@@ -994,7 +994,7 @@ class Window(QMainWindow):
         preview_actions=QHBoxLayout();preview_actions.addStretch(1);preview_actions.addWidget(self.cinematic_fullscreen_button);preview_actions.addWidget(self.refresh_cinematic_button);right_layout.addLayout(preview_actions)
         main_split.addWidget(preview_panel);main_split.setStretchFactor(0,5);main_split.setStretchFactor(1,6);main_split.setSizes([740,860]);l.addWidget(main_split,1)
         action_bar=QHBoxLayout();action_bar.setSpacing(10);action_bar.addWidget(self.cinematic_status,1)
-        self.test_cinematic_button=self.button('▶  Test Video',self.test_cinematic_video);self.test_cinematic_button.setObjectName('codPrimary');action_bar.addWidget(self.test_cinematic_button)
+        self.test_cinematic_button=self.button('Test Video',self.test_cinematic_video);self.test_cinematic_button.setObjectName('codPrimary');action_bar.addWidget(self.test_cinematic_button)
         self.post_cinematic_button=self.button('Post to Discord',self.post_cinematic_video);self.post_cinematic_button.setObjectName('codSecondary');self.post_cinematic_button.setEnabled(False);action_bar.addWidget(self.post_cinematic_button)
         l.addLayout(action_bar)
         talent_friends_row=QHBoxLayout();talent_friends_row.setSpacing(10)
@@ -1008,7 +1008,7 @@ class Window(QMainWindow):
         self.talent_dot=QLabel();self.talent_dot.setObjectName('talentDot');self.talent_dot.hide();talent_name_row.addWidget(self.talent_dot)
         self.talent_info=QLabel('No photo set');self.talent_info.setStyleSheet('color:#c4ccd8;font-weight:700;');talent_name_row.addWidget(self.talent_info,1);talent_meta.addLayout(talent_name_row)
         talent_btns=QHBoxLayout();talent_btns.setSpacing(6)
-        talent_btns.addWidget(self.button('Change',self.set_cinematic_talent));talent_btns.addWidget(self.button('Remove',self.remove_cinematic_talent));talent_btns.addStretch(1);talent_meta.addLayout(talent_btns)
+        talent_btns.addWidget(self.button('Change Photo',self.set_cinematic_talent));talent_btns.addWidget(self.button('Remove Photo',self.remove_cinematic_talent));talent_btns.addStretch(1);talent_meta.addLayout(talent_btns)
         talent_body.addLayout(talent_meta,1);talent_layout.addLayout(talent_body)
         talent_friends_row.addWidget(talent_panel,2)
         friends_panel=QFrame();friends_panel.setObjectName('dashboardPanel');friends_layout=QVBoxLayout(friends_panel);friends_layout.setContentsMargins(12,10,12,10);friends_layout.setSpacing(8)
@@ -2446,7 +2446,7 @@ class Window(QMainWindow):
     def update_talent_friends_status(self):
         if not hasattr(self,'talent_friends_status'):return
         count=len(getattr(self,'talent_friend_ids',[]) or [])
-        self.talent_friends_status.setText(('No friends — just you' if not count else str(count)+'/2 friends selected'))
+        self.talent_friends_status.setText((('No friends — just you' if not count else str(count)+'/2 friends selected')+' (Max Of 3 Can be used)'))
     def selected_talent_friends(self):
         wanted=set(getattr(self,'talent_friend_ids',[]) or [])
         friends=[]
@@ -2526,7 +2526,7 @@ class Window(QMainWindow):
                 if hasattr(self,'talent_dot'):self.talent_dot.show()
                 return
         self.talent_preview.setPixmap(QPixmap());self.talent_preview.setText('No photo')
-        self.talent_info.setText('No photo set')
+        self.talent_info.setText('No talent photo set')
         if hasattr(self,'talent_dot'):self.talent_dot.hide()
     def ensure_cinematic_thumbs(self):
         if not hasattr(self,'cinematic_results'):return
@@ -3384,7 +3384,7 @@ class Window(QMainWindow):
     def show_roster_empty(self):
         self._roster_loading=True
         try:
-            self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('No player selected');self.roster_big_sub.setText('');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.roster_profile_url.clear()
+            self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('No player selected');self.roster_big_sub.setText('');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.roster_profile_url.clear();self.roster_enabled.setChecked(True)
         finally:self._roster_loading=False
     def mark_roster_dirty(self):
         if getattr(self,'_roster_loading',False):return

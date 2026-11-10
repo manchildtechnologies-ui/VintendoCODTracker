@@ -132,6 +132,7 @@ class UITests(unittest.TestCase):
         self.assertTrue(w.cinematic_video_widget.isHidden())
         self.assertFalse(w.preview_image.isHidden())
         self.assertEqual(w.preview_sub.text(),'Watch the selected video.')
+        self.assertTrue(w.video_controls.isHidden())
     def test_poster_studio_has_one_scoreboard_driven_generate_action(self):
         self.assertEqual(self.window.generate_poster_button.text(),'Generate AI End Game Picture')
         self.assertFalse(hasattr(self.window,'provider'));self.assertFalse(hasattr(self.window,'theme'))

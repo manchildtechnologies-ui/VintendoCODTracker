@@ -184,7 +184,8 @@ class CodmunityPublicClient:
         self._opener = opener or urlopen
 
     def _get_json(self, url: str) -> Any:
-        request = Request(url, headers={"Accept": "application/json"})
+        request = Request(url, headers={"Accept": "application/json",
+                                          "User-Agent": "VintendoCODTracker"})
         try:
             with self._opener(request, timeout=self.timeout) as response:
                 body = response.read()
@@ -208,6 +209,10 @@ class CodmunityPublicClient:
     ) -> CommunityDistribution:
         query = urlencode({"game": game, "mode": mode, "scope": scope})
         payload = self._get_json(f"{GLOBAL_STATS_API}?{query}")
+        if isinstance(payload, dict) and not isinstance(payload.get("data"), dict):
+            # The live envelope carries the distribution fields at the top
+            # level; the parser also accepts the cached {'data': ...} shape.
+            payload = {"data": payload}
         result = CommunityDistribution.from_payload(payload)
         if (result.game, result.mode, result.scope) != (game, mode, scope):
             raise ValueError("Global stats response does not match requested game/mode/scope")

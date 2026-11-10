@@ -65,9 +65,9 @@ def _job_json(value,default):
 def prepare_poster_job(store,data_dir,mid,*,solo_player_name='',on_log=None):
     """Stage consent-filtered reference photos and prompt files for one match.
 
-    Local-only replacement for the retired extension bridge prepare step: the
-    returned folder is opened for the user, who completes the Meta AI handoff
-    manually by pasting the copied prompt and attaching the staged photos.
+    The app first tries automatic in-app submission through the Playwright driver;
+    when automation is unavailable the returned folder is opened for the user,
+    who completes the Meta AI handoff manually with the staged photos.
     """
     data_dir=Path(data_dir)
     def note(message):

@@ -825,7 +825,7 @@ class Window(QMainWindow):
                 card.setStyleSheet('background:#141923;border:1px solid #343a46;border-radius:6px;padding:8px;font-size:11px;color:#9da8b7;')
     def build_squad(self):
         l=self.page('Squad Night','CODMunity match context plus the captured scoreboard become one verified, match-bound poster job.')
-        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture stages the complete job for Meta AI and writes a single-prompt import file plus a numbered photo map.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
+        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture submits the complete job to Meta AI automatically and collects the finished picture; if the automation browser needs a login, the staged folder opens for manual handoff.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
         self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True))
@@ -3231,15 +3231,95 @@ class Window(QMainWindow):
             if prepared is None:
                 prepared=E.prepare_poster_job(self.store,E.DATA,job['id'],solo_player_name=self.settings.values.get('player',''),on_log=self.log)
             if not prepared:raise ValueError('The match job could not be prepared.')
-            QApplication.clipboard().setText(prepared['prompt'])
+            final_prompt=(self.prompt.toPlainText() or '').strip() or prepared['prompt']
+            QApplication.clipboard().setText(final_prompt)
+            self._write_unified_prompt(prepared['folder'],final_prompt)
+            self.active_id=job['id'];self.load_studio(job['id']);self.refresh_history()
+            photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
+            if self._start_poster_automation(job['id'],prepared['folder'],photo_names,final_prompt):
+                self.log(f"Match {job['id']} auto-submitted to Meta AI with {len(photo_names)} reference photo(s).")
+                self.job_status.setText('Submitting to Meta AI automatically — prompt and reference photos are being filled in the automation browser.')
+                return
             try:os.startfile(prepared['folder'])
             except OSError as exc:self.log('Photos staged; Explorer could not open the folder: '+str(exc))
-            self.active_id=job['id'];self.load_studio(job['id']);self.refresh_history()
             self.job_status.setText('Match request prepared for Meta AI. Prompt copied; attach the staged reference photos in the opened folder.')
             self.log(f"Match {job['id']} prepared for Meta AI: {len(prepared['photos'])} consented reference photo(s); prompt copied and import folder opened.")
         except Exception as exc:
             message='Could not prepare this match for Meta AI: '+str(exc)
             self.job_status.setText(message[:300]);self.notice(message);self.log('Poster preparation failed for '+job['id']+': '+str(exc))
+    def _write_unified_prompt(self,folder,text):
+        try:
+            target=Path(folder)
+            (target/'prompt.txt').write_text(text,encoding='utf-8')
+            (target/'Meta-AI-Automation-Import.txt').write_text(' '.join(text.split()),encoding='utf-8')
+        except OSError as exc:self.log('Could not refresh staged prompt text: '+str(exc))
+    def _start_poster_automation(self,job_id,folder,filenames,prompt_text):
+        if getattr(self,'_inapp_poster_active',None):
+            self.job_status.setText('A poster is already being submitted — wait for it to finish first.')
+            return True
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            return False
+        self._inapp_poster_active=job_id
+        try:self.store.update(job_id,gen_state='submitting')
+        except Exception:pass
+        try:self.generate_poster_button.setEnabled(False)
+        except (AttributeError,RuntimeError):pass
+        thread=threading.Thread(target=self._run_inapp_poster,args=(job_id,sync_playwright,folder,list(filenames or []),prompt_text),daemon=True);thread.start()
+        return True
+    def _run_inapp_poster(self,job_id,playwright_factory,folder,filenames,prompt_text):
+        try:
+            with playwright_factory() as playwright:
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp')
+                driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
+                page=driver.new_job_page()
+                try:
+                    base=Path(folder)
+                    photos=[str(base/name) for name in filenames]
+                    saved=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'))
+                finally:
+                    try:page.close()
+                    except Exception:pass
+                    try:context.close()
+                    except Exception:pass
+        except Exception as exc:
+            detail=str(getattr(exc,'detail',None) or exc)
+            step=str(getattr(exc,'step','error'))
+            QTimer.singleShot(0,lambda:self._fail_inapp_poster(job_id,step,detail));return
+        QTimer.singleShot(0,lambda:self._finish_inapp_poster(job_id,str(saved)))
+    def _finish_inapp_poster(self,job_id,saved):
+        self._inapp_poster_active=None
+        try:self.generate_poster_button.setEnabled(True)
+        except (AttributeError,RuntimeError):pass
+        try:
+            from PIL import Image
+            folder=E.DATA/'artwork';folder.mkdir(parents=True,exist_ok=True);target=folder/(uuid.uuid4().hex+'.png')
+            with Image.open(saved) as image:
+                if image.width<320 or image.height<180:raise ValueError('Image is too small')
+                image.convert('RGB').save(target)
+            try:Path(saved).unlink(missing_ok=True)
+            except OSError:pass
+        except Exception as exc:
+            message='Meta AI returned an unusable image: '+str(exc)
+            self.job_status.setText(message[:300]);self.log('In-app poster failed for '+job_id+': '+str(exc)[:160]);return
+        self.active_id=job_id
+        try:self.load_studio(job_id)
+        except Exception:pass
+        self.received_art(job_id,str(target))
+        self.job_status.setText('Poster submitted and finished image collected automatically.')
+        self.log('In-app poster completed: '+job_id)
+    def _fail_inapp_poster(self,job_id,step,detail):
+        self._inapp_poster_active=None
+        try:self.generate_poster_button.setEnabled(True)
+        except (AttributeError,RuntimeError):pass
+        if 'login' in str(step).lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then press Generate AI End Game Picture again.'
+        else:message=(f'Automatic submission stopped at {step}: {detail}')[:300]
+        self.job_status.setText(message);self.notice(message);self.log('In-app poster failed for '+job_id+': '+str(step)+' — '+str(detail)[:160])
+        try:
+            folder=E.DATA/'handoff'/E.disk_id(job_id)
+            if folder.is_dir():os.startfile(str(folder))
+        except OSError:pass
     def received_art(self,mid,path):
         current=self.store.get(mid)
         if not current:return

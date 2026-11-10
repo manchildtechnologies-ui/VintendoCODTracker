@@ -513,7 +513,7 @@ class UITests(unittest.TestCase):
         roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True),dict(id='beta',name='Beta',photo=str(photo),consent_meta=False,enabled=True),dict(id='other',name='NotIdentified',photo=str(photo),consent_meta=True,enabled=True)]
         w.notice=lambda _:None
         with patch.object(w.store,'roster',return_value=roster),patch('os.startfile'):
-            w.load_studio(mid);self.assertTrue(w.prompt.toPlainText());w.prepare_artwork()
+            w.load_studio(mid);self.assertTrue(w.prompt.toPlainText());w._start_poster_automation=lambda *args:False;w.prepare_artwork()
         self.assertIn('prepared',w.job_status.text().lower())
         handoff=app.E.DATA/'handoff'/app.E.disk_id(mid)
         self.addCleanup(shutil.rmtree,handoff,True)
@@ -521,6 +521,44 @@ class UITests(unittest.TestCase):
         by_user={item['username']:item for item in assignments}
         self.assertEqual(by_user['Alpha']['status'],'ready');self.assertTrue(by_user['Alpha']['filename'])
         self.assertEqual(by_user['Beta']['status'],'not_consented');self.assertIn('not consented',by_user['Beta']['reason'])
+    def test_prepare_artwork_prefers_automation_over_folder(self):
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;mid,_=w.store.add({'matchId':'auto-poster-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'});w.active_id=mid
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
+        photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+        roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+        w.notice=lambda _:None
+        calls=[]
+        with patch.object(w.store,'roster',return_value=roster),patch('os.startfile') as opened:
+            w.load_studio(mid)
+            w._start_poster_automation=lambda *args:(calls.append(args) or True)
+            w.prepare_artwork()
+        self.assertFalse(opened.called)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0][0],mid)
+        self.assertTrue(calls[0][2])
+        for name in calls[0][2]:
+            self.assertTrue(Path(calls[0][1],name).is_file())
+        self.assertIn('automatically',w.job_status.text().lower())
+        self.addCleanup(shutil.rmtree,Path(calls[0][1]),True)
+    def test_prepare_artwork_opens_folder_when_automation_unavailable(self):
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;mid,_=w.store.add({'matchId':'manual-poster-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'});w.active_id=mid
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
+        photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+        roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+        w.notice=lambda _:None
+        with patch.object(w.store,'roster',return_value=roster),patch('os.startfile') as opened:
+            w.load_studio(mid)
+            w._start_poster_automation=lambda *args:False
+            w.prepare_artwork()
+        self.assertTrue(opened.called)
+        folder=opened.call_args[0][0]
+        self.assertTrue(Path(folder,'prompt.txt').is_file())
+        self.assertIn('prepared',w.job_status.text().lower())
+        self.addCleanup(shutil.rmtree,Path(folder),True)
     def test_one_click_prepare_picks_newest_codmunity_match_without_scoreboard(self):
         from PIL import Image
         from unittest.mock import patch
@@ -534,6 +572,7 @@ class UITests(unittest.TestCase):
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
         w.store.save_player({'id':'vintendo','name':'Vintendo','photo':str(photo),'consent_meta':True,'enabled':True,'aliases':[]})
         w.notice=lambda _:None;w.settings.values['player']='Vintendo'
+        w._start_poster_automation=lambda *args:False
         with patch('os.startfile'):w.prepare_artwork()
         self.addCleanup(shutil.rmtree,app.E.DATA/'handoff'/app.E.disk_id(mid),True)
         self.assertEqual(w.active_id,mid)

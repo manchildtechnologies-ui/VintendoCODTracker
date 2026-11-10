@@ -20,21 +20,25 @@ class UITests(unittest.TestCase):
     def setUp(self):self.window=app.Window()
     def tearDown(self):self.window.shutdown();self.window.deleteLater();self.qt.processEvents()
     def test_all_navigation_sections_exist(self):
-        self.assertEqual(self.window.nav.count(),12)
-        self.assertIn('COD AI',[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())])
+        self.assertEqual(self.window.nav.count(),11)
+        self.assertIn('ScreenShots and Videos',[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())])
     def test_top_level_tabs_include_tracker_and_codommunity(self):
         self.assertEqual(self.window.app_tabs.count(),2)
         self.assertEqual([self.window.app_tabs.tabText(i) for i in range(2)],['Vintendo COD Tracker','CODMunity'])
         self.assertIs(self.window.app_tabs.widget(1),self.window.codmunity_page)
-    def test_tick_with_continuous_ocr_enabled_does_not_raise(self):
+    def test_tick_never_triggers_automatic_capture(self):
         self.assertGreater(app.AUTO_OCR_INTERVAL_SECONDS,0)
-        self.window.last_poll=time.monotonic()
-        self.window.tracking=True
+        self.assertTrue(self.window.auto_detect.isHidden())
+        self.assertFalse(self.window.auto_detect.isChecked())
         self.window.mode.setCurrentText('Squad Night')
-        self.window.auto_detect.setChecked(True)
-        self.window.capture_busy=True
+        self.window.last_poll=time.monotonic()
+        self.window.last_auto=0
+        self.window.capture_busy=False
+        self.window.tracking=True
+        calls=[];real=self.window.capture_once;self.window.capture_once=lambda *args,**kwargs:calls.append((args,kwargs))
         try:self.window.tick()
-        finally:self.window.tracking=False
+        finally:self.window.tracking=False;self.window.capture_once=real
+        self.assertEqual(calls,[])
     def test_delete_selected_screenshot_removes_file_and_row(self):
         from PIL import Image
         folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
@@ -72,7 +76,7 @@ class UITests(unittest.TestCase):
         folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
         target=folder/('COD_send_'+uuid.uuid4().hex+'.png');Image.new('RGB',(320,180),'red').save(target)
         self.window.refresh_cod_ai_screenshots()
-        send=self._button_by_text('Send selected screenshot to Meta AI — Make Video')
+        send=self._button_by_text('Send Selected Material to Meta Ai to Make A Video')
         self.assertIsNotNone(send)
         self.window.extension_bridge=None
         send.click()
@@ -111,8 +115,8 @@ class UITests(unittest.TestCase):
         item=app.QListWidgetItem(path.name);item.setData(Qt.UserRole,str(path))
         try:
             self.window.preview_cod_ai_screenshot(item)
-            self.assertIsNotNone(self.window.cod_ai_preview.pixmap())
-            self.assertIn('640×360',self.window.cod_ai_preview_info.text())
+            self.assertIsNotNone(self.window.preview_image.pixmap())
+            self.assertIn('640×360',self.window.preview_sub.text())
         finally:path.unlink(missing_ok=True)
     def test_codommunity_preview_snapshots_settings_roster_and_headshots(self):
         import hashlib
@@ -136,7 +140,7 @@ class UITests(unittest.TestCase):
         self.assertTrue(hasattr(self.window,'cod_ai_hotkey_status'))
         self.assertTrue(hasattr(self.window,'cod_ai_screenshots'))
     def test_poster_studio_has_one_scoreboard_driven_generate_action(self):
-        self.assertEqual(self.window.generate_poster_button.text(),'GENERATE MATCH POSTER')
+        self.assertEqual(self.window.generate_poster_button.text(),'Generate AI End Game Picture')
         self.assertFalse(hasattr(self.window,'provider'));self.assertFalse(hasattr(self.window,'theme'))
     def test_solo_startup_does_not_initialize_ocr(self):self.assertIsNone(self.window.capture);self.assertIsNone(self.window.browser)
     def test_activate_squad_night_button_acknowledges_every_click(self):
@@ -154,9 +158,24 @@ class UITests(unittest.TestCase):
         CaptureEngine().game_windows()
         self.assertEqual(ctypes.windll.user32.EnumWindows.argtypes,None)
         self.assertIsInstance(self.window.find_tracker_chrome_windows(),list)
+    def test_hotkey_capture_shows_waiting_then_confirms(self):
+        from unittest.mock import patch
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QFocusEvent,QKeyEvent
+        from PySide6.QtWidgets import QMessageBox
+        edit=self.window.scoreboard_hotkey_edit
+        edit.focusInEvent(QFocusEvent(QEvent.FocusIn))
+        self.assertIn('Press the new keys',edit.text())
+        event=QKeyEvent(QEvent.KeyPress,Qt.Key_F9,Qt.ControlModifier|Qt.ShiftModifier,'',False,1)
+        with patch.object(QMessageBox,'information',return_value=QMessageBox.Ok) as confirm:
+            edit.keyPressEvent(event)
+        self.assertEqual((edit.vk,edit.mod),(0x78,app.MOD_CONTROL|app.MOD_SHIFT))
+        confirm.assert_called_once()
+        self.assertEqual(confirm.call_args[0][1],'Hotkeys Set')
+        self.assertNotIn('Press the new keys',edit.text())
     def test_mode_switch_roundtrip(self):
-        self.window.mode.setCurrentText('Squad Night');self.window.auto_detect.setChecked(True);self.window.mode.setCurrentText('Solo Ops');self.assertFalse(self.window.auto_detect.isChecked());self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
-    def test_roi_verification_cannot_be_assumed(self):self.assertFalse(self.window.verified.isChecked())
+        self.window.mode.setCurrentText('Squad Night');self.window.mode.setCurrentText('Solo Ops');self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
+    def test_roi_verification_defaults_checked_and_hidden(self):self.assertTrue(self.window.verified.isChecked());self.assertTrue(self.window.verified.isHidden())
     def test_browser_failure_is_reported_without_losing_match(self):
         from browser_service import BrowserSession
         statuses=[];b=BrowserSession(app.E.DATA,lambda *a:None,statuses.append)
@@ -268,10 +287,9 @@ class UITests(unittest.TestCase):
         rec_row=next(i for i in range(w.center_tables['records'].rowCount()) if w.center_tables['records'].item(i,0).toolTip()==mid)
         self.assertEqual(w.center_tables['records'].item(rec_row,rec_headers.index('DAMAGE')).text(),'6878')
         self.assertEqual(w.center_tables['records'].item(rec_row,rec_headers.index('ELIMS')).text(),'19')
-        self.assertEqual(w.center_carousel.title_text(),'GAMES')
-        self.assertEqual(w.center_carousel.value_text(),str(len(w.center_rows['records'])))
+        self.assertEqual(w.dashboard_metrics['games'].text(),str(len(w.center_rows['records'])))
         self.assertRegex(w.history_summary['kills_per_game'][1].text(),r'Best \d+ kills')
-    def test_match_center_tabs_share_stat_strip(self):
+    def test_match_center_tabs_share_tables_and_count(self):
         w=self.window
         tag=uuid.uuid4().hex
         mid_post,_=w.store.add({'matchId':'post-'+tag,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-02T08:00:00Z','result':'win','stats':{'kills':5,'eliminations':5,'damage':2500,'deaths':1,'assists':0}},'delivered')
@@ -282,37 +300,21 @@ class UITests(unittest.TestCase):
         self.assertTrue(any(j['id']==mid_rev for j in review))
         self.assertEqual(w.center_tables['posts'].rowCount(),len(posts))
         self.assertEqual(w.center_tables['review'].rowCount(),len(review))
-        specs=w.CENTER_CARD_SPECS;order=('records','posts','review')
-        expected=[title for view in order for _key,title in specs[view]]
-        summaries={view:w._match_summary(w.center_rows[view]) for view in order}
-        def expected_value(view,key):
-            if key in summaries[view]:return str(summaries[view][key])
-            return str(sum(1 for job in w.center_rows[view] if job['status'] in w.REVIEW_STATUS_GROUPS.get(key,())))
-        expected_values=[expected_value(view,key) for view in order for key,_title in specs[view]]
         w.center_tabs.setCurrentIndex(1)
-        self.assertEqual(w.center_carousel.card_titles(),expected)
-        self.assertEqual(w.center_carousel.dot_count(),len(expected))
-        self.assertEqual(w.center_carousel.value_text(),expected_values[0])
         self.assertEqual(w.center_count.text(),f"{len(posts)} of {len(w.center_rows['records'])} records")
         w.center_tabs.setCurrentIndex(2)
-        self.assertEqual(w.center_carousel.card_titles(),expected)
-        w.center_carousel._dot_buttons[4].click()
-        self.wait_until(lambda:w.center_carousel.current_index()==4)
-        self.wait_until(lambda:w.center_carousel.value_text()==expected_values[4])
+        self.assertEqual(w.center_count.text(),f"{len(review)} of {len(w.center_rows['records'])} records")
         w.center_tabs.setCurrentIndex(0)
-        self.assertEqual(w.center_carousel.card_titles(),expected)
-        self.assertEqual(w.center_carousel.dot_count(),len(expected))
-        self.assertEqual(w.center_carousel.current_index(),4)
         self.assertEqual(w.center_count.text(),f"{len(w.center_rows['records'])} of {len(w.center_rows['records'])} records")
-    def test_match_center_dot_slides_to_next_card(self):
+    def test_dashboard_games_cards_mirror_history_summary(self):
         w=self.window
         w.center_tabs.setCurrentIndex(0)
-        specs=w.CENTER_CARD_SPECS['records'];self.assertGreaterEqual(len(specs),2)
-        summary=w._match_summary(w.center_rows['records'])
-        w.center_carousel._dot_buttons[1].click()
-        self.wait_until(lambda:w.center_carousel.current_index()==1)
-        self.wait_until(lambda:w.center_carousel.value_text()==str(summary[specs[1][0]]))
-        self.assertEqual(w.center_carousel.title_text(),specs[1][1])
+        rows=w.center_rows['records']
+        summary=w._match_summary(rows)
+        self.assertEqual(w.dashboard_metrics['games'].text(),str(summary['games']))
+        self.assertEqual(w.dashboard_metrics['win_rate'].text(),str(summary['win_rate']))
+        self.assertEqual(w.dashboard_metrics['kd'].text(),str(summary['kd']))
+        self.assertEqual(w.dashboard_metrics['kills_per_game'].text(),str(summary['kills_per_game']))
     def test_match_center_double_click_opens_studio(self):
         w=self.window
         mid,_=w.store.add({'matchId':'open-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':9,'eliminations':9,'damage':4100,'deaths':0,'assists':2}})
@@ -732,7 +734,7 @@ class UITests(unittest.TestCase):
     def test_cod_ai_dashboard_has_workflow_and_no_standalone_delete_button(self):
         self.assertIsNone(self._button_by_text('Delete selected video'))
         self.assertIsNotNone(self._button_by_text('Refresh'))
-        self.assertIsNotNone(self._button_by_text('Test Video'))
+        self.assertIsNone(self._button_by_text('Test Video'))
         self.assertIsNotNone(self._button_by_text('Post to Discord'))
         self.assertIsNotNone(self._button_by_text('Change Photo'))
         self.assertIsNotNone(self._button_by_text('Remove Photo'))
@@ -866,7 +868,7 @@ class UITests(unittest.TestCase):
             w.store.recent_cinematics=real_recent
             w.hide()
             w.refresh_cod_ai_screenshots()
-    def test_talent_friends_picker_lists_eligible_and_caps_two(self):
+    def test_talent_friends_picker_lists_eligible_and_caps_three(self):
         import tempfile
         from PIL import Image
         tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
@@ -883,15 +885,22 @@ class UITests(unittest.TestCase):
         ]
         for player in players:self.window.store.save_player(player)
         self.window.refresh_talent_friends()
-        boxes=[self.window.talent_friends_box.itemAt(i).widget() for i in range(self.window.talent_friends_box.count())]
-        self.assertEqual(len(boxes),3)
-        boxes[0].setChecked(True);boxes[1].setChecked(True)
+        box=self.window.talent_friends_box
+        self.assertEqual(box.count(),3)
+        box.item(0).setCheckState(Qt.Checked);box.item(1).setCheckState(Qt.Checked)
         self.assertEqual(self.window.talent_friend_ids,['f1','f2'])
         self.assertIn('(Max Of 3 Can be used)',self.window.talent_friends_status.text())
-        boxes[2].setChecked(True)
-        self.assertEqual(len(self.window.talent_friend_ids),2)
-        self.assertFalse(boxes[2].isChecked())
-        self.assertIn('Max of 3 people',self.window.cinematic_status.text())
+        self.assertIn('Featuring: F1, F2',self.window.talent_cameo_label.text())
+        box.item(2).setCheckState(Qt.Checked)
+        self.assertEqual(self.window.talent_friend_ids,['f1','f2','f3'])
+        self.assertIn('Featuring: F1, F2, F3',self.window.talent_cameo_label.text())
+        self.window.store.save_player(dict(id='f4',name='Friend4',display_name='F4',aliases=[],photo=photo('orange'),enabled=True,consent_meta=True))
+        self.window.refresh_talent_friends()
+        box=self.window.talent_friends_box
+        self.assertEqual(box.count(),4)
+        for index in range(4):box.item(index).setCheckState(Qt.Checked)
+        self.assertEqual(len(self.window.talent_friend_ids),3)
+        self.assertIn('Max of 3 friends',self.window.cinematic_status.text())
     def test_queue_cinematic_with_friends_stages_cast_and_prompt(self):
         import shutil as _shutil
         import tempfile

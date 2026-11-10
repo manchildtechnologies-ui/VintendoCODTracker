@@ -42,23 +42,6 @@ New local records enter the review queue rather than immediately posting the Sol
 
 The **COD AI** section captures an in-game moment independently of match OCR. Press **Ctrl + F8** while Call of Duty is open; the tracker identifies the visible game window, maps it to its exact DXGI monitor, and saves a lossless native-resolution PNG under `%LOCALAPPDATA%\Vintendo COD Tracker\Screenshots` (or the configured `VINTENDO_DATA_DIR`). The hotkey works while the tracker is minimized and does not change focus. **Ctrl + Shift + F8** remains reserved for scoreboard OCR. The section lists saved captures and has an **Open Screenshots Folder** button so they can be handed to the cinematic video workflow. When more than 10 screenshots pile up, the tracker offers once per run to delete the ones already used in COD AI videos. The Talent Photo panel explains that these are the people that will show up in your COD AI video (max 3 can be used): your photo plus up to 2 roster friends with headshots and Meta AI consent, attached as reference images to each queued video.
 
-## COD Tweaker (Call of Duty config editor)
-
-The **COD Tweaker** section is a review-first editor for local Call of Duty
-config files (found under `%LOCALAPPDATA%\Activision`, with a
-`Documents\Call of Duty` fallback). It only reads and rewrites plain-text
-config files: no memory editing, injection, or executable patching. Files over
-4MB are refused, and every Save, preset apply, pinned restore, and restore
-first copies the touched file to a dated backup under
-`%LOCALAPPDATA%\Vintendo COD Tracker\cod-tweaker-backups` (newest 30 kept per
-file). Editing stays read-only until unlocked per file, presets only stage
-changes for review before a confirm dialog writes anything, protected
-`DO NOT MODIFY` settings are always skipped, and the read-only lock state is
-preserved across copies. Restart the game after applying changes; while the
-game runs, saves ask for confirmation. Behavior is a Python/Qt
-reimplementation of SpockLSM cod-tweaker (MIT, (c) 2026 Spock); see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
 ## CODMunity tab preview
 
 Run `Launch-CODMunity-Tab-Preview.vbs` to open the development-only tabbed shell. Each launch snapshots the current tracker settings, match history, roster, headshots, and saved screenshots into a separate preview data folder. Preview edits never change live data. Tracking, extension handoff, Discord posting, and global hotkeys are disabled in the preview. Closing it restores CODMunity as its own window. Native window hosting depends on Windows allowing the two app windows to share a desktop session.

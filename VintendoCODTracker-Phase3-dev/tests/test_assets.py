@@ -20,8 +20,8 @@ class AssetTests(unittest.TestCase):
         banners = Path(E.ROOT) / 'assets' / 'banners'
         self.assertEqual(set(app_module.PAGE_BANNERS), {
             'Dashboard', 'Scoreboard Capture', 'Match History', 'Player Roster',
-            'AI Poster Studio', 'COD AI', 'Tracker Browser',
-            'Settings', 'COD Tweaker',
+            'AI Studio', 'ScreenShots and Videos', 'Tracker Browser',
+            'Settings',
         })
         for name, filename in app_module.PAGE_BANNERS.items():
             path = banners / filename

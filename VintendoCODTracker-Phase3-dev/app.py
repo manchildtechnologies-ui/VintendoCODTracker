@@ -197,7 +197,7 @@ class Task(QRunnable):
 class Bridge(QObject):
     image=Signal(str,str);status=Signal(str)
 
-PAGE_BANNERS={'Dashboard':'dashboard.png','Scoreboard Capture':'scoreboard.png','Match History':'match-history.png','Player Roster':'roster.png','AI Poster Studio':'ai-studio.png','COD AI':'screenshots.png','Tracker Browser':'browser.png','Settings':'settings.png','COD Tweaker':'tweaker.png'}
+PAGE_BANNERS={'Dashboard':'dashboard.png','Scoreboard Capture':'scoreboard.png','Match History':'match-history.png','Player Roster':'roster.png','AI Studio':'ai-studio.png','ScreenShots and Videos':'screenshots.png','Tracker Browser':'browser.png','Settings':'settings.png'}
 class ScoreboardHotkeyFilter(QAbstractNativeEventFilter):
     def __init__(self,callbacks):super().__init__();self.callbacks=callbacks
     def nativeEventFilter(self,eventType,message):
@@ -382,9 +382,9 @@ QTabWidget#mediaTabs {background:transparent;}
 QTabWidget#mediaTabs QTabBar::tab {background:#1a1410;color:#a8a29e;border:1px solid #3a2e22;padding:8px 22px;margin-right:6px;border-top-left-radius:6px;border-top-right-radius:6px;font-weight:800;}
 QTabWidget#mediaTabs QTabBar::tab:selected {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fb923c,stop:1 #ea580c);color:#1c0f04;border-color:#fdba74;}
 QFrame#cinematicTile[selected="true"] {border:2px solid #f97316;background:#1c1008;}
-QPushButton#friendChip {background:#14171e;border:1px solid #343945;padding:8px 10px;border-radius:7px;font-weight:700;color:#e8ebf0;text-align:left;}
-QPushButton#friendChip:hover {border-color:#f97316;color:#ffffff;}
-QPushButton#friendChip:checked {background:#2a1503;border:1px solid #f97316;color:#fdba74;}
+QListWidget#friendList{background:#0b0e13;border:1px solid #292f39;border-radius:6px;color:#e8ebf0;font-weight:700;}
+QListWidget#friendList::item{padding:7px 10px;border-radius:5px;}QListWidget#friendList::item:selected{background:#2a1503;color:#fdba74;}
+QListWidget#friendList::indicator:checked{background:#f97316;border:1px solid #f97316;}
 QLabel#talentDot {background:#22c55e;border-radius:5px;min-width:10px;min-height:10px;max-width:10px;max-height:10px;}
 QPushButton#codPrimary {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f87171,stop:0.5 #dc2626,stop:1 #991b1b);color:#ffffff;border:1px solid #fca5a5;padding:12px 28px;border-radius:8px;font-weight:900;font-size:14px;}
 QPushButton#codPrimary:hover {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fb923c,stop:0.5 #ea580c,stop:1 #9a3412);border-color:#fdba74;}
@@ -417,80 +417,6 @@ class TacticalBackdrop(QWidget):
         painter.setPen(QPen(QColor('#e72a3b'),2));painter.drawLine(18,14,43,14);painter.drawLine(18,20,35,20)
         painter.end()
 
-class StatCarousel(QFrame):
-    SLIDE_MS=140
-    def __init__(self,parent=None):
-        super().__init__(parent);self.setObjectName('historySummaryCard')
-        outer=QVBoxLayout(self);outer.setContentsMargins(10,6,10,8);outer.setSpacing(4)
-        self.host=QWidget();self.host.setFixedHeight(66);outer.addWidget(self.host)
-        self.card=QFrame(self.host)
-        content=QVBoxLayout(self.card);content.setContentsMargins(0,0,0,0);content.setSpacing(1)
-        self.value=QLabel('\\u2014');self.value.setObjectName('historySummaryValue');self.value.setAlignment(Qt.AlignCenter)
-        self.caption=QLabel('');self.caption.setObjectName('historySummaryCaption');self.caption.setAlignment(Qt.AlignCenter)
-        content.addWidget(self.value);content.addWidget(self.caption)
-        self.dots=QHBoxLayout();self.dots.setSpacing(8)
-        dots_host=QWidget();dots_host.setLayout(self.dots);outer.addWidget(dots_host)
-        self._cards=[];self._index=0;self._animating=False;self._dot_buttons=[];self._out=None;self._back=None
-        self._fit_card()
-    def resizeEvent(self,event):
-        super().resizeEvent(event)
-        if not self._animating:self._fit_card()
-    def _fit_card(self):
-        self.card.setGeometry(0,0,max(self.host.width(),1),self.host.height())
-    def set_cards(self,cards):
-        for running in (self._out,self._back):
-            try:
-                if running is not None:running.stop()
-            except RuntimeError:pass
-        self._cards=list(cards);self._index=0;self._animating=False
-        while self.dots.count()>0:
-            taken=self.dots.takeAt(0);widget=taken.widget()
-            if widget is not None:widget.deleteLater()
-        self._dot_buttons=[];self.dots.addStretch()
-        for i,(title,_text) in enumerate(self._cards):
-            dot=QPushButton();dot.setFixedSize(12,12);dot.setCursor(Qt.PointingHandCursor);dot.setAccessibleName(title);dot.setToolTip(title)
-            dot.clicked.connect(lambda _checked=False,i=i:self.show_index(i))
-            self.dots.addWidget(dot);self._dot_buttons.append(dot)
-        self.dots.addStretch()
-        self._paint_dots();self._show_current();self._fit_card()
-    def show_index(self,i):
-        if not self._cards or self._animating:return
-        i=max(0,min(i,len(self._cards)-1))
-        if i==self._index or self.host.width()<=1:
-            self._index=i;self._paint_dots();self._show_current();return
-        forward=i>self._index;self._index=i;self._paint_dots()
-        distance=self.host.width()
-        self._animating=True
-        out=QPropertyAnimation(self.card,b'pos',self);out.setDuration(self.SLIDE_MS);out.setEasingCurve(QEasingCurve.OutCubic)
-        out.setStartValue(self.card.pos());out.setEndValue(QPoint(-distance if forward else distance,0))
-        def _swapped():
-            self._show_current();self.card.move(distance if forward else -distance,0)
-            back=QPropertyAnimation(self.card,b'pos',self);back.setDuration(self.SLIDE_MS);back.setEasingCurve(QEasingCurve.OutCubic)
-            back.setStartValue(self.card.pos());back.setEndValue(QPoint(0,0))
-            back.finished.connect(self._finish_slide);back.start();self._back=back
-        out.finished.connect(_swapped);out.start();self._out=out
-    def _finish_slide(self):
-        self._animating=False;self._fit_card()
-    def _show_current(self):
-        if self._cards and 0<=self._index<len(self._cards):
-            title,text=self._cards[self._index];self.value.setText(text);self.caption.setText(title)
-        else:self.value.setText('\\u2014');self.caption.setText('')
-    def _paint_dots(self):
-        for i,dot in enumerate(self._dot_buttons):
-            active=i==self._index;dot.setFixedWidth(26 if active else 12)
-            dot.setStyleSheet('QPushButton{background:%s;border:none;border-radius:6px;}QPushButton:hover{background:%s;}'%('#e72a3b' if active else '#3a4150','#ff5966' if active else '#59616f'))
-    def card_titles(self):
-        return [title for title,_text in self._cards]
-    def dot_count(self):
-        return len(self._dot_buttons)
-    def current_index(self):
-        return self._index
-    def value_text(self):
-        return self.value.text()
-    def title_text(self):
-        return self.caption.text()
-
-
 MOD_ALT=0x0001;MOD_CONTROL=0x0002;MOD_SHIFT=0x0004;MOD_NOREPEAT=0x4000
 DEFAULT_SCOREBOARD_HOTKEY=(0x77,MOD_CONTROL|MOD_SHIFT)
 DEFAULT_SCREENSHOT_HOTKEY=(0x77,MOD_CONTROL)
@@ -517,13 +443,22 @@ def format_hotkey(vk,mod):
     parts.append(vk_name(vk));return ' + '.join(parts)
 class HotkeyEdit(QLineEdit):
     def __init__(self,vk,mod,parent=None):
-        super().__init__(parent);self.setReadOnly(True);self.set_hotkey(vk,mod);self.setPlaceholderText('Click here, then press the new keys')
+        super().__init__(parent);self.setReadOnly(True);self._waiting=False;self.set_hotkey(vk,mod);self.setPlaceholderText('Click here, then press the new keys')
         self.setToolTip('Click this box and press the key combination to use. Hold Ctrl, Shift or Alt plus another key.')
     def set_hotkey(self,vk,mod):
         self.vk=int(vk or 0);self.mod=int(mod or 0)&(MOD_CONTROL|MOD_SHIFT|MOD_ALT);self.setText(format_hotkey(self.vk,self.mod))
+    def _set_waiting(self,on):
+        self._waiting=bool(on)
+        if self._waiting:self.setText('Press the new keys…');self.setStyleSheet('border:2px solid #f97316;border-radius:6px;')
+        else:self.setStyleSheet('');self.setText(format_hotkey(self.vk,self.mod))
+    def focusInEvent(self,event):
+        super().focusInEvent(event);self._set_waiting(True)
+    def focusOutEvent(self,event):
+        super().focusOutEvent(event);self._set_waiting(False)
     def keyPressEvent(self,event):
         key=event.key()
         if key in (Qt.Key_Control,Qt.Key_Shift,Qt.Key_Alt,Qt.Key_Meta):return
+        if key==Qt.Key_Escape:self.clearFocus();return
         mod=0;mods=event.modifiers()
         if mods&Qt.ControlModifier:mod|=MOD_CONTROL
         if mods&Qt.ShiftModifier:mod|=MOD_SHIFT
@@ -534,7 +469,7 @@ class HotkeyEdit(QLineEdit):
         if native>0:vk=native
         elif Qt.Key_F1<=key<=Qt.Key_F24:vk=0x70+(key-Qt.Key_F1)
         elif 0x30<=key<=0x39 or 0x41<=key<=0x5A:vk=key
-        if vk and mod:self.set_hotkey(vk,mod)
+        if vk and mod:self.set_hotkey(vk,mod);self._set_waiting(False);QMessageBox.information(self,'Hotkeys Set','Hotkey updated to '+format_hotkey(self.vk,self.mod)+'.')
 class Window(QMainWindow):
 
     def __init__(self):
@@ -575,7 +510,7 @@ class Window(QMainWindow):
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
         self.app_tabs.currentChanged.connect(self.app_tab_changed)
         self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);self.app_tabs.setCornerWidget(self.exit_button,Qt.TopRightCorner)
-        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_cod_tweaker();self.build_logs()
+        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs()
         if self.tab_prototype:
             for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
@@ -669,7 +604,7 @@ class Window(QMainWindow):
         if not banner_pix.isNull():title.setObjectName('pageBanner');title.setPixmap(banner_pix.scaled(QSize(520,170),Qt.KeepAspectRatio,Qt.SmoothTransformation));title.setProperty('bannerFile',banner_file)
         else:title.setObjectName('title');title.setText(name)
         layout.addWidget(title,0,Qt.AlignHCenter if title.objectName()=='pageBanner' else Qt.Alignment());desc=QLabel(subtitle);desc.setWordWrap(True);desc.setStyleSheet('color:#99a8bc');layout.addWidget(desc)
-        glyph={'Dashboard':'⌂','Solo Ops':'◎','Squad Night':'◈','Scoreboard Capture':'⊙','Player Roster':'♟','AI Poster Studio':'▧','COD AI':'>','Discord Settings':'⚙','Match History':'☷','Settings':'⚙','Tracker Browser':'▣','COD Tweaker':'T'}.get(name,'›')
+        glyph={'Dashboard':'⌂','Solo Ops':'◎','Squad Night':'◈','Scoreboard Capture':'⊙','Player Roster':'♟','AI Studio':'▧','ScreenShots and Videos':'>','Discord Settings':'⚙','Match History':'☷','Settings':'⚙','Tracker Browser':'▣'}.get(name,'›')
         item=QListWidgetItem(glyph+'   '+name);item.setData(Qt.UserRole,name);self.nav.addItem(item);self.stack.addWidget(page);self.pages[name]=(page,layout);return layout
     def button(self,text,fn,accent=False):
         b=QPushButton(text);b.clicked.connect(fn)
@@ -700,25 +635,23 @@ class Window(QMainWindow):
         task.signals.done.connect(finish);task.signals.failed.connect(error);self.pool.start(task)
     def build_dashboard(self):
         l=self.page('Dashboard','CODMunity match data and scoreboard OCR are monitored together from one tracking session.' if self.track_both_startup else 'Your match activity, tracker health, and poster tools in one place.')
-        hero=TacticalBackdrop();hero_layout=QHBoxLayout(hero);hero_layout.setContentsMargins(22,12,20,12)
-        hero_copy=QVBoxLayout()
-        hero_title=QLabel('MATCH OPERATIONS');hero_title.setStyleSheet('font-size:19px;font-weight:900;color:#ffffff;letter-spacing:1px;');hero_copy.addWidget(hero_title)
-        hero_layout.addLayout(hero_copy,1);self.status=QLabel('STANDBY');self.status.setObjectName('livePill');self.status.setAlignment(Qt.AlignCenter);hero_layout.addWidget(self.status,0,Qt.AlignRight|Qt.AlignVCenter);l.addWidget(hero)
+        live_row=QHBoxLayout();live_row.setContentsMargins(2,0,2,6);live_row.setSpacing(8)
+        self.status=QLabel('●  STANDBY');self.status.setObjectName('livePill');self.status.setAlignment(Qt.AlignCenter)
+        live_row.addWidget(self.status,0,Qt.AlignLeft);live_row.addStretch(1)
+        live_wrap=QWidget();live_wrap.setLayout(live_row);l.addWidget(live_wrap)
+        self._blink_on=True;self.blink_timer=QTimer(self);self.blink_timer.setInterval(700);self.blink_timer.timeout.connect(self._blink_live_indicator)
 
         top=QGroupBox('TRACKING SOURCES');f=QHBoxLayout(top);f.setSpacing(10)
-        self.mode=QComboBox();self.mode.addItems(['Solo Ops','Squad Night']);self.mode.setCurrentText(self.settings.values.get('mode','Solo Ops'));self.mode.currentTextChanged.connect(self.mode_changed)
-        if self.track_both_startup:self.mode.setVisible(False)
         source_label='CODMunity + scoreboard OCR' if self.track_both_startup else 'Active mode'
         source=QLabel('◉   '+source_label);source.setMinimumWidth(200);source.setStyleSheet('font-weight:700;color:#e5e9ef;background:#151922;padding:10px;border-radius:5px;')
         f.addWidget(source,1)
-        if not self.track_both_startup:f.addWidget(self.mode,1)
         self.start_button=self.button('▶   START TRACKING',self.start,True);self.start_button.setMinimumHeight(42)
         self.pause_button=self.button('Ⅱ   PAUSE TRACKING',self.pause);self.pause_button.setMinimumHeight(42);self.pause_button.setEnabled(False)
         self.stop_button=self.button('■   STOP',self.stop);self.stop_button.setMinimumHeight(42);self.stop_button.setEnabled(False)
         f.addWidget(self.start_button,1);f.addWidget(self.pause_button,1);f.addWidget(self.stop_button,1);l.addWidget(top)
 
         cards=QHBoxLayout();cards.setSpacing(12);self.dashboard_metrics={}
-        for key,title,glyph,color in (('matches','MATCH RECORDS','◎','metricRed'),('squad_posts','SQUAD POSTS','♟','metricBlue'),('reviews','REVIEW JOBS','▧','metricPurple')):
+        for key,title,glyph,color in (('matches','MATCH RECORDS','◎','metricRed'),('squad_posts','SQUAD POSTS','♟','metricBlue'),('reviews','REVIEW JOBS','▧','metricPurple'),('games','GAMES','◉','metricBlue'),('win_rate','WIN RATE','★','metricPurple'),('kd','K/D RATIO','⬢','metricRed'),('kills_per_game','KILLS / GAME','⬣','metricBlue')):
             card=QFrame();card.setObjectName(color);card_layout=QHBoxLayout(card);card_layout.setContentsMargins(18,13,18,13);card_layout.setSpacing(14)
             mark=QLabel(glyph);mark.setObjectName('metricGlyph');card_layout.addWidget(mark)
             text_layout=QVBoxLayout();value=QLabel('0');value.setObjectName('metricValue');label=QLabel(title);label.setObjectName('metricLabel');text_layout.addWidget(value);text_layout.addWidget(label);card_layout.addLayout(text_layout,1);cards.addWidget(card,1);self.dashboard_metrics[key]=value
@@ -727,7 +660,6 @@ class Window(QMainWindow):
         body=QGridLayout();body.setHorizontalSpacing(14);body.setVerticalSpacing(12)
         center=QFrame();center.setObjectName('dashboardPanel');center_layout=QVBoxLayout(center);center_layout.setContentsMargins(13,12,13,13);center_layout.setSpacing(9)
         center_header=QHBoxLayout();center_title=QLabel('\u25b0  MATCH CENTER');center_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');center_header.addWidget(center_title);center_header.addStretch();self.center_count=QLabel('0 records');self.center_count.setStyleSheet('color:#aab4c3');center_header.addWidget(self.center_count);center_layout.addLayout(center_header)
-        self.center_carousel=StatCarousel();center_layout.addWidget(self.center_carousel)
         self.center_tabs=QTabWidget()
         self.center_tables={};self.center_rows={'records':[],'posts':[],'review':[]}
         for view,headers in (('records',['MATCH ID','RESULT','PLACE','MODE','KILLS','ELIMS','DAMAGE','DEATHS','ASSISTS','DATE / TIME','STATUS','ATTEMPTS']),('posts',['MATCH ID','RESULT','MODE','KILLS','DAMAGE','DATE / TIME']),('review',['MATCH ID','RESULT','MODE','STATUS','ATTEMPTS','DATE / TIME'])):
@@ -746,13 +678,13 @@ class Window(QMainWindow):
 
         tools=QFrame();tools.setObjectName('dashboardPanel');tools_layout=QVBoxLayout(tools);tools_layout.setContentsMargins(13,12,13,13);tools_layout.setSpacing(8)
         tools_title=QLabel('⚡  QUICK TOOLS');tools_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');tools_layout.addWidget(tools_title)
-        review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   OPEN AI POSTER STUDIO',lambda:self.nav.setCurrentRow(5))
+        review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   OPEN AI STUDIO',lambda:self.nav.setCurrentRow(5))
         tools_layout.addWidget(review);tools_layout.addWidget(capture);tools_layout.addWidget(poster);body.addWidget(tools,1,2)
         self.hotkey_hint=QLabel('At match end, press Ctrl + Shift + F8 while the scoreboard is visible.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
         body.setColumnStretch(0,1);body.setColumnStretch(1,1);body.setColumnStretch(2,0);body.setRowStretch(0,3);body.setRowStretch(1,2);l.addLayout(body,1)
 
         footer=QFrame();footer.setObjectName('dashboardFooter');footer_layout=QHBoxLayout(footer);footer_layout.setContentsMargins(13,8,13,8)
-        self.footer_tracking=QLabel('●  STANDBY');self.footer_tracking.setStyleSheet('font-weight:800;color:#9da7b5');self.footer_match=QLabel('Last match: —');self.footer_mode=QLabel('Mode: '+self.active_mode_label());footer_layout.addWidget(self.footer_tracking);footer_layout.addSpacing(14);footer_layout.addWidget(self.footer_match);footer_layout.addStretch();footer_layout.addWidget(self.footer_mode);l.addWidget(footer)
+        self.footer_tracking=QLabel('●  STANDBY');self.footer_tracking.setStyleSheet('font-weight:800;color:#9da7b5');self.footer_match=QLabel('Last match: —');self.footer_mode_label=QLabel('Mode:');self.footer_mode_label.setStyleSheet('font-weight:800;color:#9da7b5');self.mode=QComboBox();self.mode.addItems(['Solo Ops','Squad Night']);self.mode.setCurrentText(self.settings.values.get('mode','Solo Ops'));self.mode.currentTextChanged.connect(self.mode_changed);self.mode.setVisible(not self.track_both_startup);footer_layout.addWidget(self.footer_tracking);footer_layout.addSpacing(14);footer_layout.addWidget(self.footer_match);footer_layout.addStretch();footer_layout.addWidget(self.footer_mode_label);footer_layout.addWidget(self.mode);l.addWidget(footer)
     def build_solo(self):
         self.page('Solo Ops','CODMunity integration settings are available under Settings.')
         self.solo_settings_panel=QWidget();l=QVBoxLayout(self.solo_settings_panel);l.setContentsMargins(12,12,12,12);l.setSpacing(12)
@@ -763,7 +695,7 @@ class Window(QMainWindow):
         self.data_status=QPlainTextEdit();self.data_status.setReadOnly(True);l.addWidget(self.data_status,1)
     def build_squad(self):
         l=self.page('Squad Night','CODMunity match context plus the captured scoreboard become one verified, match-bound poster job.')
-        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  Poster Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  GENERATE MATCH POSTER stages the complete job for Vintendo Squad AI and writes a single-prompt import file plus a numbered photo map.', '05  Use the supported import controls in Meta AI Automation or the regular Meta AI page. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
+        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture stages the complete job for Vintendo Squad AI and writes a single-prompt import file plus a numbered photo map.', '05  Use the supported import controls in Meta AI Automation or the regular Meta AI page. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
         self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True));l.addStretch()
@@ -774,16 +706,16 @@ class Window(QMainWindow):
     def build_capture(self):
         l=self.page('Scoreboard Capture','Set the scoreboard region once. At match end, press Ctrl + Shift + F8 while the final scoreboard is visible; OCR prepares a draft for review.');self.capture_subtitle=l.itemAt(1).widget()
         self.monitor=QComboBox();self.roi_label=QLabel('Region: '+str(self.settings.values.get('roi') or 'not selected'))
-        self.row(l,self.monitor,self.button('Refresh monitors',self.refresh_monitors),self.button('Select scoreboard region',self.pick_region),self.button('Capture & OCR',self.capture_once,True))
+        self.row(l,self.monitor,self.button('Refresh monitors',self.refresh_monitors),self.button('Select Area To Capture Score',self.pick_region),self.button('Capture Screen Shot',self.capture_once,True))
         l.addWidget(self.roi_label);self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');l.addWidget(self.hotkey_status)
-        self.auto_detect=QCheckBox('Optional continuous OCR (uses more CPU)');self.auto_detect.setChecked(self.settings.values.get('auto_detect',False));self.auto_detect.setToolTip('Off by default. Use Ctrl + Shift + F8 to capture only when the final scoreboard is visible. Enable continuous scanning only if you prefer automatic detection.');l.addWidget(self.auto_detect)
-        self.link_match=QComboBox();l.addWidget(self.link_match)
-        self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');l.addWidget(self.result_override)
-        split=QSplitter();self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(400,180);self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Local OCR lines. Correct column headings and spacing, then parse again.');split.addWidget(self.capture_preview);split.addWidget(self.ocr_text);l.addWidget(split,1)
-        self.row(l,self.button('Parse corrected OCR',self.parse_ocr),self.button('Add player row',self.add_ocr_row),self.button('Remove selected row',self.remove_ocr_row))
+        self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
+        self.link_match=QComboBox();self.link_match.setMaximumWidth(460);self.recent_match_row=self.row(l,QLabel('Recent Match Scores'),self.link_match);self.recent_match_row.addStretch(1)
+        self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460);self.choose_result_row=self.row(l,QLabel('Choose Match Result'),self.result_override);self.choose_result_row.addStretch(1)
+        split=QSplitter();self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(400,180);self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');split.addWidget(self.capture_preview);split.addWidget(self.ocr_text);l.addWidget(split,1)
+        self.row(l,self.button('Paste Screenshot Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove',self.remove_ocr_row))
         self.ocr_stat_keys=['kills','damage','score','assists','deaths'];self.ocr_table=QTableWidget(0,1+len(self.ocr_stat_keys));self.ocr_table.setHorizontalHeaderLabels(['Player','Kills','Damage','Score','Assists','Deaths']);self.ocr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);l.addWidget(self.ocr_table,1)
-        self.verified=QCheckBox('I checked these names and numbers against the captured scoreboard');l.addWidget(self.verified)
-        self.row(l,self.button('Save verified capture to match',self.save_capture,True),self.button('Post screenshot + OCR only',self.post_capture_only))
+        self.verified=QCheckBox('I checked these names and numbers against the captured scoreboard');self.verified.setChecked(True);self.verified.hide()
+        self.row(l,self.button('Save info',self.save_capture,True),self.button('Post Screenshot as is to Discord',self.post_capture_only))
     def build_roster(self):
         l=self.page('Player Roster','Manage your COD player roster, aliases, and headshots for Meta AI artwork.')
         split=QSplitter();split.setChildrenCollapsible(False)
@@ -822,10 +754,11 @@ class Window(QMainWindow):
         self.roster_name=self.edit();self.roster_display_name=self.edit();self.roster_aliases=self.edit()
         self.roster_enabled=self.roster_switch('Enabled — include this player in the roster and match processing.')
         self.roster_profile_url=self.edit();self.roster_profile_url.setPlaceholderText('https://codmunity.gg/profile/username')
-        info_form.addRow('Exact COD username (identity)',self.roster_name)
-        info_form.addRow('Poster name (shown in artwork)',self.roster_display_name)
+        info_form.addRow('Enter Players Call of Duty Name from the Game',self.roster_name)
+        info_form.addRow('Player Nick name (Shown in AI Pictures and Videos)',self.roster_display_name)
         info_form.addRow('Aliases (separate with ;)',self.roster_aliases)
         info_form.addRow('CODMunity profile link',self.roster_profile_url)
+        self.name_test=self.edit();self.name_test.setPlaceholderText('Enter a COD username from a screenshot...');self.roster_test_button=self.button('Test Name Match',self.test_name);test_row=QHBoxLayout();test_row.setContentsMargins(0,0,0,0);test_row.setSpacing(6);test_row.addWidget(self.name_test,1);test_row.addWidget(self.roster_test_button);test_row_widget=QWidget();test_row_widget.setLayout(test_row);info_form.addRow('Test Name From Screenshot',test_row_widget)
         info_form.addRow('',self.roster_enabled)
         self.roster_tabs.addTab(info_tab,'PLAYER INFO')
         photo_tab=QWidget();photo_layout=QVBoxLayout(photo_tab);photo_layout.setSpacing(10)
@@ -877,14 +810,7 @@ class Window(QMainWindow):
         split.addWidget(right_scroll)
         split.setStretchFactor(0,3);split.setStretchFactor(1,7)
         l.addWidget(split,1)
-        tester=QFrame();tester.setObjectName('dashboardPanel')
-        tester_layout=QHBoxLayout(tester);tester_layout.setContentsMargins(14,10,14,10);tester_layout.setSpacing(10)
-        tester_label=QLabel('OCR username to test');tester_label.setStyleSheet('font-size:12px;font-weight:800;color:#c4ccd8;')
-        tester_layout.addWidget(tester_label)
-        self.name_test=self.edit();self.name_test.setPlaceholderText('Enter a COD username from a screenshot...')
-        tester_layout.addWidget(self.name_test,1)
-        tester_layout.addWidget(self.button('Test Name Match',self.test_name))
-        l.addWidget(tester)
+
         self.name_match_result=QLabel('');self.name_match_result.setStyleSheet('font-size:11px;color:#9da8b7;');self.name_match_result.setWordWrap(True)
         l.addWidget(self.name_match_result)
         self.photo_path=self.edit();self.photo_path.setVisible(False)
@@ -926,17 +852,18 @@ class Window(QMainWindow):
         layout.addWidget(status,0,Qt.AlignVCenter)
         return card
     def build_studio(self):
-        l=self.page('AI Poster Studio','CODMunity + verified scoreboard → complete extension job → Meta AI artwork with in-scene match results → Discord.')
+        l=self.page('AI Studio','CODMunity + verified scoreboard → complete extension job → Meta AI artwork with in-scene match results → Discord.')
         self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
         self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
-        self.generate_poster_button=self.button('GENERATE MATCH POSTER',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);l.addWidget(self.generate_poster_button)
+        self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);l.addWidget(self.generate_poster_button)
         self.photo_assignments=QLabel('Consented reference photos are matched automatically when available.');self.photo_assignments.setWordWrap(True);l.addWidget(self.photo_assignments)
-        self.studio_heads=QHBoxLayout();l.addLayout(self.studio_heads)
+        self.studio_heads_title=QLabel('Players Identified from ScreenShots');self.studio_heads_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');l.addWidget(self.studio_heads_title)
+        self.studio_heads=QGridLayout();self.studio_heads.setSpacing(12);l.addLayout(self.studio_heads)
         self.art_preview=QLabel('Finished artwork preview');self.art_preview.setAlignment(Qt.AlignCenter);self.art_preview.setMinimumHeight(180);l.addWidget(self.art_preview,1)
         self.approve_post_button=self.button('APPROVE & POST',self.post_active,True);self.row(l,self.approve_post_button)
-        self.row(l,self.button('Cancel browser job',self.cancel_browser),self.button('Retry / review selected job',self.retry_job));self.job_status=QLabel('No active job');l.addWidget(self.job_status)
+        self.row(l,self.button('Cancel',self.cancel_browser),self.button('Retry / review selected job',self.retry_job));self.job_status=QLabel('No active job');l.addWidget(self.job_status)
     def build_cod_ai(self):
-        l=self.page('COD AI','Capture a Call of Duty moment, test cinematic clips, and send them to Meta AI for cinematic videos.');l.setSpacing(9);l.setContentsMargins(24,14,24,14)
+        l=self.page('ScreenShots and Videos','Capture a Call of Duty moment and send screenshots to Meta AI for cinematic videos.');l.setSpacing(9);l.setContentsMargins(24,14,24,14)
         steps=QFrame();steps.setObjectName('codAiSteps');steps_layout=QHBoxLayout(steps);steps_layout.setContentsMargins(14,8,14,8);steps_layout.setSpacing(10)
         for index,(icon,title,desc) in enumerate((('⌖','CAPTURE','Grab a gameplay screenshot.'),('▶','CREATE VIDEO','Send to Meta AI to make a cinematic.'),('↗','SHARE','Post the finished video to Discord.'))):
             num=QLabel(str(index+1));num.setObjectName('stepNum');num.setAlignment(Qt.AlignCenter);steps_layout.addWidget(num)
@@ -951,7 +878,7 @@ class Window(QMainWindow):
         actions=QHBoxLayout();actions.setSpacing(10)
         actions.addWidget(self.button('Open Screenshots Folder',self.open_screenshots_folder))
         actions.addWidget(self.button('Capture Game Screenshot',self.capture_cod_ai_screenshot,True),1)
-        actions.addWidget(self.button('Send selected screenshot to Meta AI \u2014 Make Video',self.queue_selected_cinematic),1)
+        self.queue_cinematic_button=self.button('Send Selected Material to Meta Ai to Make A Video',self.queue_selected_cinematic);self.queue_cinematic_button.setStyleSheet('background:#1d4ed8;border:1px solid #3b82f6;border-radius:6px;color:#ffffff;font-weight:800;padding:10px 14px;');actions.addWidget(self.queue_cinematic_button,1)
         self.cod_ai_hotkey_status=QLabel('Hotkey: Ctrl + F8');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);actions.addWidget(self.cod_ai_hotkey_status)
         l.addLayout(actions)
         self.cod_ai_capture_status=QLabel('Screenshots will be saved as lossless PNG files in the tracker data folder. Press Ctrl + F8 in game to capture.')
@@ -965,8 +892,6 @@ class Window(QMainWindow):
         self.screenshot_tiles={}
         self.cod_ai_screenshots=QListWidget();self.cod_ai_screenshots.setObjectName('cinematicGallery');self.cod_ai_screenshots.setViewMode(QListWidget.IconMode);self.cod_ai_screenshots.setFlow(QListWidget.LeftToRight);self.cod_ai_screenshots.setMovement(QListWidget.Static);self.cod_ai_screenshots.setResizeMode(QListWidget.Adjust);self.cod_ai_screenshots.setWrapping(True);self.cod_ai_screenshots.setSpacing(6);self.cod_ai_screenshots.setMinimumHeight(220);self.cod_ai_screenshots.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cod_ai_screenshots.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cod_ai_screenshots.currentItemChanged.connect(self.preview_cod_ai_screenshot);shots_layout.addWidget(self.cod_ai_screenshots,1)
         self.cod_ai_empty=QLabel('No screenshots yet\nCapture a screenshot or open your folder.');self.cod_ai_empty.setObjectName('codEmpty');self.cod_ai_empty.setAlignment(Qt.AlignCenter);self.cod_ai_empty.setWordWrap(True);self.cod_ai_empty.hide();shots_layout.addWidget(self.cod_ai_empty,1)
-        self.cod_ai_preview_info=QLabel('Select a screenshot to preview');self.cod_ai_preview_info.setStyleSheet('color:#99a8bc;font-weight:700;');shots_layout.addWidget(self.cod_ai_preview_info)
-        self.cod_ai_preview=QLabel('Screenshot preview');self.cod_ai_preview.setAlignment(Qt.AlignCenter);self.cod_ai_preview.setMinimumSize(200,84);self.cod_ai_preview.setMaximumHeight(84);self.cod_ai_preview.setStyleSheet('background:#080a0e;border:1px solid #292f39;border-radius:6px;color:#77818f;');shots_layout.addWidget(self.cod_ai_preview)
         self.media_tabs.addTab(shots_tab,'Screenshots')
         videos_tab=QWidget();videos_layout=QVBoxLayout(videos_tab);videos_layout.setContentsMargins(6,6,6,6);videos_layout.setSpacing(8)
         self.cinematic_tiles={};self.cinematic_duration_cache={}
@@ -981,6 +906,8 @@ class Window(QMainWindow):
         preview_panel=QFrame();preview_panel.setObjectName('dashboardPanel');right_layout=QVBoxLayout(preview_panel);right_layout.setContentsMargins(12,12,12,12);right_layout.setSpacing(8)
         preview_title=QLabel('Preview');preview_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');right_layout.addWidget(preview_title)
         preview_sub=QLabel('Watch the selected video.');preview_sub.setStyleSheet('color:#99a8bc');right_layout.addWidget(preview_sub)
+        self.preview_sub=preview_sub
+        self.preview_image=QLabel('Select a screenshot to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(220);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');right_layout.addWidget(self.preview_image,1)
         self.cinematic_video_widget=QVideoWidget();self.cinematic_fullscreen_filter=FullscreenExitFilter(lambda:bool(getattr(self,'cinematic_video_widget',None) and self.cinematic_video_widget.isFullScreen()),self.exit_cinematic_fullscreen,self.toggle_cinematic_fullscreen)
         app_instance=QApplication.instance()
         if app_instance is not None:app_instance.installEventFilter(self.cinematic_fullscreen_filter)
@@ -1000,13 +927,13 @@ class Window(QMainWindow):
         preview_actions=QHBoxLayout();preview_actions.addStretch(1);preview_actions.addWidget(self.cinematic_fullscreen_button);preview_actions.addWidget(self.refresh_cinematic_button);right_layout.addLayout(preview_actions)
         main_split.addWidget(preview_panel);main_split.setStretchFactor(0,5);main_split.setStretchFactor(1,6);main_split.setSizes([740,860]);l.addWidget(main_split,1)
         action_bar=QHBoxLayout();action_bar.setSpacing(10);action_bar.addWidget(self.cinematic_status,1)
-        self.test_cinematic_button=self.button('Test Video',self.test_cinematic_video);self.test_cinematic_button.setObjectName('codPrimary');action_bar.addWidget(self.test_cinematic_button)
+        self.test_cinematic_button=None
         self.post_cinematic_button=self.button('Post to Discord',self.post_cinematic_video);self.post_cinematic_button.setObjectName('codSecondary');self.post_cinematic_button.setEnabled(False);action_bar.addWidget(self.post_cinematic_button)
         l.addLayout(action_bar)
         talent_friends_row=QHBoxLayout();talent_friends_row.setSpacing(10)
         talent_panel=QFrame();talent_panel.setObjectName('dashboardPanel');talent_layout=QVBoxLayout(talent_panel);talent_layout.setContentsMargins(12,10,12,10);talent_layout.setSpacing(8)
         talent_head=QHBoxLayout();talent_head.setSpacing(6);talent_icon=QLabel('◉');talent_icon.setStyleSheet('color:#f97316;font-size:14px;font-weight:900;');talent_head.addWidget(talent_icon)
-        talent_title=QLabel('TALENT PHOTO');talent_title.setObjectName('codPanelTitle');talent_head.addWidget(talent_title);talent_head.addStretch(1);talent_layout.addLayout(talent_head)
+        talent_title=QLabel("PLAYER CAMEO'S");talent_title.setObjectName('codPanelTitle');talent_head.addWidget(talent_title);talent_head.addStretch(1);talent_layout.addLayout(talent_head)
         talent_body=QHBoxLayout();talent_body.setSpacing(10)
         self.talent_preview=QLabel();self.talent_preview.setFixedSize(60,60);self.talent_preview.setAlignment(Qt.AlignCenter);self.talent_preview.setStyleSheet('background:#080a0e;border:1px solid #292f39;border-radius:6px;color:#77818f;');talent_body.addWidget(self.talent_preview)
         talent_meta=QVBoxLayout();talent_meta.setSpacing(6)
@@ -1016,13 +943,14 @@ class Window(QMainWindow):
         talent_btns=QHBoxLayout();talent_btns.setSpacing(6)
         talent_btns.addWidget(self.button('Change Photo',self.set_cinematic_talent));talent_btns.addWidget(self.button('Remove Photo',self.remove_cinematic_talent));talent_btns.addStretch(1);talent_meta.addLayout(talent_btns)
         talent_body.addLayout(talent_meta,1);talent_layout.addLayout(talent_body)
+        self.talent_cameo_label=QLabel('Featuring: just you');self.talent_cameo_label.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;');self.talent_cameo_label.setWordWrap(True);talent_layout.addWidget(self.talent_cameo_label)
         talent_friends_row.addWidget(talent_panel,2)
         friends_panel=QFrame();friends_panel.setObjectName('dashboardPanel');friends_layout=QVBoxLayout(friends_panel);friends_layout.setContentsMargins(12,10,12,10);friends_layout.setSpacing(8)
         friends_head=QHBoxLayout();friends_head.setSpacing(6)
         friends_title=QLabel('FRIENDS IN THIS VIDEO');friends_title.setObjectName('codPanelTitle');friends_head.addWidget(friends_title)
         friends_opt=QLabel('(Optional)');friends_opt.setStyleSheet('font-size:11px;color:#9da8b7;');friends_head.addWidget(friends_opt);friends_head.addStretch(1)
         self.talent_friends_status=QLabel('');self.talent_friends_status.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;');friends_head.addWidget(self.talent_friends_status);friends_layout.addLayout(friends_head)
-        self.talent_friends_box=QGridLayout();self.talent_friends_box.setSpacing(6);friends_layout.addLayout(self.talent_friends_box,1)
+        self.talent_friends_box=QListWidget();self.talent_friends_box.setObjectName('friendList');self.talent_friends_box.setMaximumHeight(112);self.talent_friends_box.itemClicked.connect(self.on_talent_friend_clicked);self.talent_friends_box.itemChanged.connect(self.on_talent_friend_changed);friends_layout.addWidget(self.talent_friends_box,1)
         talent_friends_row.addWidget(friends_panel,3);l.addLayout(talent_friends_row)
         self.refresh_talent_friends()
         self.refresh_talent_preview()
@@ -1240,1065 +1168,6 @@ class Window(QMainWindow):
         self.row(l,self.button('Save all settings',self.save_settings,True))
         self.update_version_label=QLabel(f'Installed version {APP_VERSION}. Updates come from GitHub Releases.');self.update_version_label.setStyleSheet('color:#99a8bc')
         self.row(l,self.update_version_label,self.button('Check for Updates',lambda:self.check_for_app_update(manual=True)))
-    # ---- COD Tweaker: review-first Call of Duty config editor ----
-    def build_cod_tweaker(self):
-        import cod_tweaker as CT
-        self._twmod = CT
-        self.tw_docs = {}
-        self.tw_notes = CT.NotesRegistry(E.ROOT / 'cod_tweaker_notes.json', E.DATA / 'cod-tweaker-notes.json')
-        self.tw_backups = CT.BackupStore(E.DATA / 'cod-tweaker-backups')
-        self.tw_pins = CT.PinStore(E.DATA / 'cod-tweaker-pins.json')
-        self.tw_files = []
-        self.tw_current = None
-        self.tw_unlocked = set()
-        self.tw_preset_pairs = []
-        self.tw_preset_index = 0
-        self.tw_diff = None
-        self.tw_restart_needed = False
-        self.tw_edit_ref = None
-        self.tw_edit_kind = 'line'
-        l = self.page('COD Tweaker', 'Review-first editor for Call of Duty config files. Nothing is written until you confirm, and every write takes a dated backup first. Restart the game after applying changes.')
-        self.tw_game_banner = QLabel('Call of Duty looks running: the game reads these files only at start and overwrites them at exit unless the file is locked.')
-        self.tw_game_banner.setWordWrap(True)
-        self.tw_game_banner.setStyleSheet('padding:9px 12px;background:#3a1418;border-left:3px solid #ed2938;color:#f3c1c5;')
-        self.tw_game_banner.setVisible(False)
-        l.addWidget(self.tw_game_banner)
-        self.tw_stale_row = QWidget()
-        stale_layout = QHBoxLayout(self.tw_stale_row)
-        stale_layout.setContentsMargins(0, 0, 0, 0)
-        self.tw_stale_label = QLabel('This file changed on disk since it was loaded.')
-        self.tw_stale_label.setWordWrap(True)
-        self.tw_stale_label.setStyleSheet('color:#ff9638;font-weight:700;')
-        stale_layout.addWidget(self.tw_stale_label, 1)
-        stale_layout.addWidget(self.button('Reload (keep my staged edits)', self.tweaker_reload_keep))
-        stale_layout.addWidget(self.button('Show what changed', self.tweaker_show_disk_diff))
-        self.tw_stale_row.setVisible(False)
-        l.addWidget(self.tw_stale_row)
-        file_row = QHBoxLayout()
-        file_row.addWidget(QLabel('Config file'))
-        self.tw_file_combo = QComboBox()
-        self.tw_file_combo.setMinimumWidth(320)
-        self.tw_file_combo.currentIndexChanged.connect(self.on_tweaker_file_changed)
-        file_row.addWidget(self.tw_file_combo, 1)
-        file_row.addWidget(self.button('Refresh files', self.refresh_tweaker_files))
-        self.tw_unlock = QCheckBox('Unlock editing for this file')
-        self.tw_unlock.setToolTip('Read-only until explicitly unlocked. Unlocking never writes anything by itself.')
-        self.tw_unlock.toggled.connect(self.on_tweaker_unlock_toggled)
-        file_row.addWidget(self.tw_unlock)
-        self.tw_save_btn = self.button('Save staged edits (backs up first)', self.save_tweaker_edits, True)
-        file_row.addWidget(self.tw_save_btn)
-        l.addLayout(file_row)
-        self.tw_restart_label = QLabel('Saved. Restart Call of Duty to apply the new values.')
-        self.tw_restart_label.setStyleSheet('color:#ff9638;font-weight:700;')
-        self.tw_restart_label.setVisible(False)
-        l.addWidget(self.tw_restart_label)
-        self.tw_tabs = QTabWidget()
-        self.tw_tabs_state = {}
-        for category in ('Graphics', 'Performance', 'Hidden Settings'):
-            self.tw_tabs.addTab(self._tw_make_settings_tab(category), category)
-        self.tw_tabs.addTab(self._tw_make_presets_tab(), 'Presets')
-        self.tw_tabs.addTab(self._tw_make_compare_tab(), 'Compare')
-        self.tw_tabs.addTab(self._tw_make_backup_tab(), 'Backup & Restore')
-        self.tw_tabs.addTab(self._tw_make_about_tab(), 'About')
-        self.tw_tabs.currentChanged.connect(lambda _i: self.on_tweaker_row_selected(None))
-        l.addWidget(self.tw_tabs, 1)
-        l.addWidget(self._tw_make_editor_panel())
-        self.tw_error = QLabel('')
-        self.tw_error.setStyleSheet('color:#ff6b74;')
-        self.tw_error.setWordWrap(True)
-        l.addWidget(self.tw_error)
-        self.refresh_tweaker_files()
-        self.tw_poll = QTimer(self)
-        self.tw_poll.setInterval(3000)
-        self.tw_poll.timeout.connect(self.poll_tweaker_guards)
-        self.tw_poll.start()
-
-    def _tw_make_about_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(6, 6, 18, 6)
-        body_layout.setSpacing(4)
-        for title, paras in (
-            ('Pins and the Guard', (
-                "Select a setting and click Pin to pin that value; pinned rows carry a [pinned] tag. Tick Pinned only to list just your pins, and use the Compare tab's Restore only pinned rows button to write pinned values back into the file - a safety backup is taken first.",
-                "The Guard in this build keeps watch but never writes on its own: while the section is open it checks every few seconds and shows a banner when Call of Duty looks running (the game reads these files only at start and overwrites them at exit unless the file is locked), plus a 'changed on disk' banner when the file moves under you. After a session, open Compare against On disk, Take what you want, and Save.",
-            )),
-            ('Locked files and the in-game menu', (
-                "While a settings file is locked, the game can't save to it. On some builds that makes the graphics menu misbehave, up to kicking you out of the match when you open it. If you want to use the in-game settings menu, make the file writable first (Lock file button or the per-file Unlock editing checkbox), make your changes in the game, then lock again. Or leave the file unlocked, use pins for the values you care about, and Take them back from the Compare tab afterwards.",
-            )),
-            ('Compare, presets and scripts', (
-                "Open the Compare tab to diff the open file against any of its backups, another file, or a preset; every difference gets a Take button, and taken values become pending changes you then Save. The same view opens from the 'changed on disk' banner, so you can see exactly what the game altered after a session.",
-            )),
-        ):
-            head = QLabel(title)
-            head.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;')
-            body_layout.addWidget(head)
-            for para in paras:
-                text = QLabel(para)
-                text.setWordWrap(True)
-                text.setStyleSheet('color:#c4ccd8;')
-                text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                body_layout.addWidget(text)
-            body_layout.addSpacing(10)
-        body_layout.addStretch()
-        scroll.setWidget(body)
-        layout.addWidget(scroll)
-        return tab
-    def _tw_make_settings_tab(self, category):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        search = QLineEdit()
-        search.setPlaceholderText('Search key, name, or description...')
-        search.setClearButtonEnabled(True)
-        layout.addWidget(search)
-        checks = QHBoxLayout()
-        chk_mod = QCheckBox('Modified only')
-        chk_pin = QCheckBox('Pinned only')
-        checks.addWidget(chk_mod)
-        checks.addWidget(chk_pin)
-        chk_hidden = None
-        if category != 'Hidden Settings':
-            chk_hidden = QCheckBox('Show hidden settings')
-            checks.addWidget(chk_hidden)
-        checks.addStretch()
-        layout.addLayout(checks)
-        table = QTableWidget(0, 6)
-        table.setHorizontalHeaderLabels(['Setting', 'Value', 'Description', 'Range', 'Warning', 'Pin'])
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Interactive)
-        table.setColumnWidth(0, 200)
-        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
-        table.setColumnWidth(1, 300)
-        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
-        table.setColumnWidth(3, 150)
-        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
-        table.setColumnWidth(4, 160)
-        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        table.setColumnWidth(5, 80)
-        table.verticalHeader().setDefaultSectionSize(36)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setAlternatingRowColors(True)
-        table.verticalHeader().hide()
-        layout.addWidget(table, 1)
-        state = {'category': category, 'search': search, 'chk_mod': chk_mod,
-                 'chk_pin': chk_pin, 'chk_hidden': chk_hidden, 'table': table}
-        self.tw_tabs_state[category] = state
-        search.textChanged.connect(lambda _t: self.refresh_tweaker_tables())
-        chk_mod.toggled.connect(lambda _t: self.refresh_tweaker_tables())
-        chk_pin.toggled.connect(lambda _t: self.refresh_tweaker_tables())
-        if chk_hidden is not None:
-            chk_hidden.toggled.connect(lambda _t: self.refresh_tweaker_tables())
-        table.itemSelectionChanged.connect(lambda _t=table: self.on_tweaker_row_selected(_t))
-        return tab
-
-    def _tw_make_presets_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        layout.addWidget(QLabel('Presets never apply on load or select. Review the preview, then confirm. Protected settings are always skipped.'))
-        top = QHBoxLayout()
-        self.tw_preset_combo = QComboBox()
-        self.tw_preset_combo.setMinimumWidth(220)
-        self.tw_preset_combo.currentIndexChanged.connect(self.preview_tweaker_preset)
-        top.addWidget(self.tw_preset_combo, 1)
-        top.addWidget(self.button('Dry-run (show what would change)', self.preview_tweaker_preset))
-        self.tw_preset_apply_btn = self.button('Review & apply preset...', self.apply_tweaker_preset, True)
-        top.addWidget(self.tw_preset_apply_btn)
-        layout.addLayout(top)
-        self.tw_preset_summary = QLabel('')
-        self.tw_preset_summary.setWordWrap(True)
-        layout.addWidget(self.tw_preset_summary)
-        self.tw_preset_table = QTableWidget(0, 3)
-        self.tw_preset_table.setHorizontalHeaderLabels(['Setting', 'Change', 'Detail'])
-        self.tw_preset_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tw_preset_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tw_preset_table.setAlternatingRowColors(True)
-        self.tw_preset_table.verticalHeader().hide()
-        layout.addWidget(self.tw_preset_table, 1)
-        self.refresh_tweaker_presets()
-        return tab
-
-    def _tw_make_compare_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        top = QHBoxLayout()
-        top.addWidget(QLabel('Compare against'))
-        self.tw_cmp_source = QComboBox()
-        self.tw_cmp_source.setMinimumWidth(260)
-        top.addWidget(self.tw_cmp_source, 1)
-        top.addWidget(self.button('Refresh diff', self.refresh_tweaker_diff))
-        self.tw_cmp_take_btn = self.button('Take selected (stage theirs)', self.take_tweaker_diff_row)
-        top.addWidget(self.tw_cmp_take_btn)
-        layout.addLayout(top)
-        self.tw_cmp_summary = QLabel('')
-        layout.addWidget(self.tw_cmp_summary)
-        self.tw_cmp_table = QTableWidget(0, 4)
-        self.tw_cmp_table.setHorizontalHeaderLabels(['Setting', 'Mine', 'Theirs', 'Status'])
-        self.tw_cmp_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tw_cmp_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tw_cmp_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tw_cmp_table.setAlternatingRowColors(True)
-        self.tw_cmp_table.verticalHeader().hide()
-        layout.addWidget(self.tw_cmp_table, 1)
-        pin_row = QHBoxLayout()
-        self.tw_cmp_pinned_only = QCheckBox('Pinned rows only')
-        self.tw_cmp_pinned_only.toggled.connect(lambda _t: self.refresh_tweaker_diff())
-        pin_row.addWidget(self.tw_cmp_pinned_only)
-        self.tw_cmp_relock = QCheckBox('Relock file after selective restore')
-        self.tw_cmp_relock.setChecked(True)
-        pin_row.addWidget(self.tw_cmp_relock)
-        pin_row.addWidget(self.button('Restore only pinned rows...', self.restore_tweaker_pinned))
-        self.tw_lock_btn = self.button('Lock file (read-only)', self.toggle_tweaker_lock)
-        self.tw_lock_btn.setToolTip('While locked, the in-game menu cannot save over this file.')
-        pin_row.addWidget(self.tw_lock_btn)
-        pin_row.addStretch()
-        layout.addLayout(pin_row)
-        return tab
-
-    def _tw_make_backup_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-        layout.addWidget(QLabel('Every save and every preset apply writes a dated backup here first. Restores take another safety backup before copying anything back.'))
-        self.tw_backup_table = QTableWidget(0, 3)
-        self.tw_backup_table.setHorizontalHeaderLabels(['When', 'File', 'Size'])
-        self.tw_backup_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tw_backup_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tw_backup_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tw_backup_table.setAlternatingRowColors(True)
-        self.tw_backup_table.verticalHeader().hide()
-        layout.addWidget(self.tw_backup_table, 1)
-        row = QHBoxLayout()
-        row.addWidget(self.button('Refresh list', self.refresh_tweaker_backups))
-        row.addWidget(self.button('Restore selected...', self.restore_tweaker_backup, True))
-        row.addWidget(self.button('Compare selected', self.compare_tweaker_backup))
-        row.addStretch()
-        layout.addLayout(row)
-        return tab
-
-    def _tw_make_editor_panel(self):
-        panel = QFrame()
-        panel.setObjectName('dashboardPanel')
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
-        self.tw_edit_title = QLabel('Select a setting above to review it.')
-        self.tw_edit_title.setStyleSheet('font-weight:800;')
-        self.tw_edit_title.setWordWrap(True)
-        layout.addWidget(self.tw_edit_title)
-        self.tw_edit_stack = QStackedWidget()
-        self.tw_edit_line = QLineEdit()
-        self.tw_edit_combo = QComboBox()
-        self.tw_edit_combo.setMinimumWidth(200)
-        self.tw_edit_int = QSpinBox()
-        self.tw_edit_int.setRange(-1000000000, 1000000000)
-        self.tw_edit_double = QDoubleSpinBox()
-        self.tw_edit_double.setRange(-1000000000.0, 1000000000.0)
-        self.tw_edit_double.setDecimals(3)
-        slider_wrap = QWidget()
-        slider_layout = QHBoxLayout(slider_wrap)
-        slider_layout.setContentsMargins(0, 0, 0, 0)
-        self.tw_edit_slider = QSlider(Qt.Horizontal)
-        self.tw_edit_slider_value = QLabel('')
-        self.tw_edit_slider_value.setMinimumWidth(90)
-        self.tw_edit_slider.valueChanged.connect(
-            lambda value: self.tw_edit_slider_value.setText(str(value / self._tw_slider_factor())))
-        slider_layout.addWidget(self.tw_edit_slider, 1)
-        slider_layout.addWidget(self.tw_edit_slider_value)
-        for widget in (self.tw_edit_line, self.tw_edit_combo, self.tw_edit_int,
-                       self.tw_edit_double, slider_wrap):
-            self.tw_edit_stack.addWidget(widget)
-        layout.addWidget(self.tw_edit_stack)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.button('Stage change', self.stage_tweaker_edit, True))
-        self.tw_pin_btn = self.button('Pin', self.pin_tweaker_edit)
-        buttons.addWidget(self.tw_pin_btn)
-        buttons.addWidget(self.button('Revert to original', self.revert_tweaker_original))
-        buttons.addWidget(self.button('Revert to on-disk value', self.revert_tweaker_disk))
-        buttons.addStretch()
-        layout.addLayout(buttons)
-        self.tw_edit_hint = QLabel('Edits stay staged until you press Save. Invalid values are rejected with an inline error.')
-        self.tw_edit_hint.setWordWrap(True)
-        self.tw_edit_hint.setStyleSheet('color:#99a8bc;')
-        layout.addWidget(self.tw_edit_hint)
-        return panel
-
-    def _tw_slider_factor(self):
-        return float(getattr(self, 'tw_slider_factor_value', 1.0) or 1.0)
-
-    def _tw_current_doc(self):
-        return (self.tw_docs or {}).get(self.tw_current or '')
-
-    def _tw_row_visible(self, setting, category, state):
-        CT = self._twmod
-        note = self.tw_notes.note_for(setting)
-        hidden = bool(note.get('hidden', False))
-        home = CT.category_for(setting.section, hidden)
-        if home != category:
-            show_hidden = state.get('chk_hidden') is not None and state['chk_hidden'].isChecked()
-            if not (show_hidden and hidden and category != 'Hidden Settings'):
-                return False
-        needle = state['search'].text().strip().lower()
-        if needle and needle not in (setting.key + ' ' + setting.name + ' ' + (setting.description or '')).lower():
-            return False
-        if state['chk_mod'].isChecked() and not setting.modified:
-            return False
-        if state['chk_pin'].isChecked() and not self.tw_pins.is_pinned(setting.key):
-            return False
-        return True
-
-    def refresh_tweaker_files(self):
-        CT = self._twmod
-        try:
-            self.tw_files = CT.CODTweakerLocator().find()
-        except Exception as exc:
-            self.log('COD Tweaker file scan failed: ' + str(exc))
-            self.tw_files = []
-        combo = self.tw_file_combo
-        combo.blockSignals(True)
-        combo.clear()
-        if not self.tw_files:
-            combo.addItem('No COD config files found (see tooltip)', None)
-            combo.setToolTip('Looked under %LOCALAPPDATA%\\Activision and Documents\\Call of Duty. Place a config file there, then press Refresh files.')
-        for item in self.tw_files:
-            combo.addItem('%s — %s' % (((item.get('game') + ' \u2014 ') if item.get('game') else '') + (item.get('group') or item['kind']), item['path'].name), str(item['path']))
-        combo.blockSignals(False)
-        if self.tw_files:
-            first = str(self.tw_files[0]['path'])
-            combo.setCurrentIndex(0)
-            if self.tw_current not in (str(item['path']) for item in self.tw_files):
-                self.tw_current = first
-        else:
-            self.tw_current = None
-        self.tw_unlock.blockSignals(True)
-        self.tw_unlock.setChecked(bool(self.tw_current and self.tw_current in self.tw_unlocked))
-        self.tw_unlock.blockSignals(False)
-        self.on_tweaker_file_changed(combo.currentIndex())
-
-    def on_tweaker_file_changed(self, _index):
-        CT = self._twmod
-        data = self.tw_file_combo.currentData() if hasattr(self, 'tw_file_combo') else None
-        self.tw_current = str(data) if data else (str(self.tw_files[0]['path']) if self.tw_files else None)
-        if self.tw_current and self.tw_current not in (self.tw_docs or {}):
-            try:
-                self.tw_docs[self.tw_current] = CT.CODDocument.load(self.tw_current)
-            except (OSError, ValueError) as exc:
-                self.log('COD Tweaker could not parse %s: %s' % (self.tw_current, exc))
-                self.tw_docs[self.tw_current] = None
-        self.tw_unlock.blockSignals(True)
-        self.tw_unlock.setChecked(bool(self.tw_current and self.tw_current in self.tw_unlocked))
-        self.tw_unlock.blockSignals(False)
-        self.tw_edit_ref = None
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_backups()
-        self.refresh_tweaker_compare_sources()
-        self.refresh_tweaker_diff()
-        self.preview_tweaker_preset()
-        self.poll_tweaker_guards()
-        self.update_tweaker_lock_button()
-
-    def on_tweaker_unlock_toggled(self, checked):
-        if not self.tw_current:
-            return
-        if checked:
-            self.tw_unlocked.add(self.tw_current)
-        else:
-            self.tw_unlocked.discard(self.tw_current)
-        self.on_tweaker_row_selected(None)
-
-    def refresh_tweaker_tables(self):
-        if not hasattr(self, 'tw_tabs_state'):
-            return
-        from PySide6.QtGui import QColor
-        doc = self._tw_current_doc()
-        settings = doc.settings if doc is not None else []
-        unlocked_file = bool(self.tw_current and self.tw_current in self.tw_unlocked)
-        for category, state in self.tw_tabs_state.items():
-            table = state['table']
-            table.blockSignals(True)
-            table.setRowCount(0)
-            for setting in settings:
-                if not self._tw_row_visible(setting, category, state):
-                    continue
-                note = self.tw_notes.note_for(setting)
-                row = table.rowCount()
-                table.insertRow(row)
-                name_item = QTableWidgetItem(setting.name + (' *' if setting.modified else ''))
-                name_item.setData(Qt.UserRole, setting.key)
-                name_item.setToolTip(setting.key + ((' @' + setting.variant) if setting.variant else ''))
-                editable = unlocked_file and not setting.protected
-                desc_text = note.get('note', '') or setting.description
-                desc_item = QTableWidgetItem(desc_text)
-                desc_item.setToolTip(desc_text)
-                range_item = QTableWidgetItem(setting.range_text())
-                warnings = []
-                if setting.protected:
-                    warnings.append('DO NOT MODIFY')
-                if note.get('hidden', False):
-                    warnings.append('Not in the in-game menu')
-                suggested = str(note.get('suggested', '') or '')
-                if suggested and suggested != setting.effective and not setting.protected:
-                    warnings.append('Differs from suggested (%s)' % suggested)
-                warn_item = QTableWidgetItem(' · '.join(warnings))
-                if setting.protected:
-                    warn_item.setForeground(QColor('#ff6b74'))
-                for column, item in enumerate((name_item, desc_item, range_item, warn_item)):
-                    table.setItem(row, column if column < 1 else column + 1, item)
-                table.setCellWidget(row, 1, self._tw_row_value_widget(setting, editable))
-                pin_btn = QPushButton('Unpin' if self.tw_pins.is_pinned(setting.key) else 'Pin')
-                pin_btn.setToolTip('Pin this value')
-                pin_btn.clicked.connect(lambda _c=False, k=setting.key: self.toggle_tweaker_pin(k))
-                table.setCellWidget(row, 5, pin_btn)
-            table.blockSignals(False)
-        staged = len(doc.staged_changes()) if doc is not None else 0
-        self.tw_save_btn.setText('Save %d staged edit(s) (backs up first)' % staged if staged else 'Save staged edits (backs up first)')
-        self.on_tweaker_row_selected(None)
-
-    def _tw_selected_setting(self, table):
-        doc = self._tw_current_doc()
-        if doc is None or table is None or table.currentRow() < 0:
-            return None, None
-        key_item = table.item(table.currentRow(), 0)
-        if key_item is None:
-            return None, None
-        ref = key_item.data(Qt.UserRole)
-        return doc.match(key=ref), ref
-
-    def on_tweaker_row_selected(self, table):
-        if table is None:
-            table = (self.tw_tabs_state.get(self.tw_tabs.tabText(self.tw_tabs.currentIndex()), {}) or {}).get('table')
-            if table is not None and table.currentRow() < 0:
-                table = None
-                for state in self.tw_tabs_state.values():
-                    if state['table'].currentRow() >= 0:
-                        table = state['table']
-                        break
-        setting, ref = self._tw_selected_setting(table)
-        unlocked = bool(self.tw_current and self.tw_current in self.tw_unlocked)
-        for widget in (self.tw_edit_line, self.tw_edit_combo, self.tw_edit_int,
-                       self.tw_edit_double, self.tw_edit_slider):
-            widget.setEnabled(False)
-        if setting is None:
-            self.tw_edit_ref = None
-            self.tw_edit_title.setText('Select a setting above to review it.')
-            self.tw_pin_btn.setText('Pin')
-            return
-        self.tw_edit_ref = ref
-        note = self.tw_notes.note_for(setting)
-        pinned = self.tw_pins.is_pinned(setting.key)
-        title = '%s  —  %s' % (setting.name, setting.effective)
-        if setting.modified:
-            title += '  (staged: %s)' % setting.pending
-        if pinned:
-            title += '  [pinned]'
-        if setting.protected:
-            title += '  [DO NOT MODIFY — locked]'
-        self.tw_edit_title.setText(title)
-        self.tw_edit_title.setToolTip('%s%s\n%s' % (setting.key, (' @' + setting.variant) if setting.variant else '', note.get('note', '')))
-        self.tw_pin_btn.setText('Unpin' if pinned else 'Pin')
-        editable = unlocked and not setting.protected
-        if setting.kind == 'bool':
-            self.tw_edit_stack.setCurrentWidget(self.tw_edit_combo)
-            self.tw_edit_combo.blockSignals(True)
-            self.tw_edit_combo.clear()
-            self.tw_edit_combo.addItems(['true', 'false'])
-            self.tw_edit_combo.setCurrentText(setting.effective)
-            self.tw_edit_combo.blockSignals(False)
-            self.tw_edit_combo.setEnabled(editable)
-            self.tw_edit_kind = 'combo'
-        elif setting.kind == 'choice':
-            self.tw_edit_stack.setCurrentWidget(self.tw_edit_combo)
-            self.tw_edit_combo.blockSignals(True)
-            self.tw_edit_combo.clear()
-            self.tw_edit_combo.addItems(setting.options)
-            self.tw_edit_combo.setCurrentText(setting.effective)
-            self.tw_edit_combo.blockSignals(False)
-            self.tw_edit_combo.setEnabled(editable)
-            self.tw_edit_kind = 'combo'
-        elif setting.kind == 'number' and setting.min is not None and setting.max is not None and (setting.max - setting.min) <= 10000:
-            factor = 10.0 ** (setting.decimals or 0)
-            self.tw_slider_factor_value = factor
-            self.tw_edit_stack.setCurrentWidget(self.tw_edit_slider.parentWidget())
-            self.tw_edit_slider.blockSignals(True)
-            self.tw_edit_slider.setRange(int(round(setting.min * factor)), int(round(setting.max * factor)))
-            try:
-                self.tw_edit_slider.setValue(int(round(float(setting.effective) * factor)))
-            except (TypeError, ValueError):
-                self.tw_edit_slider.setValue(int(round(setting.min * factor)))
-            self.tw_edit_slider.blockSignals(False)
-            self.tw_edit_slider_value.setText(setting.effective)
-            self.tw_edit_slider.setEnabled(editable)
-            self.tw_edit_kind = 'slider'
-        elif setting.kind == 'number':
-            try:
-                current = float(setting.effective)
-            except (TypeError, ValueError):
-                current = 0.0
-            if setting.decimals in (None, 0) and setting.min is not None and float(setting.min).is_integer() and setting.max is not None and float(setting.max).is_integer():
-                self.tw_edit_stack.setCurrentWidget(self.tw_edit_int)
-                self.tw_edit_int.setRange(int(setting.min), int(setting.max))
-                self.tw_edit_int.setValue(int(round(current)))
-                self.tw_edit_int.setEnabled(editable)
-                self.tw_edit_kind = 'int'
-            else:
-                self.tw_edit_stack.setCurrentWidget(self.tw_edit_double)
-                decimals = setting.decimals if setting.decimals is not None else 3
-                self.tw_edit_double.setDecimals(decimals)
-                self.tw_edit_double.setRange(float(setting.min) if setting.min is not None else -1000000000.0,
-                                             float(setting.max) if setting.max is not None else 1000000000.0)
-                self.tw_edit_double.setValue(current)
-                self.tw_edit_double.setEnabled(editable)
-                self.tw_edit_kind = 'double'
-        else:
-            self.tw_edit_stack.setCurrentWidget(self.tw_edit_line)
-            self.tw_edit_line.setText(setting.effective)
-            self.tw_edit_line.setEnabled(editable)
-            self.tw_edit_kind = 'line'
-        if not unlocked:
-            self.tw_edit_hint.setText('Read-only: tick "Unlock editing for this file" to stage changes.')
-        elif setting.protected:
-            self.tw_edit_hint.setText('Protected (DO NOT MODIFY): this setting cannot be staged or preset-applied.')
-        else:
-            self.tw_edit_hint.setText('Edits stay staged until you press Save. Invalid values are rejected with an inline error.')
-
-    def _tw_editor_raw_value(self):
-        doc = self._tw_current_doc()
-        setting = doc.match(key=self.tw_edit_ref) if doc is not None else None
-        if self.tw_edit_kind == 'combo':
-            return self.tw_edit_combo.currentText()
-        if self.tw_edit_kind == 'int':
-            return str(self.tw_edit_int.value())
-        if self.tw_edit_kind == 'double':
-            decimals = setting.decimals if setting is not None and setting.decimals is not None else 3
-            return '%.*f' % (decimals, self.tw_edit_double.value())
-        if self.tw_edit_kind == 'slider':
-            factor = self._tw_slider_factor()
-            decimals = setting.decimals if setting is not None and setting.decimals is not None else 0
-            return '%.*f' % (decimals, self.tw_edit_slider.value() / factor)
-        return self.tw_edit_line.text()
-
-    def _tw_row_value_widget(self, setting, editable):
-        if setting.kind == 'bool' or (setting.kind == 'choice' and setting.options):
-            combo = QComboBox()
-            combo.addItems(['true', 'false'] if setting.kind == 'bool' else list(setting.options))
-            combo.setCurrentText(setting.effective)
-            combo.setEnabled(editable)
-            combo.activated.connect(lambda _i, k=setting.key, c=combo: self.stage_tweaker_row(k, c.currentText()))
-            return combo
-        if setting.kind == 'number' and setting.min is not None and setting.max is not None and (setting.max - setting.min) <= 10000:
-            factor = 10.0 ** (setting.decimals or 0)
-            decimals = setting.decimals if setting.decimals is not None else 0
-            wrap = QWidget()
-            box = QHBoxLayout(wrap)
-            box.setContentsMargins(0, 0, 0, 0)
-            box.setSpacing(6)
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(int(round(setting.min * factor)), int(round(setting.max * factor)))
-            try:
-                start = int(round(float(setting.effective) * factor))
-            except (TypeError, ValueError):
-                start = int(round(setting.min * factor))
-            slider.setValue(start)
-            slider.setEnabled(editable)
-            edit = QLineEdit()
-            edit.setMinimumWidth(80)
-            edit.setText('%.*f' % (decimals, slider.value() / factor))
-            edit.setEnabled(editable)
-            slider.valueChanged.connect(lambda v, e=edit, f=factor, d=decimals: e.setText('%.*f' % (d, v / f)))
-            slider.sliderReleased.connect(lambda k=setting.key, e=edit: self.stage_tweaker_row(k, e.text()))
-            edit.editingFinished.connect(lambda k=setting.key, e=edit: self.stage_tweaker_row(k, e.text()))
-            box.addWidget(slider, 1)
-            box.addWidget(edit)
-            return wrap
-        edit = QLineEdit()
-        edit.setText(setting.effective)
-        edit.setEnabled(editable)
-        edit.editingFinished.connect(lambda k=setting.key, e=edit: self.stage_tweaker_row(k, e.text()))
-        return edit
-    def stage_tweaker_row(self, key, raw_value):
-        doc = self._tw_current_doc()
-        self.tw_error.setText('')
-        if doc is None:
-            return
-        if self.tw_current not in self.tw_unlocked:
-            self.tw_error.setText('Unlock editing for this file first.')
-            self.refresh_tweaker_tables()
-            return
-        ok, normalized, error = doc.stage(key, raw_value)
-        if not ok:
-            self.tw_error.setText('Invalid value: ' + error)
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_diff()
-    def toggle_tweaker_pin(self, key):
-        if not key:
-            return
-        self.tw_pins.toggle(key)
-        self.refresh_tweaker_tables()
-    def stage_tweaker_edit(self):
-        doc = self._tw_current_doc()
-        self.tw_error.setText('')
-        if doc is None or self.tw_edit_ref is None:
-            self.tw_error.setText('Select a setting first.')
-            return
-        if self.tw_current not in self.tw_unlocked:
-            self.tw_error.setText('Unlock editing for this file first.')
-            return
-        ok, normalized, error = doc.stage(self.tw_edit_ref, self._tw_editor_raw_value())
-        if not ok:
-            self.tw_error.setText('Invalid value: ' + error)
-            return
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_diff()
-
-    def pin_tweaker_edit(self):
-        if not self.tw_edit_ref:
-            return
-        self.tw_pin_btn.setText('Unpin' if self.tw_pins.toggle(self.tw_edit_ref) else 'Pin')
-        self.refresh_tweaker_tables()
-
-    def revert_tweaker_original(self):
-        doc = self._tw_current_doc()
-        if doc is not None and self.tw_edit_ref and doc.revert_to_original(self.tw_edit_ref):
-            self.tw_error.setText('')
-            self.refresh_tweaker_tables()
-            self.refresh_tweaker_diff()
-
-    def revert_tweaker_disk(self):
-        doc = self._tw_current_doc()
-        if doc is None or not self.tw_edit_ref:
-            return
-        ok, message = doc.revert_to_disk(self.tw_edit_ref)
-        if not ok:
-            self.tw_error.setText('Could not revert to disk: ' + str(message))
-            return
-        self.tw_error.setText('')
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_diff()
-
-    def save_tweaker_edits(self):
-        CT = self._twmod
-        doc = self._tw_current_doc()
-        if doc is None:
-            self.notice('No config file is loaded.')
-            return
-        if not doc.staged_changes():
-            self.notice('There are no staged edits to save.')
-            return
-        if self.tw_current not in self.tw_unlocked:
-            self.notice('Unlock editing for this file first.')
-            return
-        if CT.is_game_running() and not self.ask('Call of Duty looks running. The game may overwrite this file at exit. Save anyway?'):
-            return
-        if doc.is_stale_on_disk():
-            self.notice('The file changed on disk. Use Reload (keep my staged edits) or Show what changed first.')
-            return
-        try:
-            backup = self.tw_backups.backup_file(doc.path)
-        except OSError as exc:
-            self.notice('Backup before write failed, nothing was saved: ' + str(exc))
-            return
-        try:
-            doc.save()
-        except OSError as exc:
-            self.notice('Saving failed after backup (%s): %s' % (backup, exc))
-            return
-        self.tw_restart_needed = True
-        self.tw_restart_label.setVisible(True)
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_backups()
-        self.refresh_tweaker_compare_sources()
-        self.refresh_tweaker_diff()
-        self.log('COD Tweaker saved %s (backup %s). Restart the game to apply.' % (doc.path, backup))
-
-    def tweaker_reload_keep(self):
-        doc = self._tw_current_doc()
-        if doc is None:
-            return
-        try:
-            doc.refresh_keep_pending()
-        except (OSError, ValueError) as exc:
-            self.notice('Reload failed: ' + str(exc))
-            return
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_diff()
-        self.poll_tweaker_guards()
-        self.log('COD Tweaker reloaded %s from disk; staged edits were kept.' % doc.path)
-
-    def tweaker_show_disk_diff(self):
-        self.tw_tabs.setCurrentIndex(4)
-        self.refresh_tweaker_compare_sources()
-        for index in range(self.tw_cmp_source.count()):
-            if str(self.tw_cmp_source.itemData(index) or '').startswith('disk:'):
-                self.tw_cmp_source.setCurrentIndex(index)
-                break
-        self.refresh_tweaker_diff()
-
-    def poll_tweaker_guards(self):
-        if not hasattr(self, 'tw_game_banner'):
-            return
-        try:
-            match = self._twmod.matching_game_process()
-            running = bool(match)
-        except Exception:
-            match = ''
-            running = False
-        try:
-            self.tw_game_banner.setVisible(bool(running))
-            self.tw_game_banner.setToolTip('Detected process: ' + match if match else 'No game process detected')
-            doc = self._tw_current_doc()
-            stale = bool(doc is not None and doc.is_stale_on_disk())
-            self.tw_stale_row.setVisible(stale)
-        except RuntimeError:
-            pass
-
-    # ---- presets ----
-    def _tw_preset_payloads(self):
-        try:
-            data = json.loads((E.ROOT / 'cod_tweaker_presets.json').read_text(encoding='utf-8-sig'))
-        except (OSError, ValueError):
-            return []
-        presets = data.get('Presets', []) if isinstance(data, dict) else []
-        return [item for item in presets if isinstance(item, dict) and isinstance(item.get('Values'), list)]
-
-    def refresh_tweaker_presets(self):
-        combo = self.tw_preset_combo
-        combo.blockSignals(True)
-        combo.clear()
-        for payload in self._tw_preset_payloads():
-            combo.addItem(str(payload.get('Title') or payload.get('Kind') or 'Preset'))
-        combo.blockSignals(False)
-        self.preview_tweaker_preset()
-
-    def _tw_active_preset(self):
-        payloads = self._tw_preset_payloads()
-        if not payloads or self.tw_preset_combo.currentIndex() < 0:
-            return None
-        return self._twmod.Preset(payloads[self.tw_preset_combo.currentIndex() % len(payloads)])
-
-    def preview_tweaker_preset(self):
-        if not hasattr(self, 'tw_preset_table'):
-            return
-        doc = self._tw_current_doc()
-        preset = self._tw_active_preset()
-        self.tw_preset_table.setRowCount(0)
-        if doc is None or preset is None:
-            self.tw_preset_summary.setText('Load a config file to preview a preset against it.')
-            self.tw_preset_pairs = []
-            return
-        self.tw_preset_pairs = preset.match_against(doc)
-        plan = preset.dry_run(doc)
-        stage_count = sum(1 for item in plan if item['action'] == 'stage')
-        skip_count = sum(1 for item in plan if item['action'] == 'skip')
-        self.tw_preset_summary.setText('%s: %d change(s) would be staged, %d skipped (protected, invalid, or already set). Nothing is staged until you confirm.' % (
-            preset.title, stage_count, skip_count))
-        for item in plan:
-            row = self.tw_preset_table.rowCount()
-            self.tw_preset_table.insertRow(row)
-            if item['action'] == 'stage':
-                detail = '%s -> %s' % (item.get('from', ''), item.get('to', ''))
-            else:
-                detail = item.get('reason', '')
-            self.tw_preset_table.setItem(row, 0, QTableWidgetItem(item.get('key', '')))
-            self.tw_preset_table.setItem(row, 1, QTableWidgetItem(item['action']))
-            self.tw_preset_table.setItem(row, 2, QTableWidgetItem(detail))
-
-    def apply_tweaker_preset(self):
-        CT = self._twmod
-        doc = self._tw_current_doc()
-        preset = self._tw_active_preset()
-        if doc is None or preset is None:
-            self.notice('Load a config file and select a preset first.')
-            return
-        if self.tw_current not in self.tw_unlocked:
-            self.notice('Unlock editing for this file first.')
-            return
-        plan = preset.dry_run(doc)
-        staged_plan = [item for item in plan if item['action'] == 'stage']
-        if not staged_plan:
-            self.notice('The preset would change nothing (protected, invalid, or already set).')
-            return
-        if CT.is_game_running() and not self.ask('Call of Duty looks running. Apply the preset anyway?'):
-            return
-        if doc.is_stale_on_disk():
-            self.notice('The file changed on disk. Use Reload (keep my staged edits) or Show what changed first.')
-            return
-        preview = '\n'.join('%s: %s -> %s' % (item['key'], item.get('from', ''), item.get('to', '')) for item in staged_plan[:12])
-        if len(staged_plan) > 12:
-            preview += '\n... and %d more' % (len(staged_plan) - 12)
-        if not self.ask('Apply preset "%s" (%d change(s))?\n\n%s\n\nA dated backup is taken first.' % (preset.title, len(staged_plan), preview)):
-            return
-        try:
-            backup = self.tw_backups.backup_file(doc.path)
-        except OSError as exc:
-            self.notice('Backup before write failed, nothing was applied: ' + str(exc))
-            return
-        staged, skipped = preset.confirm(doc, self.tw_preset_pairs)
-        try:
-            doc.save()
-        except OSError as exc:
-            self.notice('Saving failed after backup (%s): %s' % (backup, exc))
-            return
-        self.tw_restart_needed = True
-        self.tw_restart_label.setVisible(True)
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_backups()
-        self.refresh_tweaker_compare_sources()
-        self.refresh_tweaker_diff()
-        self.log('COD Tweaker applied preset "%s": %d staged, %d skipped (backup %s).' % (preset.title, len(staged), len(skipped), backup))
-
-    # ---- compare / backup & restore ----
-    def refresh_tweaker_compare_sources(self):
-        if not hasattr(self, 'tw_cmp_source'):
-            return
-        combo = self.tw_cmp_source
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem('On-disk file (reread)', 'disk:')
-        for payload in self._tw_preset_payloads():
-            combo.addItem('Preset: %s' % (payload.get('Title') or payload.get('Kind')), 'preset:%s' % (payload.get('Title') or payload.get('Kind')))
-        doc = self._tw_current_doc()
-        if doc is not None:
-            for backup in self.tw_backups.list_backups(basename=doc.path.name):
-                combo.addItem('Backup: %s' % backup.name, 'backup:%s' % backup.name)
-        combo.blockSignals(False)
-
-    def _tw_theirs_values(self):
-        CT = self._twmod
-        doc = self._tw_current_doc()
-        key = str(self.tw_cmp_source.currentData() or 'disk:')
-        if doc is None:
-            return {}
-        if key.startswith('preset:'):
-            title = key[len('preset:'):]
-            payload = next((item for item in self._tw_preset_payloads() if str(item.get('Title') or item.get('Kind')) == title), None)
-            if payload is None:
-                return {}
-            theirs = {}
-            for entry in payload.get('Values', []):
-                setting = doc.match(key=str(entry.get('Key') or '') or None,
-                                    name=str(entry.get('Name') or '') or None,
-                                    variant=str(entry.get('Variant') or ''))
-                ref = setting.key if setting is not None else str(entry.get('Key') or entry.get('Name') or '')
-                if ref:
-                    theirs[ref] = str(entry.get('Value', ''))
-            return theirs
-        if key.startswith('backup:'):
-            name = key[len('backup:'):]
-            backups = [item for item in self.tw_backups.list_backups(basename=doc.path.name) if item.name == name]
-            if not backups:
-                return {}
-            try:
-                raw = backups[0].read_bytes()
-            except OSError:
-                return {}
-            if len(raw) > CT.MAX_FILE_BYTES:
-                return {}
-            return {item.key: item.original for item in CT.parse_text(raw.decode('utf-8-sig', errors='replace'))}
-        try:
-            fresh = CT.CODDocument.load(doc.path)
-        except (OSError, ValueError):
-            return {}
-        return {item.key: item.original for item in fresh.settings}
-
-    def refresh_tweaker_diff(self):
-        if not hasattr(self, 'tw_cmp_table'):
-            return
-        CT = self._twmod
-        doc = self._tw_current_doc()
-        self.tw_cmp_table.setRowCount(0)
-        if doc is None:
-            self.tw_cmp_summary.setText('Load a config file to compare it.')
-            self.tw_diff = None
-            return
-        mine = {item.key: item.effective for item in doc.settings}
-        theirs = self._tw_theirs_values()
-        self.tw_diff = CT.Diff.build(mine, theirs)
-        pinned_only = self.tw_cmp_pinned_only.isChecked()
-        for row_data in self.tw_diff.rows:
-            if pinned_only and not self.tw_pins.is_pinned(row_data['ref']):
-                continue
-            row = self.tw_cmp_table.rowCount()
-            self.tw_cmp_table.insertRow(row)
-            ref_item = QTableWidgetItem(row_data['ref'])
-            ref_item.setData(Qt.UserRole, row_data['ref'])
-            self.tw_cmp_table.setItem(row, 0, ref_item)
-            self.tw_cmp_table.setItem(row, 1, QTableWidgetItem(row_data['mine']))
-            self.tw_cmp_table.setItem(row, 2, QTableWidgetItem(row_data['theirs']))
-            self.tw_cmp_table.setItem(row, 3, QTableWidgetItem(row_data['status']))
-        summary = self.tw_diff.summary()
-        self.tw_cmp_summary.setText('%d matching, %d different, %d only in backup/preset/disk, %d only in mine.' % (
-            summary.get('matching', 0), summary.get('different', 0),
-            summary.get('only-in-other', 0), summary.get('only-in-mine', 0)))
-
-    def take_tweaker_diff_row(self):
-        doc = self._tw_current_doc()
-        if doc is None or self.tw_diff is None or self.tw_cmp_table.currentRow() < 0:
-            self.tw_error.setText('Select a diff row to take.')
-            return
-        ref_item = self.tw_cmp_table.item(self.tw_cmp_table.currentRow(), 0)
-        if ref_item is None:
-            return
-        if self.tw_current not in self.tw_unlocked:
-            self.tw_error.setText('Unlock editing for this file first.')
-            return
-        ok, message = self.tw_diff.take(doc, ref_item.data(Qt.UserRole))
-        if not ok:
-            self.tw_error.setText('Could not take value: ' + str(message))
-            return
-        self.tw_error.setText('')
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_diff()
-
-    def restore_tweaker_pinned(self):
-        CT = self._twmod
-        doc = self._tw_current_doc()
-        if doc is None or self.tw_diff is None:
-            self.notice('Load a config file and build a diff first.')
-            return
-        if self.tw_current not in self.tw_unlocked:
-            self.notice('Unlock editing for this file first.')
-            return
-        pinned_rows = [row for row in self.tw_diff.rows if self.tw_pins.is_pinned(row['ref']) and row['theirs'] != '' and row['mine'] != row['theirs']]
-        if not pinned_rows:
-            self.notice('No pinned rows differ from this compare source.')
-            return
-        if not self.ask('Restore %d pinned setting(s) from this compare source? A safety backup is taken first.' % len(pinned_rows)):
-            return
-        if doc.is_stale_on_disk():
-            self.notice('The file changed on disk. Use Reload (keep my staged edits) or Show what changed first.')
-            return
-        try:
-            backup = self.tw_backups.backup_file(doc.path)
-        except OSError as exc:
-            self.notice('Backup before write failed, nothing was restored: ' + str(exc))
-            return
-        failures = []
-        for row in pinned_rows:
-            ok, message = self.tw_diff.take(doc, row['ref'])
-            if not ok:
-                failures.append('%s: %s' % (row['ref'], message))
-        try:
-            doc.save()
-        except OSError as exc:
-            self.notice('Saving failed after backup (%s): %s' % (backup, exc))
-            return
-        if self.tw_cmp_relock.isChecked():
-            try:
-                CT.set_locked(doc.path, True)
-            except OSError as exc:
-                self.log('COD Tweaker relock failed: ' + str(exc))
-        self.tw_restart_needed = True
-        self.tw_restart_label.setVisible(True)
-        self.update_tweaker_lock_button()
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_backups()
-        self.refresh_tweaker_diff()
-        if failures:
-            self.notice('Restored with %d skipped row(s):\n%s' % (len(failures), '\n'.join(failures[:8])))
-        self.log('COD Tweaker restored %d pinned row(s) (backup %s).' % (len(pinned_rows) - len(failures), backup))
-
-    def update_tweaker_lock_button(self):
-        if not hasattr(self, 'tw_lock_btn'):
-            return
-        doc = self._tw_current_doc()
-        if doc is None:
-            self.tw_lock_btn.setText('Lock file (read-only)')
-            return
-        self.tw_lock_btn.setText('Unlock file (writable)' if self._twmod.is_locked(doc.path) else 'Lock file (read-only)')
-
-    def toggle_tweaker_lock(self):
-        CT = self._twmod
-        doc = self._tw_current_doc()
-        if doc is None:
-            self.notice('Load a config file first.')
-            return
-        try:
-            CT.set_locked(doc.path, not CT.is_locked(doc.path))
-        except OSError as exc:
-            self.notice('Could not change the file lock: ' + str(exc))
-            return
-        self.update_tweaker_lock_button()
-        self.log('COD Tweaker file lock: %s is now %s.' % (doc.path.name, 'locked' if CT.is_locked(doc.path) else 'writable'))
-
-    def refresh_tweaker_backups(self):
-        if not hasattr(self, 'tw_backup_table'):
-            return
-        import time as _time
-        self.tw_backup_table.setRowCount(0)
-        doc = self._tw_current_doc()
-        for backup in self.tw_backups.list_backups(basename=doc.path.name if doc is not None else None):
-            try:
-                stamp = _time.strftime('%Y-%m-%d %H:%M:%S', _time.localtime(backup.stat().st_mtime))
-                size = str(backup.stat().st_size)
-            except OSError:
-                continue
-            row = self.tw_backup_table.rowCount()
-            self.tw_backup_table.insertRow(row)
-            when_item = QTableWidgetItem(stamp)
-            when_item.setData(Qt.UserRole, str(backup))
-            self.tw_backup_table.setItem(row, 0, when_item)
-            self.tw_backup_table.setItem(row, 1, QTableWidgetItem(backup.name))
-            self.tw_backup_table.setItem(row, 2, QTableWidgetItem(size))
-
-    def _tw_selected_backup(self):
-        if self.tw_backup_table.currentRow() < 0:
-            return None
-        item = self.tw_backup_table.item(self.tw_backup_table.currentRow(), 0)
-        return Path(item.data(Qt.UserRole)) if item is not None else None
-
-    def restore_tweaker_backup(self):
-        doc = self._tw_current_doc()
-        backup = self._tw_selected_backup()
-        if doc is None or backup is None:
-            self.notice('Select a backup to restore.')
-            return
-        if not self.ask('Restore %s over %s? A fresh safety backup is taken first, and the file lock is preserved.' % (backup.name, doc.path.name)):
-            return
-        try:
-            safety = self.tw_backups.restore(backup, doc.path)
-        except (OSError, FileNotFoundError) as exc:
-            self.notice('Restore failed, the live file was not touched: ' + str(exc))
-            return
-        try:
-            self.tw_docs[self.tw_current] = self._twmod.CODDocument.load(doc.path)
-        except (OSError, ValueError) as exc:
-            self.notice('Restored, but the result could not be reparsed: ' + str(exc))
-            return
-        self.tw_restart_needed = True
-        self.tw_restart_label.setVisible(True)
-        self.refresh_tweaker_tables()
-        self.refresh_tweaker_backups()
-        self.refresh_tweaker_compare_sources()
-        self.refresh_tweaker_diff()
-        self.poll_tweaker_guards()
-        self.log('COD Tweaker restored %s over %s (safety backup %s).' % (backup.name, doc.path.name, safety))
-
-    def compare_tweaker_backup(self):
-        backup = self._tw_selected_backup()
-        if backup is None:
-            self.notice('Select a backup to compare.')
-            return
-        self.tw_tabs.setCurrentIndex(4)
-        self.refresh_tweaker_compare_sources()
-        for index in range(self.tw_cmp_source.count()):
-            if self.tw_cmp_source.itemData(index) == 'backup:%s' % backup.name:
-                self.tw_cmp_source.setCurrentIndex(index)
-                break
-        self.refresh_tweaker_diff()
-
     def reconnect_extension_bridge(self):
         old=getattr(self,'extension_bridge',None)
         if old:
@@ -2414,9 +1283,7 @@ class Window(QMainWindow):
     def refresh_talent_friends(self):
         box=getattr(self,'talent_friends_box',None)
         if box is None:return
-        while box.count():
-            child=box.takeAt(0);widget=child.widget()
-            if widget is not None:widget.deleteLater()
+        box.blockSignals(True);box.clear()
         eligible=[]
         for player in self.store.roster():
             if not player.get('enabled',True):continue
@@ -2425,36 +1292,47 @@ class Window(QMainWindow):
             if not photo or not Path(photo).is_file():continue
             eligible.append(player)
         valid={str(player.get('id')) for player in eligible}
-        self.talent_friend_ids=[pid for pid in (getattr(self,'talent_friend_ids',[]) or []) if pid in valid][:2]
+        self.talent_friend_ids=[pid for pid in (getattr(self,'talent_friend_ids',[]) or []) if pid in valid][:3]
         chosen=set(self.talent_friend_ids)
-        if not eligible and hasattr(self,'talent_friends_status'):self.talent_friends_status.setText('No eligible friends — roster players need a headshot and Meta AI consent.')
-        for position,player in enumerate(eligible):
+        if not eligible and hasattr(self,'talent_friends_status'):self.talent_friends_status.setText('No eligible friends \u2014 roster players need a headshot and Meta AI consent.')
+        for player in eligible:
             pid=str(player.get('id'));name=str(player.get('display_name') or player.get('name',''))
-            chip=QPushButton(name);chip.setCheckable(True);chip.setChecked(pid in chosen);chip.setProperty('talentPid',pid);chip.setObjectName('friendChip')
-            chip.toggled.connect(lambda _checked=False,pid=pid:self.on_talent_friend_toggled(pid))
-            box.addWidget(chip,position//3,position%3)
+            item=QListWidgetItem(name);item.setData(Qt.UserRole,pid);item.setFlags(item.flags()|Qt.ItemIsUserCheckable);item.setCheckState(Qt.Checked if pid in chosen else Qt.Unchecked);box.addItem(item)
+        box.blockSignals(False)
         self.update_talent_friends_status()
-    def on_talent_friend_toggled(self,pid):
-        box=getattr(self,'talent_friends_box',None);states={}
-        if box is not None:
-            for index in range(box.count()):
-                widget=box.itemAt(index).widget()
-                if widget is not None and widget.property('talentPid'):states[str(widget.property('talentPid'))]=widget.isChecked()
-        chosen=[pid for pid in (getattr(self,'talent_friend_ids',[]) or [])]
-        if states.get(pid) and pid not in chosen:chosen.append(pid)
-        if not states.get(pid) and pid in chosen:chosen.remove(pid)
-        if len(chosen)>2:
-            chosen=chosen[:2]
-            if box is not None:
-                for index in range(box.count()):
-                    widget=box.itemAt(index).widget()
-                    if widget is not None and str(widget.property('talentPid') or '') not in chosen:widget.blockSignals(True);widget.setChecked(False);widget.blockSignals(False)
-            if hasattr(self,'cinematic_status'):self.cinematic_status.setText('Max of 3 people per video (you + up to 2 friends).')
-        self.talent_friend_ids=chosen;self.update_talent_friends_status()
+    def on_talent_friend_clicked(self,item):
+        if item is None:return
+        item.setCheckState(Qt.Unchecked if item.checkState()==Qt.Checked else Qt.Checked)
+    def on_talent_friend_changed(self,item):
+        if item is None:return
+        try:box=self.talent_friends_box
+        except AttributeError:box=None
+        if box is not None:box.blockSignals(True)
+        try:
+            pid=str(item.data(Qt.UserRole) or '')
+            if not pid:return
+            chosen=[pid for pid in (getattr(self,'talent_friend_ids',[]) or [])]
+            if item.checkState()==Qt.Checked and pid not in chosen:chosen.append(pid)
+            if item.checkState()!=Qt.Checked and pid in chosen:chosen.remove(pid)
+            if len(chosen)>3:
+                chosen=chosen[:3]
+                if box is not None:
+                    for index in range(box.count()):
+                        other=box.item(index)
+                        if other is not None and str(other.data(Qt.UserRole) or '') not in chosen:other.setCheckState(Qt.Unchecked)
+                if hasattr(self,'cinematic_status'):self.cinematic_status.setText('Max of 3 friends per video (plus you).')
+            self.talent_friend_ids=chosen
+        finally:
+            if box is not None:box.blockSignals(False)
+        self.update_talent_friends_status()
     def update_talent_friends_status(self):
         if not hasattr(self,'talent_friends_status'):return
         count=len(getattr(self,'talent_friend_ids',[]) or [])
-        self.talent_friends_status.setText((('No friends — just you' if not count else str(count)+'/2 friends selected')+' (Max Of 3 Can be used)'))
+        self.talent_friends_status.setText((('No friends \u2014 just you' if not count else str(count)+'/3 friends selected')+' (Max Of 3 Can be used)'))
+        if hasattr(self,'talent_cameo_label'):
+            wanted=set(getattr(self,'talent_friend_ids',[]) or [])
+            names=[str(player.get('display_name') or player.get('name','')) for player in self.store.roster() if str(player.get('id')) in wanted]
+            self.talent_cameo_label.setText('Featuring: '+', '.join(names) if names else 'Featuring: just you')
     def selected_talent_friends(self):
         wanted=set(getattr(self,'talent_friend_ids',[]) or [])
         friends=[]
@@ -2462,7 +1340,8 @@ class Window(QMainWindow):
             if str(player.get('id')) in wanted and player.get('enabled',True) and player.get('consent_meta',False):
                 photo=str(player.get('photo') or '')
                 if photo and Path(photo).is_file():friends.append(player)
-        return friends[:2]
+        return friends[:3]
+
     def set_cinematic_talent(self):
         try:
             chosen,_=QFileDialog.getOpenFileName(self,'Choose talent reference photo',str(Path.home()),'Images (*.png *.jpg *.jpeg *.webp)')
@@ -2673,7 +1552,7 @@ class Window(QMainWindow):
         if hasattr(self,'cinematic_play_button'):self.cinematic_play_button.setEnabled(bool(selected_video and Path(selected_video).is_file()))
         if hasattr(self,'cinematic_fullscreen_button'):self.cinematic_fullscreen_button.setEnabled(bool(selected_video and Path(selected_video).is_file()))
         if selected_video and selected_video!=previous_video and Path(selected_video).is_file():
-            self.cinematic_player.setSource(QUrl.fromLocalFile(selected_video));self.cinematic_player.play();self.cinematic_play_button.setText('Pause')
+            self.cinematic_player.setSource(QUrl.fromLocalFile(selected_video));self.cinematic_player.play();self.cinematic_play_button.setText('Pause');self.preview_image.hide();self.cinematic_video_widget.show()
             selected_id=selected.data(Qt.UserRole) if selected else ''
             if selected_id and str(self.cinematic_player.source().toLocalFile())==str(Path(selected_video)):
                 self.ask_post_cinematic_video(selected_id,selected_video)
@@ -2685,7 +1564,7 @@ class Window(QMainWindow):
         self.cinematic_player.stop()
         if path and Path(path).is_file():self.cinematic_player.setSource(QUrl.fromLocalFile(path));self.cinematic_player.play();self.cinematic_play_button.setText('Pause')
         else:self.cinematic_player.setSource(QUrl());self.cinematic_play_button.setText('Play')
-        has_video=bool(path and Path(path).is_file())
+        has_video=bool(path and Path(path).is_file());self.preview_image.setVisible(not has_video);self.cinematic_video_widget.setVisible(True);self.preview_sub.setText(Path(path).name if has_video else 'Watch the selected video.')
         self.post_cinematic_button.setEnabled(has_video)
         if hasattr(self,'cinematic_play_button'):self.cinematic_play_button.setEnabled(has_video)
         if hasattr(self,'cinematic_fullscreen_button'):self.cinematic_fullscreen_button.setEnabled(has_video)
@@ -2872,10 +1751,10 @@ class Window(QMainWindow):
         if self.cod_ai_screenshots.count():
             if not self.cod_ai_screenshots.currentItem():self.cod_ai_screenshots.setCurrentRow(0)
         else:
-            self.cod_ai_preview.clear();self.cod_ai_preview.setText('No screenshots yet');self.cod_ai_preview_info.setText('Select a screenshot to preview')
+            self.preview_image.setText('Select a screenshot to preview it here');self.preview_sub.setText('Watch the selected video.')
         self.maybe_offer_screenshot_cleanup()
     def ask_screenshot_cleanup(self,used_count,total_count):
-        box=QMessageBox(self);box.setWindowTitle('Many screenshots');box.setText('You seem to have a bunch of screenshots. Would you like to delete the ones you have already used in COD AI videos?');box.setInformativeText(f'{used_count} used of {total_count} screenshots would be deleted. Queue entries stay for history.');yes_button=box.addButton('Yes',QMessageBox.YesRole);box.addButton('No',QMessageBox.NoRole);box.setDefaultButton(yes_button);box.exec();return box.clickedButton() is yes_button
+        box=QMessageBox(self);box.setWindowTitle('Many screenshots');box.setText('You seem to have a bunch of screenshots. Would you like to delete the ones you have already used in videos?');box.setInformativeText(f'{used_count} used of {total_count} screenshots would be deleted. Queue entries stay for history.');yes_button=box.addButton('Yes',QMessageBox.YesRole);box.addButton('No',QMessageBox.NoRole);box.setDefaultButton(yes_button);box.exec();return box.clickedButton() is yes_button
     def maybe_offer_screenshot_cleanup(self):
         if getattr(self,'_screenshot_cleanup_offered',False):return
         if not self.isVisible():return
@@ -2925,10 +1804,10 @@ class Window(QMainWindow):
         if not path:return
         pix=QPixmap(path)
         if pix.isNull():
-            self.cod_ai_preview.clear();self.cod_ai_preview.setText('Could not read screenshot');self.cod_ai_preview_info.setText(item.toolTip() or Path(str(path)).name);return
-        self.cod_ai_preview.setPixmap(pix.scaled(self.cod_ai_preview.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
-        self.cod_ai_preview_info.setText(f'{Path(path).name}  ·  {pix.width()}×{pix.height()}')
-        self._sync_screenshot_tiles()
+            self.preview_image.setText('Could not read screenshot');self.preview_sub.setText(item.toolTip() or Path(str(path)).name);return
+        self.preview_image.setPixmap(pix.scaled(self.preview_image.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        self.preview_sub.setText(f'{Path(path).name}  ·  {pix.width()}×{pix.height()}')
+        self._sync_screenshot_tiles();self.cinematic_player.stop();self.preview_image.show();self.cinematic_video_widget.hide()
     def ensure_screenshot_capture(self):
         if self.capture is None:
             from capture_engine import CaptureEngine,StableDetector
@@ -2961,7 +1840,7 @@ class Window(QMainWindow):
             self.screenshot_busy=False;path,output,game_window=result;name=Path(path).name
             message=f'Saved {name} · {output["width"]}×{output["height"]} · {output.get("label",game_window.get("title") or "game display")}'
             self.cod_ai_capture_status.setText(message);self.cod_ai_capture_status.setStyleSheet('color:#56e99a;font-weight:800;');self.refresh_cod_ai_screenshots();self.log(message)
-            if self.tray.isVisible():self.tray.showMessage('COD AI screenshot saved',name,QSystemTrayIcon.Information,2500)
+            if self.tray.isVisible():self.tray.showMessage('Screenshot saved',name,QSystemTrayIcon.Information,2500)
         def failed(message):
             self.screenshot_busy=False;detail='Screenshot not saved: '+str(message)
             self.cod_ai_capture_status.setText(detail);self.cod_ai_capture_status.setStyleSheet('color:#ffb15e;font-weight:800;');self.log(detail)
@@ -3002,7 +1881,7 @@ class Window(QMainWindow):
             self.auto_detect.setChecked(False)
             if self.capture and not self.capture_busy and not self.screenshot_busy:self.capture.close();self.capture=None
             if self.browser:self.browser.close()
-        self.settings.values['mode']=mode;self.settings.save();self.status.setText('STANDBY  /  '+self.active_mode_label());self.refresh_dashboard_status()
+        self.settings.values['mode']=mode;self.settings.save();self.status.setText('●  STANDBY');self.refresh_dashboard_status()
         if not initial:self.log('Mode changed to '+mode+'. Press Start to begin.')
     def skipped_update_version(self):
         try:return (E.DATA/'skipped_update.txt').read_text(encoding='utf-8').strip()
@@ -3132,7 +2011,7 @@ class Window(QMainWindow):
             command=[sys.executable,'--solo-worker'] if getattr(sys,'frozen',False) else [sys.executable,str(E.ROOT/'app.py'),'--solo-worker']
             environment=dict(os.environ);environment['VINTENDO_PARENT_PID']=str(os.getpid())
             self.solo=subprocess.Popen(command,env=environment,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        self.status.setText('TRACKING  /  '+self.active_mode_label());self.start_button.setText('●   TRACKING');self.start_button.setEnabled(False);self.start_button.setToolTip('Automatic match tracking is active.');self.pause_button.setText('Ⅱ   PAUSE TRACKING');self.pause_button.setEnabled(True);self.stop_button.setEnabled(True);self.log('Tracking started.');self.last_poll=0;self.refresh_dashboard_status()
+        self.status.setText('●  LIVE TRACKING');self.start_button.setText('●   TRACKING');self.start_button.setEnabled(False);self.start_button.setToolTip('Automatic match tracking is active.');self.pause_button.setText('Ⅱ   PAUSE TRACKING');self.pause_button.setEnabled(True);self.stop_button.setEnabled(True);self.log('Tracking started.');self.last_poll=0;self.refresh_dashboard_status()
     def stop(self):
         self.tracking=False;self.paused=False
         if self.solo:
@@ -3147,7 +2026,7 @@ class Window(QMainWindow):
                     try:process.wait(timeout=45)
                     except subprocess.TimeoutExpired:process.terminate();process.wait(timeout=5)
                 self.async_task(wait_worker,lambda _:self.log('Solo worker stopped cleanly.'))
-        self.status.setText('STOPPED');self.start_button.setText('▶   START TRACKING');self.start_button.setEnabled(True);self.start_button.setToolTip('');self.pause_button.setText('Ⅱ   PAUSE TRACKING');self.pause_button.setEnabled(False);self.stop_button.setEnabled(False);self.log('Tracking stopped.');self.refresh_dashboard_status()
+        self.status.setText('●  STOPPED');self.start_button.setText('▶   START TRACKING');self.start_button.setEnabled(True);self.start_button.setToolTip('');self.pause_button.setText('Ⅱ   PAUSE TRACKING');self.pause_button.setEnabled(False);self.stop_button.setEnabled(False);self.log('Tracking stopped.');self.refresh_dashboard_status()
     def pause(self):
         if not self.tracking:return
         if self.mode.currentText()=='Solo Ops':
@@ -3155,7 +2034,7 @@ class Window(QMainWindow):
                 import psutil
                 if self.paused:psutil.Process(self.solo.pid).resume()
                 else:psutil.Process(self.solo.pid).suspend()
-        self.paused=not self.paused;self.status.setText('PAUSED' if self.paused else 'TRACKING  /  '+self.active_mode_label());self.pause_button.setText('▶   RESUME TRACKING' if self.paused else 'Ⅱ   PAUSE TRACKING');self.refresh_dashboard_status()
+        self.paused=not self.paused;self.status.setText('●  PAUSED' if self.paused else '●  LIVE TRACKING');self.pause_button.setText('▶   RESUME TRACKING' if self.paused else 'Ⅱ   PAUSE TRACKING');self.refresh_dashboard_status()
     def tick(self):
         if not self.tracking or self.paused:return
         if self.solo and self.solo.poll() is not None:self.log('Solo worker stopped. See Activity Logs for details.');self.stop();return
@@ -3236,18 +2115,18 @@ class Window(QMainWindow):
                 from capture_utils import looks_like_scoreboard
                 if not self.detector.observe(text,looks_like_scoreboard(lines)):return
                 self.log('Stable scoreboard detected; draft ready for review.')
-            self.last_frame=frame;self.last_capture=None;self.verified.setChecked(False);self.ocr_text.setPlainText(text);self.capture_preview.setPixmap(frame_pixmap(frame).scaled(650,290,Qt.KeepAspectRatio,Qt.SmoothTransformation));self.parse_ocr()
+            self.last_frame=frame;self.last_capture=None;self.verified.setChecked(True);self.ocr_text.setPlainText(text);self.capture_preview.setPixmap(frame_pixmap(frame).scaled(650,290,Qt.KeepAspectRatio,Qt.SmoothTransformation));self.parse_ocr()
             if hotkey:self._show_capture_review();self.log('Scoreboard OCR draft is ready. Review the names and values, then save it.')
         def failed(message):
             self.capture_busy=False
-            if hotkey:self.hotkey_status.setText('Capture failed; try Capture & OCR.');self._show_capture_review()
+            if hotkey:self.hotkey_status.setText('Capture failed; try Capture Screen Shot.');self._show_capture_review()
         self.async_task(work,done,failed)
     def parse_ocr(self):
         rows=E.parse_scoreboard(self.ocr_text.toPlainText());keys=list(dict.fromkeys(key for row in rows for key in row.get('stats',{})))
         self.set_ocr_columns(keys or ['kills','eliminations','deaths','assists','damage','score','placement','redeploys'])
         self.ocr_table.setRowCount(0)
         for row in rows:self.add_ocr_row(row=row)
-        self.verified.setChecked(False);self.log(f'{len(rows)} candidate player rows. Review columns and correct values before verifying.')
+        self.verified.setChecked(True);self.log(f'{len(rows)} candidate player rows. Review columns and correct values before saving.')
     def set_ocr_columns(self,keys):
         self.ocr_stat_keys=list(dict.fromkeys(str(key) for key in keys if key))
         labels={'kills':'Kills','eliminations':'Eliminations','deaths':'Deaths','assists':'Assists','damage':'Damage','score':'Score','placement':'Placement','redeploys':'Redeploys','revives':'Revives','headshots':'Headshots','kd':'K/D','downs':'Downs'}
@@ -3491,6 +2370,14 @@ class Window(QMainWindow):
         self.dashboard_metrics['squad_posts'].setText(f"{sum(j['status']=='delivered' for j in rows):,}")
         review_statuses={'needs_review','art_ready','ready','failed','uncertain','awaiting_artwork'}
         self.dashboard_metrics['reviews'].setText(f"{sum(j['status'] in review_statuses for j in rows):,}")
+        try:period_rows=self._history_period_rows(rows) if hasattr(self,'history_period') else rows
+        except Exception:period_rows=rows
+        try:summary=self._match_summary(period_rows)
+        except Exception:summary={}
+        self.dashboard_metrics['games'].setText(str(summary.get('games',len(rows))))
+        self.dashboard_metrics['win_rate'].setText(str(summary.get('win_rate','—')))
+        self.dashboard_metrics['kd'].setText(str(summary.get('kd','—')))
+        self.dashboard_metrics['kills_per_game'].setText(str(summary.get('kills_per_game','—')))
         self.center_count.setText(f'{len(rows)} records')
         self.refresh_match_center(rows)
         self.refresh_dashboard_status();self.refresh_match_history_view(rows)
@@ -3583,8 +2470,6 @@ class Window(QMainWindow):
         indicator.setStyleSheet('color:'+color+';')
 
     CENTER_REVIEW_STATUSES={'needs_review','art_ready','ready','failed','uncertain','awaiting_artwork'}
-    CENTER_CARD_SPECS={'records':[('games','GAMES'),('win_rate','WIN RATE')],'posts':[('kd','K/D RATIO'),('kills_per_game','KILLS / GAME')],'review':[('needs_review','NEEDS REVIEW'),('ready','READY'),('attention','NEEDS ATTENTION')]}
-    REVIEW_STATUS_GROUPS={'needs_review':{'needs_review'},'ready':{'ready','art_ready'},'attention':{'failed','uncertain'}}
 
     def refresh_match_center(self,rows):
         if not hasattr(self,'center_tables'):return
@@ -3612,17 +2497,6 @@ class Window(QMainWindow):
                     table.setItem(row,col,item)
         self.refresh_center_stats()
     def refresh_center_stats(self):
-        if not hasattr(self,'center_carousel'):return
-        rows_by_view=getattr(self,'center_rows',{}) or {}
-        cards=[]
-        for view in ('records','posts','review'):
-            rows=rows_by_view.get(view,[]) if isinstance(rows_by_view,dict) else []
-            summary=self._match_summary(rows)
-            for key,title in self.CENTER_CARD_SPECS[view]:
-                if key in summary:value=str(summary[key])
-                else:value=str(sum(1 for job in rows if job['status'] in self.REVIEW_STATUS_GROUPS.get(key,())))
-                cards.append((title,value))
-        self.center_carousel.set_cards(cards)
         self.refresh_center_count()
     def refresh_center_count(self):
         if not hasattr(self,'center_tabs') or not hasattr(self,'center_count'):return
@@ -3652,10 +2526,21 @@ class Window(QMainWindow):
         else:tracking='STANDBY';color='#a7b0bd'
         self.status.setText('●  '+tracking);self.status.setStyleSheet(f'background:#111720;border:1px solid {color};border-radius:18px;color:{color};font-size:13px;font-weight:900;padding:10px 16px;')
         self.footer_tracking.setText('●  '+tracking);self.footer_tracking.setStyleSheet('font-weight:800;color:'+color)
-        self.footer_mode.setText('Mode: '+self.active_mode_label())
+        if hasattr(self,'blink_timer'):
+            if self.tracking and not self.paused:
+                if not self.blink_timer.isActive():self.blink_timer.start()
+            else:self.blink_timer.stop()
         latest=json.loads(self.history_rows[0]['payload']) if getattr(self,'history_rows',None) else {}
         played=latest.get('playedAt') or latest.get('date') or latest.get('timestamp')
         self.footer_match.setText('Last match: '+(self._display_time(played) if played else '—'))
+    def _blink_live_indicator(self):
+        if not (self.tracking and not self.paused):return
+        try:pill=self.status
+        except (AttributeError,RuntimeError):return
+        self._blink_on=not getattr(self,'_blink_on',True)
+        color='#56e99a' if self._blink_on else '#1f6b44'
+        try:pill.setStyleSheet(f'background:#111720;border:1px solid {color};border-radius:18px;color:{color};font-size:13px;font-weight:900;padding:10px 16px;')
+        except (AttributeError,RuntimeError):pass
     def selected_job(self):
         row=self.history.currentRow();return self.history_rows[row] if 0<=row<len(self.history_rows) else None
     def review_selected(self):
@@ -3677,9 +2562,9 @@ class Window(QMainWindow):
                     from PIL import Image
                     with Image.open(job['capture']) as image:self.last_frame=np.array(image.convert('RGB'))
                     saved_players=json.loads(job['players']);keys=list(dict.fromkeys(key for player in saved_players for key in (player.get('stats') or {})))
-                    self.set_ocr_columns(keys or ['kills','eliminations','deaths','assists','damage','score','placement','redeploys']);self.ocr_table.setRowCount(0)
+                    self.set_ocr_columns(keys or ['kills','eliminations','deaths','assists','damage','score','placement','redeploys']);self.ocr_table.setRowCount(0);self.verified.setChecked(True)
                     for player in saved_players:self.add_ocr_row(row=player)
-                    self.verified.setChecked(False)
+                    self.verified.setChecked(True)
                 except (OSError,ValueError):self.last_frame=None
         ix=self.link_match.findData(mid)
         if ix>=0:self.link_match.setCurrentIndex(ix)
@@ -3708,10 +2593,10 @@ class Window(QMainWindow):
             widget=self.studio_heads.takeAt(0).widget()
             if widget:widget.deleteLater()
         mappings=E.match_reference_photos(players,self.store.roster())
-        for mapping in mappings:
+        for position,mapping in enumerate(mappings):
             if mapping['status']=='ready':
                 assignments.append(mapping['username']+' → poster name: '+mapping['posterName']+' (consented photo matched)')
-                thumbnail=QLabel();thumbnail.setToolTip(mapping['username']+' → '+mapping['posterName']);self.show_image(thumbnail,mapping['photoPath'],96,96);self.studio_heads.addWidget(thumbnail)
+                cell=QVBoxLayout();cell.setSpacing(4);thumbnail=QLabel();thumbnail.setToolTip(mapping['username']+' → '+mapping['posterName']);thumbnail.setAlignment(Qt.AlignCenter);self.show_image(thumbnail,mapping['photoPath'],128,128);caption=QLabel(mapping['posterName']);caption.setAlignment(Qt.AlignCenter);caption.setWordWrap(True);caption.setStyleSheet('font-size:12px;font-weight:700;color:#c4ccd8;');cell.addWidget(thumbnail);cell.addWidget(caption);holder=QWidget();holder.setLayout(cell);self.studio_heads.addWidget(holder,position//4,position%4)
             elif mapping['status']=='ambiguous':assignments.append(mapping['username']+' → AMBIGUOUS roster match ('+', '.join(mapping['candidates'])+'); no photo attached')
             elif mapping['status']=='not_consented':assignments.append(mapping['username']+' → '+mapping['rosterName']+' (not consented; photo omitted)')
             elif mapping['status']=='missing_photo':assignments.append(mapping['username']+' → '+mapping['rosterName']+' (photo missing)')

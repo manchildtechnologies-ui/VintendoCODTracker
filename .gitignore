@@ -39,6 +39,11 @@ verify-*-data/
 *-preview-data/
 browser-e2e-work/
 
+# ---- secrets stay local ----
+release-keys/
+*.pem
+*.key
+
 # ---- snapshots and backups stay local ----
 backups/
 verify-data/

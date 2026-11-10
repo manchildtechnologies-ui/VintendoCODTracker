@@ -10,6 +10,7 @@ from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QListWidget,QListWidgetItem,QStackedWidget,QLineEdit,QComboBox,QCheckBox,QPlainTextEdit,QTableWidget,QTableWidgetItem,QHeaderView,QFileDialog,QMessageBox,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QSystemTrayIcon,QMenu,QSplitter,QGroupBox,QScrollArea,QTabWidget,QFrame,QButtonGroup,QInputDialog,QSlider,QDoubleSpinBox)
 import engine as E
 import updater
+import meta_automation
 from version import APP_VERSION
 
 SCOREBOARD_HOTKEY_ID=0x5638
@@ -594,6 +595,8 @@ class Window(QMainWindow):
         self.tray=QSystemTrayIcon(self.windowIcon(),self);menu=QMenu();menu.addAction('Open Vintendo COD Tracker',self.showNormal);menu.addAction('Pause tracking',self.pause);menu.addAction('Quit',self.shutdown);self.tray.setContextMenu(menu);self.tray.activated.connect(lambda reason:self.showNormal() if reason==QSystemTrayIcon.DoubleClick else None)
         if QSystemTrayIcon.isSystemTrayAvailable():self.tray.show()
         self.timer=QTimer(self);self.timer.timeout.connect(self.tick);self.timer.start(1000);self.last_poll=0;self.last_auto=0;self.cinematic_refresh_timer=QTimer(self);self.cinematic_refresh_timer.timeout.connect(self.refresh_cinematic_results);self.cinematic_refresh_timer.start(3000)
+        self.inapp_timer=QTimer(self);self.inapp_timer.timeout.connect(self.poll_inapp_cinematics);self.inapp_timer.start(10000)
+        self._inapp_active=None
         self.refresh_history();self.refresh_roster();self.mode_changed(self.mode.currentText(),initial=True);self.refresh_hotkey_labels()
         self.log('Ready. Combined CODMunity + scoreboard tracking will start automatically.' if self.track_both_startup else 'Ready. Solo Ops is the default. Start tracking when the old tracker is stopped.')
         if not self.tab_prototype:self.import_previous_settings()
@@ -1034,6 +1037,10 @@ class Window(QMainWindow):
         try:mode=str(self.settings.values.get('tracker_browser_mode') or 'dedicated').strip().lower()
         except Exception:mode='dedicated'
         return mode if mode in ('dedicated','attach') else 'dedicated'
+    def meta_submission(self):
+        try:mode=str(self.settings.values.get('meta_submission') or 'inapp').strip().lower()
+        except Exception:mode='inapp'
+        return mode if mode in ('inapp','extension') else 'inapp'
     def tracker_chrome_data_dir(self):
         try:base=Path(E.DATA)
         except Exception:base=Path.home()/'.vintendo-cod-tracker'
@@ -1204,6 +1211,7 @@ class Window(QMainWindow):
         self.row(automation_layout,self.button('Copy Chrome pairing token',self.copy_extension_token),self.button('Rotate pairing token',self.rotate_extension_token),self.button('Reconnect bridge',self.reconnect_extension_bridge))
         browser_mode_note=QLabel('Tracker Chrome profile: the dedicated profile keeps the Meta AI login isolated from your own Chrome; attaching reuses a Meta AI tab you already have open in your own Chrome.');browser_mode_note.setWordWrap(True);automation_layout.addWidget(browser_mode_note)
         self.browser_mode_combo=QComboBox();self.browser_mode_combo.addItems(['Dedicated tracker profile (recommended)','Use my already-open Chrome']);self.browser_mode_combo.setCurrentIndex(1 if self.tracker_browser_mode()=='attach' else 0);browser_mode_form=QFormLayout();browser_mode_form.addRow('Tracker Chrome profile',self.browser_mode_combo);automation_layout.addLayout(browser_mode_form)
+        self.meta_submission_combo=QComboBox();self.meta_submission_combo.addItems(['In-app Tracker Browser (recommended)','Legacy Chrome extension']);self.meta_submission_combo.setCurrentIndex(0 if self.meta_submission()=='inapp' else 1);submission_form=QFormLayout();submission_form.addRow('Meta video submission',self.meta_submission_combo);automation_layout.addLayout(submission_form)
         help_text=QLabel('Vintendo COD Automation pairs through this local bridge. After pairing, identified matches are queued automatically; the extension submits the prompt and matched reference images, then returns the generated artwork. Verified match results are requested as part of the Meta AI scene; the tracker does not paint a stats panel over it.');help_text.setWordWrap(True);automation_layout.addWidget(help_text);automation_layout.addStretch()
         self.settings_tabs.addTab(self.discord_settings_panel,'Discord')
         hotkeys_tab=QWidget();hotkeys_layout=QVBoxLayout(hotkeys_tab);hotkeys_layout.setContentsMargins(12,12,12,12);hotkeys_layout.setSpacing(12)
@@ -2677,6 +2685,71 @@ class Window(QMainWindow):
     def test_cinematic_video(self):
         source,_=QFileDialog.getOpenFileName(self,'Choose a COD gameplay screenshot',str(self.screenshots_dir()),'Images (*.png *.jpg *.jpeg *.webp)')
         if source:self.queue_cinematic_source(source)
+    def poll_inapp_cinematics(self):
+        if self.meta_submission()!='inapp':return
+        if getattr(self,'_inapp_active',None):return
+        try:pending=self.store.pending_cinematics(1)
+        except Exception:return
+        if not pending:return
+        job_id=str(pending[0].get('id') or '')
+        if not job_id:return
+        try:claimed=self.store.claim_cinematic(job_id)
+        except Exception:return
+        if not claimed:return
+        self._inapp_active=job_id
+        try:self.store.update_cinematic(job_id,status='awaiting_generation')
+        except Exception:pass
+        thread=threading.Thread(target=self._run_inapp_cinematic,args=(job_id,),daemon=True);thread.start()
+    def _run_inapp_cinematic(self,job_id):
+        try:row=self.store.get_cinematic(job_id)
+        except Exception:row=None
+        if not row or row.get('status') not in ('running','awaiting_generation'):
+            self._inapp_active=None;return
+        prompt=str(row.get('prompt') or '');screenshot=str(row.get('image') or '')
+        try:talent_ids=json.loads(row.get('talent_ids') or '[]')
+        except Exception:talent_ids=[]
+        faces=[]
+        for pid in list(talent_ids or [])[:3]:
+            staged=self.videos_dir()/('talent_'+str(pid)+'.png')
+            if staged.is_file():faces.append(str(staged))
+        talent_png=self.videos_dir()/'talent.png'
+        if talent_png.is_file():faces.insert(0,str(talent_png))
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            self._fail_inapp_cinematic(job_id,'Playwright is not installed in the tracker environment.');return
+        try:self.store.update_cinematic(job_id,status='awaiting_download')
+        except Exception:pass
+        try:
+            with sync_playwright() as playwright:
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp')
+                driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
+                page=driver.new_job_page()
+                try:video=driver.submit_image_to_video(page,screenshot,faces,prompt,str(self.videos_dir()))
+                finally:
+                    try:page.close()
+                    except Exception:pass
+                    try:context.close()
+                    except Exception:pass
+        except Exception as exc:
+            detail=str(getattr(exc,'detail',None) or exc)
+            step=str(getattr(exc,'step','error'))
+            if 'login' in step.lower():message='The automation browser opened signed out. Log into Meta AI in that window, then requeue the video.'
+            else:message=(f'Meta automation stopped at {step}: {detail}')[:300]
+            self._fail_inapp_cinematic(job_id,message);return
+        try:self.store.update_cinematic(job_id,status='completed',video=str(video),error='')
+        except Exception:pass
+        try:self.on_log('In-app cinematic completed: '+job_id)
+        except Exception:pass
+        self._inapp_active=None
+        QTimer.singleShot(0,self.refresh_cinematic_results)
+    def _fail_inapp_cinematic(self,job_id,message):
+        try:self.store.update_cinematic(job_id,status='failed',error=str(message)[:300])
+        except Exception:pass
+        try:self.on_log('In-app cinematic failed: '+job_id+' — '+str(message)[:160])
+        except Exception:pass
+        self._inapp_active=None
+        QTimer.singleShot(0,self.refresh_cinematic_results)
     def queue_selected_cinematic(self):
         item=self.cod_ai_screenshots.currentItem()
         if not item:return
@@ -2971,7 +3044,7 @@ class Window(QMainWindow):
         if self.ask('Update downloaded. Restart now to apply it?') and updater.apply_and_restart(dest):QApplication.quit()
     def save_settings(self):
         try:
-            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
+            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'),meta_submission=('extension' if self.meta_submission_combo.currentIndex()==1 else 'inapp'))
             self.settings.values.update(scoreboard_hotkey_vk=self.scoreboard_hotkey_edit.vk,scoreboard_hotkey_mod=self.scoreboard_hotkey_edit.mod,screenshot_hotkey_vk=self.screenshot_hotkey_edit.vk,screenshot_hotkey_mod=self.screenshot_hotkey_edit.mod,screenshots_dir=self.screenshots_dir_edit.text().strip(),videos_dir=self.videos_dir_edit.text().strip(),webhook_channel=self.webhook_channel.text().strip(),cinematic_webhook_channel=self.cinematic_webhook_channel.text().strip());self.settings.set_webhook(self.webhook.text());self.settings.set_cinematic_webhook(self.cinematic_webhook.text());self.settings.save();self.log('Settings saved with DPAPI-protected webhook. Restart tracking to apply integration changes.');self.refresh_dashboard_status()
             self.unregister_global_hotkeys();self.register_global_hotkeys();self.refresh_hotkey_labels()
             if getattr(self,'extension_bridge',None) is not None:self.extension_bridge.videos_dir=self.videos_dir()

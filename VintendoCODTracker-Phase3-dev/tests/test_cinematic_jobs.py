@@ -21,6 +21,14 @@ class CinematicJobStoreTests(unittest.TestCase):
         self.assertFalse(self.store.update_cinematic('missing',status='running'))
         self.assertEqual(self.store.get_cinematic(job)['status'],'running')
         self.assertEqual(self.store.history(),[])
+    def test_claim_is_exclusive_and_idempotent(self):
+        image=Path(self.temp.name)/'shot.png';image.write_bytes(b'png')
+        job='cin-'+'b'*32
+        self.assertTrue(self.store.create_cinematic(job,'shot.png',image,'prompt'))
+        self.assertTrue(self.store.claim_cinematic(job))
+        self.assertFalse(self.store.claim_cinematic(job))
+        self.assertEqual(self.store.get_cinematic(job)['status'],'running')
+        self.assertEqual(self.store.pending_cinematics(),[])
     def test_complete_mp4_container_check(self):
         valid=b'\0\0\0\x18ftypisom'+b'\0'*12+b'moov'+b'\0'*16+b'mdat'+b'x'*1500
         self.assertTrue(valid_mp4(valid))

@@ -24,6 +24,7 @@ arguments=[
     '--hidden-import','test_squad_queue',
     '--hidden-import','test_local_bridge','--hidden-import','test_extension',
     '--hidden-import','codmunity_stats','--hidden-import','test_codmunity_stats',
+    '--hidden-import','PySide6.QtWebEngineWidgets','--hidden-import','PySide6.QtWebEngineCore',
     '--collect-all','rapidocr_onnxruntime','--collect-all','dxcam','--collect-all','playwright',
     '--collect-binaries','onnxruntime','--collect-data','onnxruntime',
     '--add-data',str(ROOT/'core'/'legacy')+os.pathsep+'core/legacy',

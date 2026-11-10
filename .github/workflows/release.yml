@@ -36,6 +36,13 @@ jobs:
       - name: Build exe
         run: python build.py
 
+      - name: Verify packaged build
+        shell: pwsh
+        run: |
+          $env:VINTENDO_DATA_DIR = "$env:RUNNER_TEMP/verify-data"
+          $env:VINTENDO_NO_AUTO_START = "1"
+          ./VintendoCODTracker.exe --verify-build
+
       - name: Stage extension zip (no backups)
         shell: pwsh
         run: |

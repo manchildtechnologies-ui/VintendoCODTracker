@@ -455,6 +455,10 @@ class Store:
             return dict(row) if row else None
     def pending_cinematics(self,limit=5):
         with self.connect() as c:return [dict(r) for r in c.execute("SELECT * FROM cinematic_jobs WHERE status='queued' ORDER BY created LIMIT ?",(max(1,min(int(limit),20)),))]
+    def claim_cinematic(self,job_id):
+        with self.connect() as c:
+            cur=c.execute("UPDATE cinematic_jobs SET status='running',updated=? WHERE id=? AND status='queued'",(time.time(),job_id))
+            return cur.rowcount==1
     def update_cinematic(self,job_id,**values):
         allowed={'status','video','error','talent_ids'}
         if not values or not set(values)<=allowed:raise ValueError('Invalid cinematic job update')

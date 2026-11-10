@@ -154,7 +154,15 @@ class FriendTile(QWidget):
         layout.addWidget(self.photo,0,Qt.AlignHCenter);layout.addWidget(self.name)
         self.set_selected(False)
     def set_selected(self,on):
-        color='#f97316' if on else '#292f39'
+        self._selected=bool(on);self._refresh()
+    def enterEvent(self,event):
+        self._hovered=True;self._refresh()
+    def leaveEvent(self,event):
+        self._hovered=False;self._refresh()
+    def _refresh(self):
+        if getattr(self,'_selected',False):color='#f97316'
+        elif getattr(self,'_hovered',False):color='#8a93a3'
+        else:color='#292f39'
         self.setStyleSheet('FriendTile{border:2px solid %s;border-radius:6px;background:#0b0e13;}'%color)
     def mousePressEvent(self,event):
         super().mousePressEvent(event)
@@ -172,6 +180,9 @@ class WindowsWindowHost:
         set_style=getattr(user32,'SetWindowLongPtrW',user32.SetWindowLongW);set_style.argtypes=(hwnd,ctypes.c_int,long_ptr);set_style.restype=long_ptr
         user32.GetParent.argtypes=(hwnd,);user32.GetParent.restype=hwnd
         user32.SetParent.argtypes=(hwnd,hwnd);user32.SetParent.restype=hwnd
+        user32.SetFocus.argtypes=(hwnd,);user32.SetFocus.restype=hwnd
+        user32.SetForegroundWindow.argtypes=(hwnd,);user32.SetForegroundWindow.restype=wintypes.BOOL
+        user32.IsWindow.argtypes=(hwnd,);user32.IsWindow.restype=wintypes.BOOL
         user32.SetWindowPos.argtypes=(hwnd,hwnd,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT);user32.SetWindowPos.restype=wintypes.BOOL
         user32.MoveWindow.argtypes=(hwnd,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.BOOL);user32.MoveWindow.restype=wintypes.BOOL
         user32.GetWindowRect.argtypes=(hwnd,ctypes.POINTER(wintypes.RECT));user32.GetWindowRect.restype=wintypes.BOOL
@@ -189,6 +200,15 @@ class WindowsWindowHost:
         user32.SetWindowPos(hwnd,0,0,0,0,0,self.SWP_FRAMECHANGED|self.SWP_SHOWWINDOW)
         if int(user32.GetParent(hwnd) or 0)!=int(parent_hwnd):
             self.detach();raise OSError(set_parent_error or ctypes.get_last_error(),'Windows did not attach the CODMunity window to the tab.')
+        try:user32.SetForegroundWindow(hwnd);user32.SetFocus(hwnd)
+        except Exception:pass
+    def focus_embedded(self):
+        if not self.hwnd:return False
+        try:
+            user32=self._apis()[0]
+            if not user32.IsWindow(self.hwnd):self.hwnd=None;return False
+            user32.SetFocus(self.hwnd);return True
+        except Exception:return False
     def resize(self,width,height):
         if self.hwnd:self._apis()[0].MoveWindow(self.hwnd,0,0,max(1,width),max(1,height),True)
     def detach(self):
@@ -400,6 +420,7 @@ QLabel#stepArrow {color:#f97316;}
 QTabWidget#mediaTabs {background:transparent;}
 QTabWidget#mediaTabs QTabBar::tab {background:#1a1410;color:#a8a29e;border:1px solid #3a2e22;padding:8px 22px;margin-right:6px;border-top-left-radius:6px;border-top-right-radius:6px;font-weight:800;}
 QTabWidget#mediaTabs QTabBar::tab:selected {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fb923c,stop:1 #ea580c);color:#1c0f04;border-color:#fdba74;}
+QFrame#cinematicTile:hover {border-color:#7b8494;}
 QFrame#cinematicTile[selected="true"] {border:2px solid #f97316;background:#1c1008;}
 QLabel#talentDot {background:#22c55e;border-radius:5px;min-width:10px;min-height:10px;max-width:10px;max-height:10px;}
 QPushButton#codPrimary {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f87171,stop:0.5 #dc2626,stop:1 #991b1b);color:#ffffff;border:1px solid #fca5a5;padding:12px 28px;border-radius:8px;font-weight:900;font-size:14px;}
@@ -412,6 +433,10 @@ QLabel#codPanelTitle {font-size:13px;font-weight:900;color:#f2f4f7;letter-spacin
 QPushButton#codPlay {background:#f97316;color:#1c0f04;border:none;border-radius:8px;font-weight:900;padding:8px 22px;font-size:13px;}
 QPushButton#codPlay:hover {background:#fdba74;}
 QPushButton#codPlay:disabled {background:#2a2e36;color:#717986;}
+QPushButton#codBlue {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2563eb,stop:1 #1d4ed8);color:#ffffff;border:1px solid #3b82f6;border-radius:6px;font-weight:800;padding:10px 14px;}
+QPushButton#codBlue:hover {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #3b82f6,stop:1 #2563eb);border-color:#93c5fd;}
+QPushButton#codBlue:pressed {background:#1e40af;border-color:#1e3a8a;}
+QPushButton#codBlue:disabled {color:#717986;background:#171a20;border-color:#282c34;}
 '''
 
 class TacticalBackdrop(QWidget):
@@ -539,7 +564,7 @@ class Window(QMainWindow):
             self.auto_detect.setChecked(bool(self.settings.values.get('auto_detect',False)))
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)=='Squad Night':self.nav.item(row).setHidden(True)
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex);self.nav.setCurrentRow(0)
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex);self.nav.currentRowChanged.connect(self.on_nav_row_changed);self.nav.setCurrentRow(0)
         for hidden_page in ('Solo Ops','Discord Settings','Match History'):
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)==hidden_page:self.nav.item(row).setHidden(True)
@@ -553,9 +578,14 @@ class Window(QMainWindow):
         if not self.tab_prototype:self.import_previous_settings()
         self.refresh_cod_ai_screenshots()
         self.register_global_hotkeys()
+    def on_nav_row_changed(self,row):
+        try:name=self.nav.item(row).data(Qt.UserRole)
+        except (AttributeError,RuntimeError):return
+        if name=='Tracker Browser':self.browser_host.focus_embedded()
     def app_tab_changed(self,index):
         if self.app_tabs.widget(index) is self.codmunity_page:
             self.start_or_attach_codmunity()
+            self.codmunity_host.focus_embedded()
             if not self.tab_prototype and not getattr(self,'poll_busy',False):
                 self.codmunity_status.setText('Pulling CODMunity matches into the tracker…')
                 self.poll_records(source='codmunity-tab')
@@ -655,16 +685,12 @@ class Window(QMainWindow):
         task.signals.done.connect(finish);task.signals.failed.connect(error);self.pool.start(task)
     def build_dashboard(self):
         l=self.page('Dashboard','CODMunity match data and scoreboard OCR are monitored together from one tracking session.' if self.track_both_startup else 'Your match activity, tracker health, and poster tools in one place.')
-        live_row=QHBoxLayout();live_row.setContentsMargins(2,0,2,6);live_row.setSpacing(8)
         self.status=QLabel('●  STANDBY');self.status.setObjectName('livePill');self.status.setAlignment(Qt.AlignCenter)
-        live_row.addWidget(self.status,0,Qt.AlignLeft);live_row.addStretch(1)
-        live_wrap=QWidget();live_wrap.setLayout(live_row);l.addWidget(live_wrap)
+        self.status.setMinimumWidth(200)
         self._blink_on=True;self.blink_timer=QTimer(self);self.blink_timer.setInterval(700);self.blink_timer.timeout.connect(self._blink_live_indicator)
 
-        top=QGroupBox('TRACKING SOURCES');f=QHBoxLayout(top);f.setSpacing(10)
-        source_label='CODMunity + scoreboard OCR' if self.track_both_startup else 'Active mode'
-        source=QLabel('◉   '+source_label);source.setMinimumWidth(200);source.setStyleSheet('font-weight:700;color:#e5e9ef;background:#151922;padding:10px;border-radius:5px;')
-        f.addWidget(source,1)
+        top=QWidget();f=QHBoxLayout(top);f.setSpacing(10);f.setContentsMargins(0,0,0,0)
+        f.addWidget(self.status,1)
         self.start_button=self.button('▶   START TRACKING',self.start,True);self.start_button.setMinimumHeight(42)
         self.pause_button=self.button('Ⅱ   PAUSE TRACKING',self.pause);self.pause_button.setMinimumHeight(42);self.pause_button.setEnabled(False)
         self.stop_button=self.button('■   STOP',self.stop);self.stop_button.setMinimumHeight(42);self.stop_button.setEnabled(False)
@@ -902,7 +928,7 @@ class Window(QMainWindow):
         actions=QHBoxLayout();actions.setSpacing(10)
         self.open_screenshots_button=self.button('Open Screenshots Folder',self.open_screenshots_folder)
         actions.addWidget(self.button('Capture Game Screenshot',self.capture_cod_ai_screenshot,True),1)
-        self.queue_cinematic_button=self.button('Send Selected Material to Meta Ai to Make A Video',self.queue_selected_cinematic);self.queue_cinematic_button.setStyleSheet('background:#1d4ed8;border:1px solid #3b82f6;border-radius:6px;color:#ffffff;font-weight:800;padding:10px 14px;');actions.addWidget(self.queue_cinematic_button,1)
+        self.queue_cinematic_button=self.button('Send Selected Material to Meta Ai to Make A Video',self.queue_selected_cinematic);self.queue_cinematic_button.setObjectName('codBlue');actions.addWidget(self.queue_cinematic_button,1)
         l.addLayout(actions)
         self.cod_ai_capture_status=QLabel('Screenshots will be saved as lossless PNG files in the tracker data folder. Press Ctrl + F8 in game to capture.')
         self.cod_ai_capture_status.setWordWrap(True);self.cod_ai_capture_status.setStyleSheet('color:#99a8bc');l.addWidget(self.cod_ai_capture_status)
@@ -1011,6 +1037,7 @@ class Window(QMainWindow):
             try:alive=ctypes.windll.user32.IsWindow(self.browser_host.hwnd)
             except Exception:alive=False
             if alive:self.browser_host.resize(self.browser_surface.width(),self.browser_surface.height());self.browser_status.setText('Tracker Chrome is embedded in this tab. Leave its Meta AI tab untouched while a video generates.');return
+        QMessageBox.information(self,'Meta.ai Login Required','You must login to Meta.ai for the videos and screenshots to work before you can post to Discord. This is a free and easy way to use the AI features. A new browser window will now open where you must login. Your info is never stored by Vintendo Tracker or anything outside of Meta, like it normally would if you were logging in.')
         if self.tracker_browser_mode()=='attach':
             self.browser_hold_message=False
             try:windows=self.find_tracker_chrome_windows()
@@ -1023,7 +1050,7 @@ class Window(QMainWindow):
             self.browser_status.setText('Chrome was not found in the usual install folders.');return
         try:known=set(self.find_tracker_chrome_windows())
         except Exception:known=set()
-        try:subprocess.Popen([str(executable),'--user-data-dir='+str(self.tracker_chrome_data_dir())])
+        try:subprocess.Popen([str(executable),'--user-data-dir='+str(self.tracker_chrome_data_dir()),'--window-size=1440,900',meta_automation.META_HOME])
         except OSError as exc:self.browser_status.setText('Could not launch Chrome: '+str(exc)[:200]);return
         self.browser_known_windows=known;self.browser_poll_ticks=0
         try:self.browser_poll.stop()
@@ -1662,7 +1689,7 @@ class Window(QMainWindow):
         except Exception as exc:
             detail=str(getattr(exc,'detail',None) or exc)
             step=str(getattr(exc,'step','error'))
-            if 'login' in step.lower():message='The automation browser opened signed out. Log into Meta AI in that window, then requeue the video.'
+            if 'login' in step.lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then requeue the video.'
             else:message=(f'Meta automation stopped at {step}: {detail}')[:300]
             self._fail_inapp_cinematic(job_id,message);return
         try:self.store.update_cinematic(job_id,status='completed',video=str(video),error='')

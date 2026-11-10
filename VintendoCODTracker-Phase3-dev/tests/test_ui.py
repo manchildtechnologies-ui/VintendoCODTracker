@@ -194,6 +194,46 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.active_id,mid)
         self.assertIn(mid,w.studio_match.text())
         self.assertTrue(w.generate_poster_button.isEnabled())
+    def test_open_tracker_chrome_login_notice_then_meta_home(self):
+        from unittest.mock import patch
+        from PySide6.QtWidgets import QMessageBox
+        w=self.window
+        w.browser_host.hwnd=None
+        with patch.object(QMessageBox,'information',return_value=QMessageBox.Ok) as confirm, \
+                patch.object(w,'chrome_executable',return_value='C:/fake/chrome.exe'), \
+                patch.object(w,'find_tracker_chrome_windows',return_value=[]), \
+                patch('subprocess.Popen') as popen:
+            w.open_tracker_chrome()
+            confirm.assert_called_once()
+            self.assertEqual(confirm.call_args[0][1],'Meta.ai Login Required')
+            self.assertIn('login to Meta.ai',confirm.call_args[0][2])
+        popen.assert_called_once()
+        launched_args=popen.call_args[0][0]
+        self.assertIn('--window-size=1440,900',launched_args)
+        self.assertTrue(str(launched_args[-1]).startswith('https://www.meta.ai'))
+    def test_embedded_browser_focus_is_safe_without_window(self):
+        w=self.window
+        self.assertFalse(w.browser_host.focus_embedded())
+        self.assertFalse(w.codmunity_host.focus_embedded())
+    def test_tracker_browser_nav_focuses_embedded_window(self):
+        from unittest.mock import patch as mock_patch
+        w=self.window
+        with mock_patch.object(w.browser_host,'focus_embedded',return_value=True) as focus:
+            for row in range(w.nav.count()):
+                if w.nav.item(row).data(Qt.UserRole)=='Tracker Browser':
+                    w.nav.setCurrentRow(row);break
+            focus.assert_called_once_with()
+    def test_all_buttons_keep_stylesheet_hover_feedback(self):
+        from PySide6.QtWidgets import QPushButton
+        offenders=[b.text() or b.objectName() for b in self.window.findChildren(QPushButton) if 'background' in b.styleSheet()]
+        self.assertEqual(offenders,[])
+    def test_friend_tile_hover_highlights_border(self):
+        tile=app.FriendTile('f1',lambda pid:None)
+        tile.set_selected(False)
+        self.assertIn('#292f39',tile.styleSheet())
+        tile.enterEvent(None);self.assertIn('#8a93a3',tile.styleSheet())
+        tile.leaveEvent(None);self.assertIn('#292f39',tile.styleSheet())
+        tile.set_selected(True);self.assertIn('#f97316',tile.styleSheet())
     def test_mode_switch_roundtrip(self):
         self.window.mode.setCurrentText('Squad Night');self.window.mode.setCurrentText('Solo Ops');self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
     def test_roi_verification_defaults_checked_and_hidden(self):self.assertTrue(self.window.verified.isChecked());self.assertTrue(self.window.verified.isHidden())
@@ -644,7 +684,7 @@ class UITests(unittest.TestCase):
         from unittest.mock import patch
         w=self.window;attached=[]
         w.attach_browser_window=lambda hwnd:attached.append(hwnd)
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen') as popen:
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen') as popen,patch('app.QMessageBox.information'):
             w.open_tracker_chrome()
             self.assertTrue(w.browser_poll.isActive());popen.assert_called_once()
         with patch.object(w,'find_tracker_chrome_windows',return_value=[12345]):
@@ -654,12 +694,12 @@ class UITests(unittest.TestCase):
         from unittest.mock import patch
         w=self.window;attached=[]
         w.attach_browser_window=lambda hwnd:attached.append(hwnd)
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen'):
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen'),patch('app.QMessageBox.information'):
             w.open_tracker_chrome()
             for _ in range(30):w.try_attach_tracker_chrome()
         self.assertEqual(attached,[]);self.assertFalse(w.browser_poll.isActive())
         self.assertIn('Embed',w.browser_status.text())
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[7]),patch('subprocess.Popen'):
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[7]),patch('subprocess.Popen'),patch('app.QMessageBox.information'):
             w.open_tracker_chrome()
             for _ in range(30):w.try_attach_tracker_chrome()
         self.assertEqual(attached,[7])
@@ -1065,8 +1105,10 @@ class UITests(unittest.TestCase):
         original=w.settings.values.get('tracker_browser_mode')
         w.settings.values['tracker_browser_mode']='attach'
         try:
+            from unittest.mock import patch
             w.find_tracker_chrome_windows=lambda: []
-            w.open_tracker_chrome()
+            with patch('app.QMessageBox.information'):
+                w.open_tracker_chrome()
             self.assertIn('No Chrome windows found',w.browser_status.text())
         finally:
             if original is None:w.settings.values.pop('tracker_browser_mode',None)
@@ -1078,8 +1120,10 @@ class UITests(unittest.TestCase):
         w.settings.values['tracker_browser_mode']='attach'
         try:
             w.find_tracker_chrome_windows=lambda: [4242]
+            from unittest.mock import patch
             w.attach_browser_window=lambda hwnd: attached.append(hwnd)
-            w.open_tracker_chrome()
+            with patch('app.QMessageBox.information'):
+                w.open_tracker_chrome()
             self.assertEqual(attached,[4242])
         finally:
             if original is None:w.settings.values.pop('tracker_browser_mode',None)
@@ -1092,8 +1136,10 @@ class UITests(unittest.TestCase):
             w.chrome_executable=lambda: Path('chrome.exe')
             w.find_tracker_chrome_windows=lambda: []
             w.refresh_tracker_browser=lambda: None
+            from unittest.mock import patch
             subprocess_mod.Popen=lambda *args,**kwargs: seen.append(args[0])
-            w.open_tracker_chrome()
+            with patch('app.QMessageBox.information'):
+                w.open_tracker_chrome()
             self.assertEqual(len(seen),1)
             flags=[str(part) for part in seen[0][1:]]
             self.assertTrue(any(part.startswith('--user-data-dir=') for part in flags))

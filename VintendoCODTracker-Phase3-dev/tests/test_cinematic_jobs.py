@@ -35,4 +35,19 @@ class CinematicJobStoreTests(unittest.TestCase):
         self.assertFalse(valid_mp4(b'not-video'+b'x'*2000))
         self.assertFalse(valid_mp4(b'\0\0\0\x18ftypisom'+b'x'*1500))
 
+class AutomationBrowserLaunchTests(unittest.TestCase):
+    def test_automation_browser_stays_headed_but_starts_minimized(self):
+        from types import SimpleNamespace
+        import meta_automation
+        calls={}
+        class FakeChromium:
+            def launch_persistent_context(self,folder,**kwargs):
+                calls.update(kwargs);return object()
+        with tempfile.TemporaryDirectory() as tmp:
+            meta_automation.ensure_context(SimpleNamespace(chromium=FakeChromium()),Path(tmp)/'profile')
+        self.assertFalse(calls.get('headless',True))
+        self.assertIn('--start-minimized',calls.get('args',[]))
+        self.assertIn('--disable-blink-features=AutomationControlled',calls.get('args',[]))
+
+
 if __name__=='__main__':unittest.main()

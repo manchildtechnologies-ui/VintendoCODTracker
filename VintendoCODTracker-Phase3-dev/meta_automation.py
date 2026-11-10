@@ -74,7 +74,7 @@ def ensure_context(playwright, user_data_dir, channel='chrome', viewport=(1440, 
             str(folder), channel=channel, headless=False,
             viewport={'width': viewport[0], 'height': viewport[1]},
             accept_downloads=True,
-            args=['--disable-blink-features=AutomationControlled'])
+            args=['--disable-blink-features=AutomationControlled','--start-minimized'])
     except Exception as exc:
         raise MetaAutomationError(
             'browser',

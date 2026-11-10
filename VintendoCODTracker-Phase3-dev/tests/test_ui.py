@@ -541,6 +541,7 @@ class UITests(unittest.TestCase):
         for name in calls[0][2]:
             self.assertTrue(Path(calls[0][1],name).is_file())
         self.assertIn('automatically',w.job_status.text().lower())
+        self.addCleanup(w.store.update,mid,gen_state='idle',error='')
         self.addCleanup(shutil.rmtree,Path(calls[0][1]),True)
     def test_prepare_artwork_opens_folder_when_automation_unavailable(self):
         from PIL import Image
@@ -559,6 +560,59 @@ class UITests(unittest.TestCase):
         self.assertTrue(Path(folder,'prompt.txt').is_file())
         self.assertIn('prepared',w.job_status.text().lower())
         self.addCleanup(shutil.rmtree,Path(folder),True)
+    def test_full_auto_pump_launches_queued_job(self):
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;mid,_=w.store.add({'matchId':'fullauto-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]),gen_state='queued')
+        photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+        roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+        w.notice=lambda _:None
+        calls=[]
+        with patch.object(w.store,'roster',return_value=roster):
+            w._start_poster_automation=lambda *args:(calls.append(args) or True)
+            w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.full_auto.blockSignals(True);w.full_auto.setChecked(True);w.full_auto.blockSignals(False)
+            calls.clear()
+            w._pump_full_auto()
+        self.assertEqual(len(calls),1);self.assertEqual(calls[0][0],mid)
+        self.addCleanup(shutil.rmtree,Path(calls[0][1]),True)
+    def test_full_auto_holds_without_webhook(self):
+        w=self.window;mid,_=w.store.add({'matchId':'held-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]),gen_state='queued')
+        w.notice=lambda _:None
+        calls=[]
+        w._start_poster_automation=lambda *args:(calls.append(args) or True)
+        w.webhook.setText('');w.full_auto.blockSignals(True);w.full_auto.setChecked(True);w.full_auto.blockSignals(False)
+        calls.clear()
+        w._pump_full_auto()
+        self.assertEqual(calls,[])
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+        self.addCleanup(w.store.update,mid,gen_state='idle',error='')
+    def test_full_auto_parks_unpreparable_job(self):
+        w=self.window;mid,_=w.store.add({'matchId':'unprepped-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([dict(name='Nobody',verified=False,stats={'kills':1})]),gen_state='queued')
+        w.notice=lambda _:None
+        w._start_poster_automation=lambda *args:True
+        w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.full_auto.blockSignals(True);w.full_auto.setChecked(True);w.full_auto.blockSignals(False)
+        w._pump_full_auto()
+        row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle');self.assertTrue(row['error'])
+    def test_finish_chains_pump_and_fail_parks(self):
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;mid,_=w.store.add({'matchId':'chained-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([]))
+        saved=app.E.DATA/('chained-'+uuid.uuid4().hex+'.png');Image.new('RGB',(640,360),'navy').save(saved)
+        w.notice=lambda _:None
+        pumped=[]
+        w._pump_full_auto=lambda:pumped.append(True)
+        w._finish_inapp_poster(mid,str(saved))
+        self.assertEqual(pumped,[True])
+        pumped.clear()
+        with patch('os.startfile') as opened:
+            w._poster_manual=False
+            w._fail_inapp_poster(mid,'generation','boom')
+        self.assertEqual(pumped,[True]);self.assertFalse(opened.called)
+        row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle')
     def test_one_click_prepare_picks_newest_codmunity_match_without_scoreboard(self):
         from PIL import Image
         from unittest.mock import patch
@@ -1064,19 +1118,49 @@ class UITests(unittest.TestCase):
         self.window.refresh_talent_friends()
         tiles=self.window.talent_friend_tiles
         self.assertEqual(set(tiles),{'f1','f2','f3','f4','f5'})
-        self.assertIn('(Max Of 4 Can be used)',self.window.talent_friends_status.text())
+        self.assertIn('(Max Of 3 Can be used)',self.window.talent_friends_status.text())
         QTest.mouseClick(tiles['f1'],Qt.LeftButton);QTest.mouseClick(tiles['f2'],Qt.LeftButton)
         self.assertEqual(self.window.talent_friend_ids,['f1','f2'])
         self.assertIn('Featuring: F1, F2',self.window.talent_cameo_label.text())
         strip_widgets=[self.window.talent_cameo_strip.itemAt(i).widget() for i in range(self.window.talent_cameo_strip.count())]
         self.assertEqual(len([wide for wide in strip_widgets if wide is not None]),2)
+        self.assertFalse(tiles['f1'].remove_button.isHidden())
+        self.assertTrue(tiles['f3'].remove_button.isHidden())
+        tiles['f1'].remove_button.click()
+        self.assertEqual(self.window.talent_friend_ids,['f2'])
+        self.assertIn('Featuring: F2',self.window.talent_cameo_label.text())
+        self.assertTrue(tiles['f1'].remove_button.isHidden())
         self.window.on_talent_friend_toggled('f3');self.window.on_talent_friend_toggled('f4')
-        self.assertEqual(self.window.talent_friend_ids,['f1','f2','f3','f4'])
-        self.assertIn('Featuring: F1, F2, F3, F4',self.window.talent_cameo_label.text())
+        self.assertEqual(self.window.talent_friend_ids,['f2','f3','f4'])
+        self.assertIn('Featuring: F2, F3, F4',self.window.talent_cameo_label.text())
         self.window.on_talent_friend_toggled('f5')
-        self.assertEqual(len(self.window.talent_friend_ids),4)
+        self.assertEqual(len(self.window.talent_friend_ids),3)
         self.assertNotIn('f5',self.window.talent_friend_ids)
-        self.assertIn('Max of 4 friends',self.window.cinematic_status.text())
+        self.assertIn('Max of 3 friends',self.window.cinematic_status.text())
+    def test_friend_grid_rejects_own_cameo_with_message(self):
+        from PIL import Image
+        w=self.window
+        def photo(color):
+            target=app.E.DATA/('cameo-'+color+'-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(48,48),color).save(target);return str(target)
+        w.store.save_player(dict(id='me',name='Me',display_name='Me',aliases=[],photo=photo('red'),enabled=True,consent_meta=True))
+        w.store.save_player(dict(id='pal',name='Pal',display_name='Pal',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True))
+        w.settings.values['player']='Me'
+        talent=w.videos_dir()/'talent.png'
+        created=not talent.is_file()
+        if created:Image.new('RGB',(48,48),'gray').save(talent)
+        try:
+            w.refresh_talent_friends()
+            w.on_talent_friend_toggled('me')
+            self.assertEqual(w.talent_friend_ids,[])
+            self.assertIn('already in this video',w.cinematic_status.text())
+            w.on_talent_friend_toggled('pal')
+            self.assertEqual(w.talent_friend_ids,['pal'])
+        finally:
+            w.talent_friend_ids=[]
+            w.settings.values.pop('player',None)
+            if created:
+                try:talent.unlink()
+                except OSError:pass
     def test_queue_cinematic_with_friends_stages_cast_and_prompt(self):
         import shutil as _shutil
         import tempfile

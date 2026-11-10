@@ -145,7 +145,7 @@ class ScreenshotTile(QFrame):
         self.setProperty('selected',bool(value));self.style().unpolish(self);self.style().polish(self)
 
 class FriendTile(QWidget):
-    """One friend tile: headshot photo with the name underneath. Click to toggle."""
+    """One friend tile: headshot photo with the name underneath. Click to toggle. Selected tiles show a red X to remove."""
     def __init__(self,pid,on_toggle,parent=None):
         super().__init__(parent);self.pid=str(pid);self._on_toggle=on_toggle
         self.setCursor(Qt.PointingHandCursor)
@@ -155,9 +155,25 @@ class FriendTile(QWidget):
         self.name=QLabel();self.name.setAlignment(Qt.AlignCenter);self.name.setWordWrap(True)
         self.name.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
         layout.addWidget(self.photo,0,Qt.AlignHCenter);layout.addWidget(self.name)
+        self.remove_button=QPushButton('X',self)
+        self.remove_button.setFixedSize(18,18)
+        self.remove_button.setCursor(Qt.PointingHandCursor)
+        self.remove_button.setToolTip('Remove this friend from the video')
+        self.remove_button.setObjectName('tileRemove')
+        self.remove_button.clicked.connect(self._on_remove_clicked)
+        self.remove_button.hide()
+        self.remove_button.raise_()
         self.set_selected(False)
+    def _on_remove_clicked(self):
+        if callable(self._on_toggle):self._on_toggle(self.pid)
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        try:self.remove_button.move(max(0,self.width()-20),2)
+        except RuntimeError:pass
     def set_selected(self,on):
         self._selected=bool(on);self._refresh()
+        try:self.remove_button.setVisible(bool(on))
+        except (AttributeError,RuntimeError):pass
     def enterEvent(self,event):
         self._hovered=True;self._refresh()
     def leaveEvent(self,event):
@@ -415,6 +431,8 @@ QLabel#cinematicName {font-size:11px;color:#c4ccd8;padding:0 2px;}
 QLabel#cinematicBadge {background:rgba(0,0,0,170);color:#ffffff;font-size:11px;font-weight:800;border-radius:4px;padding:2px 6px;margin:5px;}
 QPushButton#cinematicDelete {background:#c8102e;color:#ffffff;border:1px solid #ff5b6a;border-radius:12px;font-size:12px;font-weight:900;padding:0;margin:4px;}
 QPushButton#cinematicDelete:hover {background:#ed2938;}
+QPushButton#tileRemove {background:#b91c1c;color:#ffffff;border:none;border-radius:9px;font-size:11px;font-weight:900;padding:0;margin:0;}
+QPushButton#tileRemove:hover {background:#ef2b2b;}
 QListWidget#cinematicGallery {background:#090b10;border:1px solid #2b303c;border-radius:8px;padding:6px;}
 QListWidget#cinematicGallery::item {border:none;background:transparent;padding:2px;margin:2px;color:#dce1e9;}
 QListWidget#cinematicGallery::item:selected {border:none;background:transparent;}
@@ -573,8 +591,9 @@ class Window(QMainWindow):
         self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);self.app_tabs.setCornerWidget(self.exit_button,Qt.TopRightCorner)
         self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs()
         if self.tab_prototype:
-            for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
+            for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
+            self.full_auto.setChecked(False)
         if self.track_both_startup:
             # Keep the existing internal mode for OCR, but hide its redundant
             # manual mode page when the launcher already starts both sources.
@@ -828,6 +847,7 @@ class Window(QMainWindow):
         for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture submits the complete job to Meta AI automatically and collects the finished picture; if the automation browser needs a login, the staged folder opens for manual handoff.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
+        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());l.addWidget(self.full_auto)
         self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True))
         squad_title=QLabel('SQUAD LEADERBOARD');squad_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;letter-spacing:1px;');l.addWidget(squad_title)
         squad_controls=QHBoxLayout();squad_controls.setSpacing(8)
@@ -1716,7 +1736,9 @@ class Window(QMainWindow):
             if not photo or not Path(photo).is_file():continue
             eligible.append(player)
         valid={str(player.get('id')) for player in eligible}
-        self.talent_friend_ids=[pid for pid in (getattr(self,'talent_friend_ids',[]) or []) if pid in valid][:4]
+        self.talent_friend_ids=[pid for pid in (getattr(self,'talent_friend_ids',[]) or []) if pid in valid][:3]
+        own=self._own_roster_id()
+        if own and self._own_cameo_present():self.talent_friend_ids=[pid for pid in self.talent_friend_ids if pid!=own]
         chosen=set(self.talent_friend_ids)
         if not eligible and hasattr(self,'talent_friends_status'):self.talent_friends_status.setText('No eligible friends \u2014 roster players need a headshot and Meta AI consent.')
         for position,player in enumerate(eligible):
@@ -1729,15 +1751,32 @@ class Window(QMainWindow):
             box.addWidget(tile,position//4,position%4)
             self.talent_friend_tiles[pid]=tile
         self.update_talent_friends_status()
+    def _own_roster_id(self):
+        try:me=str(self.settings.values.get('player','') or '').casefold()
+        except Exception:return ''
+        if not me:return ''
+        try:roster=self.store.roster()
+        except Exception:return ''
+        for player in roster or []:
+            names=[str(player.get('display_name') or ''),str(player.get('name') or '')]+[str(alias) for alias in (player.get('aliases') or [])]
+            if any(name and name.casefold()==me for name in names):return str(player.get('id'))
+        return ''
+    def _own_cameo_present(self):
+        try:return (self.videos_dir()/'talent.png').is_file()
+        except Exception:return False
     def on_talent_friend_toggled(self,pid):
         if not pid:return
+        own=self._own_roster_id()
+        if own and str(pid)==own and self._own_cameo_present() and pid not in (getattr(self,'talent_friend_ids',[]) or []):
+            if hasattr(self,'cinematic_status'):self.cinematic_status.setText('You are already in this video \u2014 the talent photo is you.')
+            return
         chosen=[pid for pid in (getattr(self,'talent_friend_ids',[]) or [])]
         if pid in chosen:chosen.remove(pid)
         else:
             chosen.append(pid)
-            if len(chosen)>4:
-                chosen=chosen[:4]
-                if hasattr(self,'cinematic_status'):self.cinematic_status.setText('Max of 4 friends per video (plus you).')
+            if len(chosen)>3:
+                chosen=chosen[:3]
+                if hasattr(self,'cinematic_status'):self.cinematic_status.setText('Max of 3 friends per video (plus you).')
         self.talent_friend_ids=chosen
         for other_pid,tile in (getattr(self,'talent_friend_tiles',{}) or {}).items():
             try:tile.set_selected(other_pid in chosen)
@@ -1746,7 +1785,7 @@ class Window(QMainWindow):
     def update_talent_friends_status(self):
         if not hasattr(self,'talent_friends_status'):return
         count=len(getattr(self,'talent_friend_ids',[]) or [])
-        self.talent_friends_status.setText((('No friends \u2014 just you' if not count else str(count)+'/4 friends selected')+' (Max Of 4 Can be used)'))
+        self.talent_friends_status.setText((('No friends \u2014 just you' if not count else str(count)+'/3 friends selected')+' (Max Of 3 Can be used)'))
         if hasattr(self,'talent_cameo_label'):
             wanted=set(getattr(self,'talent_friend_ids',[]) or [])
             names=[str(player.get('display_name') or player.get('name','')) for player in self.store.roster() if str(player.get('id')) in wanted]
@@ -1778,7 +1817,7 @@ class Window(QMainWindow):
             if str(player.get('id')) in wanted and player.get('enabled',True) and player.get('consent_meta',False):
                 photo=str(player.get('photo') or '')
                 if photo and Path(photo).is_file():friends.append(player)
-        return friends[:4]
+        return friends[:3]
 
     def set_cinematic_talent(self):
         try:
@@ -2033,7 +2072,7 @@ class Window(QMainWindow):
         try:talent_ids=json.loads(row.get('talent_ids') or '[]')
         except Exception:talent_ids=[]
         faces=[]
-        for pid in list(talent_ids or [])[:4]:
+        for pid in list(talent_ids or [])[:3]:
             staged=self.videos_dir()/('talent_'+str(pid)+'.png')
             if staged.is_file():faces.append(str(staged))
         talent_png=self.videos_dir()/'talent.png'
@@ -2349,7 +2388,7 @@ class Window(QMainWindow):
         if self.ask('Update downloaded. Restart now to apply it?') and updater.apply_and_restart(dest):QApplication.quit()
     def save_settings(self):
         try:
-            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
+            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),full_auto=self.full_auto.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
             self.settings.values.update(scoreboard_hotkey_vk=self.scoreboard_hotkey_edit.vk,scoreboard_hotkey_mod=self.scoreboard_hotkey_edit.mod,screenshot_hotkey_vk=self.screenshot_hotkey_edit.vk,screenshot_hotkey_mod=self.screenshot_hotkey_edit.mod,screenshots_dir=self.screenshots_dir_edit.text().strip(),videos_dir=self.videos_dir_edit.text().strip(),webhook_channel=self.webhook_channel.text().strip(),cinematic_webhook_channel=self.cinematic_webhook_channel.text().strip());self.settings.set_webhook(self.webhook.text());self.settings.set_cinematic_webhook(self.cinematic_webhook.text());self.settings.save();self.log('Settings saved with DPAPI-protected webhook. Restart tracking to apply integration changes.');self.refresh_dashboard_status()
             self.unregister_global_hotkeys();self.register_global_hotkeys();self.refresh_hotkey_labels()
             if hasattr(self,'cod_ai_screenshots'):self.refresh_cod_ai_screenshots()
@@ -2490,6 +2529,7 @@ class Window(QMainWindow):
             for mid in new:self.log('New match queued for Squad Night review: '+mid)
             if source=='codmunity-tab':self.codmunity_status.setText('CODMunity matches are in the tracker.')
             self.refresh_history()
+            self._pump_full_auto()
         self.async_task(work,done,lambda _:setattr(self,'poll_busy',False))
     def ensure_capture(self):
         if self.mode.currentText()!='Squad Night':raise RuntimeError('Enable Squad Night to use scoreboard capture.')
@@ -2606,6 +2646,7 @@ class Window(QMainWindow):
                        not str(context['game_mode']).startswith('Not shown') and 1<=len(players)<=4)
         self.store.update(mid,payload=payload,capture=str(path),ocr=self.ocr_text.toPlainText(),players=json.dumps(players),status='needs_review',gen_state='queued' if auto_eligible else 'idle',prompt='',theme=None);self.active_id=mid;self.last_capture=str(path);self.refresh_history();self.load_studio(mid)
         self.log('Verified scoreboard saved. A Meta AI creative brief was prepared from the reviewed names and performance ranks.')
+        self._pump_full_auto()
     def ask_match_result(self):
         box=QMessageBox(self);box.setWindowTitle('Vintendo COD Tracker');box.setText('Did you win or lose?');box.setInformativeText('Neither the linked CODMunity match nor the scoreboard shows the result.');win_button=box.addButton('Win',QMessageBox.AcceptRole);lose_button=box.addButton('Lose',QMessageBox.AcceptRole);box.addButton('Cancel',QMessageBox.RejectRole);box.setDefaultButton(win_button);box.exec()
         if box.clickedButton() is win_button:return 'win'
@@ -3228,25 +3269,77 @@ class Window(QMainWindow):
                 message='Could not prepare this match for Meta AI: no identified players'
                 self.job_status.setText(message);self.notice(message);return
         try:
-            if prepared is None:
-                prepared=E.prepare_poster_job(self.store,E.DATA,job['id'],solo_player_name=self.settings.values.get('player',''),on_log=self.log)
-            if not prepared:raise ValueError('The match job could not be prepared.')
-            final_prompt=(self.prompt.toPlainText() or '').strip() or prepared['prompt']
-            QApplication.clipboard().setText(final_prompt)
-            self._write_unified_prompt(prepared['folder'],final_prompt)
-            self.active_id=job['id'];self.load_studio(job['id']);self.refresh_history()
-            photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
-            if self._start_poster_automation(job['id'],prepared['folder'],photo_names,final_prompt):
-                self.log(f"Match {job['id']} auto-submitted to Meta AI with {len(photo_names)} reference photo(s).")
-                self.job_status.setText('Submitting to Meta AI automatically — prompt and reference photos are being filled in the automation browser.')
-                return
-            try:os.startfile(prepared['folder'])
-            except OSError as exc:self.log('Photos staged; Explorer could not open the folder: '+str(exc))
-            self.job_status.setText('Match request prepared for Meta AI. Prompt copied; attach the staged reference photos in the opened folder.')
-            self.log(f"Match {job['id']} prepared for Meta AI: {len(prepared['photos'])} consented reference photo(s); prompt copied and import folder opened.")
+            launched=self._prepare_and_launch(job['id'],manual=True)
         except Exception as exc:
             message='Could not prepare this match for Meta AI: '+str(exc)
-            self.job_status.setText(message[:300]);self.notice(message);self.log('Poster preparation failed for '+job['id']+': '+str(exc))
+            self.job_status.setText(message[:300]);self.notice(message);self.log('Poster preparation failed for '+job['id']+': '+str(exc));return
+        if launched:
+            self.log(f"Match {job['id']} auto-submitted to Meta AI.")
+            self.job_status.setText('Submitting to Meta AI automatically — prompt and reference photos are being filled in the automation browser.')
+            return
+        try:
+            folder=E.DATA/'handoff'/E.disk_id(job['id'])
+            if folder.is_dir():os.startfile(str(folder))
+        except OSError as exc:self.log('Photos staged; Explorer could not open the folder: '+str(exc))
+        self.job_status.setText('Match request prepared for Meta AI. Prompt copied; attach the staged reference photos in the opened folder.')
+        self.log(f"Match {job['id']} prepared for Meta AI: prompt copied and import folder opened.")
+    def _prepare_and_launch(self,mid,manual=True):
+        job=self.store.get(mid)
+        if not job:raise ValueError('Match is no longer in Match History.')
+        self.active_id=mid
+        try:self.load_studio(mid)
+        except (AttributeError,RuntimeError):pass
+        players=json.loads(job.get('players') or '[]')
+        if not self.ensure_match_prompt(job,players):raise ValueError('No identified players for this match.')
+        prepared=E.prepare_poster_job(self.store,E.DATA,mid,solo_player_name=self.settings.values.get('player',''),on_log=self.log)
+        if not prepared:raise ValueError('The match job could not be prepared.')
+        final_prompt=(self.prompt.toPlainText() or '').strip() or prepared['prompt']
+        QApplication.clipboard().setText(final_prompt)
+        self._write_unified_prompt(prepared['folder'],final_prompt)
+        try:self.refresh_history()
+        except (AttributeError,RuntimeError):pass
+        photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
+        self._poster_manual=manual
+        return bool(self._start_poster_automation(mid,prepared['folder'],photo_names,final_prompt))
+    def _toggle_full_auto(self):
+        try:on=bool(self.full_auto.isChecked())
+        except (AttributeError,RuntimeError):return
+        self.settings.values['full_auto']=on
+        if on and hasattr(self,'auto_post'):
+            try:
+                if not self.auto_post.isChecked():self.auto_post.setChecked(True);self.log('Full Auto on: automatic Discord posting enabled with it.')
+            except (AttributeError,RuntimeError):pass
+            self.settings.values['auto_post']=True
+        try:self.settings.save()
+        except Exception:pass
+        if on:self._pump_full_auto()
+    def _pump_full_auto(self):
+        if getattr(self,'tab_prototype',False):return
+        if getattr(self,'closing',False):return
+        try:on=bool(self.full_auto.isChecked())
+        except (AttributeError,RuntimeError):return
+        if not on:return
+        if getattr(self,'_inapp_poster_active',None):return
+        try:rows=self.store.history()
+        except Exception:return
+        target=None
+        for row in rows:
+            if str(row.get('gen_state') or '')!='queued':continue
+            if str(row.get('status') or '') in ('delivered','solo_delivered','failed','uncertain'):continue
+            target=row['id'];break
+        if target is None:return
+        try:webhook_ok=bool(self.webhook.text().strip())
+        except (AttributeError,RuntimeError):webhook_ok=False
+        if not webhook_ok:self.log('Full Auto is holding '+target+': set a Discord webhook first.');return
+        try:
+            if not self.auto_post.isChecked():self.auto_post.setChecked(True);self.settings.values['auto_post']=True;self.log('Full Auto enabled automatic Discord posting.')
+        except (AttributeError,RuntimeError):pass
+        try:launched=self._prepare_and_launch(target,manual=False)
+        except Exception as exc:
+            try:self.store.update(target,gen_state='idle',error=str(exc)[:300])
+            except Exception:pass
+            self.log('Full Auto skipped '+target+': '+str(exc)[:160]);return
+        if launched:self.log('Full Auto submitted '+target+' to Meta AI.')
     def _write_unified_prompt(self,folder,text):
         try:
             target=Path(folder)
@@ -3309,17 +3402,23 @@ class Window(QMainWindow):
         self.received_art(job_id,str(target))
         self.job_status.setText('Poster submitted and finished image collected automatically.')
         self.log('In-app poster completed: '+job_id)
+        self._pump_full_auto()
     def _fail_inapp_poster(self,job_id,step,detail):
         self._inapp_poster_active=None
         try:self.generate_poster_button.setEnabled(True)
         except (AttributeError,RuntimeError):pass
+        try:self.store.update(job_id,gen_state='idle',error=(str(step)+': '+str(detail))[:300])
+        except Exception:pass
         if 'login' in str(step).lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then press Generate AI End Game Picture again.'
         else:message=(f'Automatic submission stopped at {step}: {detail}')[:300]
-        self.job_status.setText(message);self.notice(message);self.log('In-app poster failed for '+job_id+': '+str(step)+' — '+str(detail)[:160])
-        try:
-            folder=E.DATA/'handoff'/E.disk_id(job_id)
-            if folder.is_dir():os.startfile(str(folder))
-        except OSError:pass
+        self.job_status.setText(message);self.log('In-app poster failed for '+job_id+': '+str(step)+' — '+str(detail)[:160])
+        if getattr(self,'_poster_manual',True):
+            self.notice(message)
+            try:
+                folder=E.DATA/'handoff'/E.disk_id(job_id)
+                if folder.is_dir():os.startfile(str(folder))
+            except OSError:pass
+        self._pump_full_auto()
     def received_art(self,mid,path):
         current=self.store.get(mid)
         if not current:return

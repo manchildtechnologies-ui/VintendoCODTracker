@@ -155,8 +155,9 @@ class UITests(unittest.TestCase):
     def test_tracker_browser_search_survives_capture_engine_scan(self):
         import ctypes
         from capture_engine import CaptureEngine
+        before=ctypes.windll.user32.EnumWindows.argtypes
         CaptureEngine().game_windows()
-        self.assertEqual(ctypes.windll.user32.EnumWindows.argtypes,None)
+        self.assertEqual(ctypes.windll.user32.EnumWindows.argtypes,before)
         self.assertIsInstance(self.window.find_tracker_chrome_windows(),list)
     def test_hotkey_capture_shows_waiting_then_confirms(self):
         from unittest.mock import patch
@@ -173,6 +174,26 @@ class UITests(unittest.TestCase):
         confirm.assert_called_once()
         self.assertEqual(confirm.call_args[0][1],'Hotkeys Set')
         self.assertNotIn('Press the new keys',edit.text())
+    def test_codmunity_tab_pulls_matches_into_tracker(self):
+        from unittest.mock import patch
+        w=self.window
+        with patch.object(app.E,'load_matches',wraps=app.E.load_matches) as loader:
+            w.app_tabs.setCurrentIndex(1)
+            self.wait_until(lambda:not w.poll_busy)
+            self.assertTrue(loader.called)
+            self.assertEqual(w.codmunity_status.text(),'CODMunity matches are in the tracker.')
+    def test_studio_match_picker_loads_selected_match(self):
+        w=self.window
+        payload={'matchId':'studio-pick','game':'warzone','mode':'battle_royale','modeKey':'resurgence','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':7}}
+        mid,_=w.store.add(payload,'needs_review')
+        w.store.update(mid,players=json.dumps([{'name':'Vintendo','stats':{'kills':7},'verified':True}]),prompt=app.E.MATCH_POSTER_PROMPT_MARKER+'\nfixture')
+        w.refresh_history()
+        ix=w.studio_match_picker.findData(mid)
+        self.assertGreaterEqual(ix,0)
+        w.studio_match_picker.setCurrentIndex(ix)
+        self.assertEqual(w.active_id,mid)
+        self.assertIn(mid,w.studio_match.text())
+        self.assertTrue(w.generate_poster_button.isEnabled())
     def test_mode_switch_roundtrip(self):
         self.window.mode.setCurrentText('Squad Night');self.window.mode.setCurrentText('Solo Ops');self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
     def test_roi_verification_defaults_checked_and_hidden(self):self.assertTrue(self.window.verified.isChecked());self.assertTrue(self.window.verified.isHidden())
@@ -868,8 +889,9 @@ class UITests(unittest.TestCase):
             w.store.recent_cinematics=real_recent
             w.hide()
             w.refresh_cod_ai_screenshots()
-    def test_talent_friends_picker_lists_eligible_and_caps_three(self):
+    def test_talent_friends_picker_lists_eligible_and_caps_four(self):
         import tempfile
+        from PySide6.QtTest import QTest
         from PIL import Image
         tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
         self.window.store=app.E.Store(tmpdir/'history.sqlite3')
@@ -879,28 +901,29 @@ class UITests(unittest.TestCase):
             dict(id='f1',name='Friend1',display_name='F1',aliases=[],photo=photo('red'),enabled=True,consent_meta=True),
             dict(id='f2',name='Friend2',display_name='F2',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True),
             dict(id='f3',name='Friend3',display_name='F3',aliases=[],photo=photo('green'),enabled=True,consent_meta=True),
+            dict(id='f4',name='Friend4',display_name='F4',aliases=[],photo=photo('orange'),enabled=True,consent_meta=True),
+            dict(id='f5',name='Friend5',display_name='F5',aliases=[],photo=photo('pink'),enabled=True,consent_meta=True),
             dict(id='noconsent',name='NoConsent',display_name='NC',aliases=[],photo=photo('yellow'),enabled=True,consent_meta=False),
             dict(id='nophoto',name='NoPhoto',display_name='NP',aliases=[],photo=str(tmpdir/'ghost.png'),enabled=True,consent_meta=True),
             dict(id='off',name='Off',display_name='Off',aliases=[],photo=photo('purple'),enabled=False,consent_meta=True),
         ]
         for player in players:self.window.store.save_player(player)
         self.window.refresh_talent_friends()
-        box=self.window.talent_friends_box
-        self.assertEqual(box.count(),3)
-        box.item(0).setCheckState(Qt.Checked);box.item(1).setCheckState(Qt.Checked)
+        tiles=self.window.talent_friend_tiles
+        self.assertEqual(set(tiles),{'f1','f2','f3','f4','f5'})
+        self.assertIn('(Max Of 4 Can be used)',self.window.talent_friends_status.text())
+        QTest.mouseClick(tiles['f1'],Qt.LeftButton);QTest.mouseClick(tiles['f2'],Qt.LeftButton)
         self.assertEqual(self.window.talent_friend_ids,['f1','f2'])
-        self.assertIn('(Max Of 3 Can be used)',self.window.talent_friends_status.text())
         self.assertIn('Featuring: F1, F2',self.window.talent_cameo_label.text())
-        box.item(2).setCheckState(Qt.Checked)
-        self.assertEqual(self.window.talent_friend_ids,['f1','f2','f3'])
-        self.assertIn('Featuring: F1, F2, F3',self.window.talent_cameo_label.text())
-        self.window.store.save_player(dict(id='f4',name='Friend4',display_name='F4',aliases=[],photo=photo('orange'),enabled=True,consent_meta=True))
-        self.window.refresh_talent_friends()
-        box=self.window.talent_friends_box
-        self.assertEqual(box.count(),4)
-        for index in range(4):box.item(index).setCheckState(Qt.Checked)
-        self.assertEqual(len(self.window.talent_friend_ids),3)
-        self.assertIn('Max of 3 friends',self.window.cinematic_status.text())
+        strip_widgets=[self.window.talent_cameo_strip.itemAt(i).widget() for i in range(self.window.talent_cameo_strip.count())]
+        self.assertEqual(len([wide for wide in strip_widgets if wide is not None]),2)
+        self.window.on_talent_friend_toggled('f3');self.window.on_talent_friend_toggled('f4')
+        self.assertEqual(self.window.talent_friend_ids,['f1','f2','f3','f4'])
+        self.assertIn('Featuring: F1, F2, F3, F4',self.window.talent_cameo_label.text())
+        self.window.on_talent_friend_toggled('f5')
+        self.assertEqual(len(self.window.talent_friend_ids),4)
+        self.assertNotIn('f5',self.window.talent_friend_ids)
+        self.assertIn('Max of 4 friends',self.window.cinematic_status.text())
     def test_queue_cinematic_with_friends_stages_cast_and_prompt(self):
         import shutil as _shutil
         import tempfile

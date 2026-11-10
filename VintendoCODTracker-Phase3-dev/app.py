@@ -141,6 +141,25 @@ class ScreenshotTile(QFrame):
     def set_selected(self,value):
         self.setProperty('selected',bool(value));self.style().unpolish(self);self.style().polish(self)
 
+class FriendTile(QWidget):
+    """One friend tile: headshot photo with the name underneath. Click to toggle."""
+    def __init__(self,pid,on_toggle,parent=None):
+        super().__init__(parent);self.pid=str(pid);self._on_toggle=on_toggle
+        self.setCursor(Qt.PointingHandCursor)
+        layout=QVBoxLayout(self);layout.setContentsMargins(4,4,4,4);layout.setSpacing(3)
+        self.photo=QLabel();self.photo.setAlignment(Qt.AlignCenter);self.photo.setFixedSize(64,64)
+        self.photo.setStyleSheet('background:#080a0e;border:1px solid #292f39;border-radius:6px;color:#77818f;')
+        self.name=QLabel();self.name.setAlignment(Qt.AlignCenter);self.name.setWordWrap(True)
+        self.name.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
+        layout.addWidget(self.photo,0,Qt.AlignHCenter);layout.addWidget(self.name)
+        self.set_selected(False)
+    def set_selected(self,on):
+        color='#f97316' if on else '#292f39'
+        self.setStyleSheet('FriendTile{border:2px solid %s;border-radius:6px;background:#0b0e13;}'%color)
+    def mousePressEvent(self,event):
+        super().mousePressEvent(event)
+        if event.button()==Qt.LeftButton and callable(self._on_toggle):self._on_toggle(self.pid)
+
 class WindowsWindowHost:
     """Reparent one existing Windows top-level window into a QWidget surface."""
     GWL_STYLE=-16; WS_CHILD=0x40000000; WS_POPUP=0x80000000
@@ -382,9 +401,6 @@ QTabWidget#mediaTabs {background:transparent;}
 QTabWidget#mediaTabs QTabBar::tab {background:#1a1410;color:#a8a29e;border:1px solid #3a2e22;padding:8px 22px;margin-right:6px;border-top-left-radius:6px;border-top-right-radius:6px;font-weight:800;}
 QTabWidget#mediaTabs QTabBar::tab:selected {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fb923c,stop:1 #ea580c);color:#1c0f04;border-color:#fdba74;}
 QFrame#cinematicTile[selected="true"] {border:2px solid #f97316;background:#1c1008;}
-QListWidget#friendList{background:#0b0e13;border:1px solid #292f39;border-radius:6px;color:#e8ebf0;font-weight:700;}
-QListWidget#friendList::item{padding:7px 10px;border-radius:5px;}QListWidget#friendList::item:selected{background:#2a1503;color:#fdba74;}
-QListWidget#friendList::indicator:checked{background:#f97316;border:1px solid #f97316;}
 QLabel#talentDot {background:#22c55e;border-radius:5px;min-width:10px;min-height:10px;max-width:10px;max-height:10px;}
 QPushButton#codPrimary {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #f87171,stop:0.5 #dc2626,stop:1 #991b1b);color:#ffffff;border:1px solid #fca5a5;padding:12px 28px;border-radius:8px;font-weight:900;font-size:14px;}
 QPushButton#codPrimary:hover {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #fb923c,stop:0.5 #ea580c,stop:1 #9a3412);border-color:#fdba74;}
@@ -538,7 +554,11 @@ class Window(QMainWindow):
         self.refresh_cod_ai_screenshots()
         self.register_global_hotkeys()
     def app_tab_changed(self,index):
-        if self.app_tabs.widget(index) is self.codmunity_page:self.start_or_attach_codmunity()
+        if self.app_tabs.widget(index) is self.codmunity_page:
+            self.start_or_attach_codmunity()
+            if not self.tab_prototype and not getattr(self,'poll_busy',False):
+                self.codmunity_status.setText('Pulling CODMunity matches into the tracker…')
+                self.poll_records(source='codmunity-tab')
     def codmunity_executable(self):
         override=os.environ.get('CODMUNITY_DESKTOP_EXE','').strip()
         candidates=[Path(override)] if override else []
@@ -853,6 +873,7 @@ class Window(QMainWindow):
         return card
     def build_studio(self):
         l=self.page('AI Studio','CODMunity + verified scoreboard → complete extension job → Meta AI artwork with in-scene match results → Discord.')
+        self.studio_match_picker=QComboBox();self.studio_match_picker.setMaximumWidth(460);self.studio_match_picker.setToolTip('Pick a recent match to load it into AI Studio.');self.studio_match_picker.currentIndexChanged.connect(self.on_studio_match_changed);self.studio_match_row=self.row(l,QLabel('Pick a match'),self.studio_match_picker);self.studio_match_row.addStretch(1)
         self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
         self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
         self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);l.addWidget(self.generate_poster_button)
@@ -874,12 +895,14 @@ class Window(QMainWindow):
             steps_layout.addLayout(copy)
             if index<2:
                 arrow=QLabel(chr(187));arrow.setObjectName('stepArrow');steps_layout.addWidget(arrow);steps_layout.addStretch(1)
+        hotkey_bar=QHBoxLayout();hotkey_bar.setContentsMargins(0,0,0,0);hotkey_bar.setSpacing(10);hotkey_bar.addStretch(1)
+        self.cod_ai_hotkey_status=QLabel('Hotkey: Ctrl + F8');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);hotkey_bar.addWidget(self.cod_ai_hotkey_status)
+        hotkey_wrap=QWidget();hotkey_wrap.setLayout(hotkey_bar);l.addWidget(hotkey_wrap)
         l.addWidget(steps)
         actions=QHBoxLayout();actions.setSpacing(10)
-        actions.addWidget(self.button('Open Screenshots Folder',self.open_screenshots_folder))
+        self.open_screenshots_button=self.button('Open Screenshots Folder',self.open_screenshots_folder)
         actions.addWidget(self.button('Capture Game Screenshot',self.capture_cod_ai_screenshot,True),1)
         self.queue_cinematic_button=self.button('Send Selected Material to Meta Ai to Make A Video',self.queue_selected_cinematic);self.queue_cinematic_button.setStyleSheet('background:#1d4ed8;border:1px solid #3b82f6;border-radius:6px;color:#ffffff;font-weight:800;padding:10px 14px;');actions.addWidget(self.queue_cinematic_button,1)
-        self.cod_ai_hotkey_status=QLabel('Hotkey: Ctrl + F8');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);actions.addWidget(self.cod_ai_hotkey_status)
         l.addLayout(actions)
         self.cod_ai_capture_status=QLabel('Screenshots will be saved as lossless PNG files in the tracker data folder. Press Ctrl + F8 in game to capture.')
         self.cod_ai_capture_status.setWordWrap(True);self.cod_ai_capture_status.setStyleSheet('color:#99a8bc');l.addWidget(self.cod_ai_capture_status)
@@ -928,7 +951,7 @@ class Window(QMainWindow):
         main_split.addWidget(preview_panel);main_split.setStretchFactor(0,5);main_split.setStretchFactor(1,6);main_split.setSizes([740,860]);l.addWidget(main_split,1)
         action_bar=QHBoxLayout();action_bar.setSpacing(10);action_bar.addWidget(self.cinematic_status,1)
         self.test_cinematic_button=None
-        self.post_cinematic_button=self.button('Post to Discord',self.post_cinematic_video);self.post_cinematic_button.setObjectName('codSecondary');self.post_cinematic_button.setEnabled(False);action_bar.addWidget(self.post_cinematic_button)
+        self.post_cinematic_button=self.button('Post to Discord',self.post_cinematic_video);self.post_cinematic_button.setObjectName('codSecondary');self.post_cinematic_button.setEnabled(False);action_bar.insertWidget(0,self.open_screenshots_button);action_bar.addWidget(self.post_cinematic_button)
         l.addLayout(action_bar)
         talent_friends_row=QHBoxLayout();talent_friends_row.setSpacing(10)
         talent_panel=QFrame();talent_panel.setObjectName('dashboardPanel');talent_layout=QVBoxLayout(talent_panel);talent_layout.setContentsMargins(12,10,12,10);talent_layout.setSpacing(8)
@@ -943,6 +966,7 @@ class Window(QMainWindow):
         talent_btns=QHBoxLayout();talent_btns.setSpacing(6)
         talent_btns.addWidget(self.button('Change Photo',self.set_cinematic_talent));talent_btns.addWidget(self.button('Remove Photo',self.remove_cinematic_talent));talent_btns.addStretch(1);talent_meta.addLayout(talent_btns)
         talent_body.addLayout(talent_meta,1);talent_layout.addLayout(talent_body)
+        self.talent_cameo_strip=QHBoxLayout();self.talent_cameo_strip.setContentsMargins(0,0,0,0);self.talent_cameo_strip.setSpacing(8);talent_layout.addLayout(self.talent_cameo_strip)
         self.talent_cameo_label=QLabel('Featuring: just you');self.talent_cameo_label.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;');self.talent_cameo_label.setWordWrap(True);talent_layout.addWidget(self.talent_cameo_label)
         talent_friends_row.addWidget(talent_panel,2)
         friends_panel=QFrame();friends_panel.setObjectName('dashboardPanel');friends_layout=QVBoxLayout(friends_panel);friends_layout.setContentsMargins(12,10,12,10);friends_layout.setSpacing(8)
@@ -950,7 +974,7 @@ class Window(QMainWindow):
         friends_title=QLabel('FRIENDS IN THIS VIDEO');friends_title.setObjectName('codPanelTitle');friends_head.addWidget(friends_title)
         friends_opt=QLabel('(Optional)');friends_opt.setStyleSheet('font-size:11px;color:#9da8b7;');friends_head.addWidget(friends_opt);friends_head.addStretch(1)
         self.talent_friends_status=QLabel('');self.talent_friends_status.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;');friends_head.addWidget(self.talent_friends_status);friends_layout.addLayout(friends_head)
-        self.talent_friends_box=QListWidget();self.talent_friends_box.setObjectName('friendList');self.talent_friends_box.setMaximumHeight(112);self.talent_friends_box.itemClicked.connect(self.on_talent_friend_clicked);self.talent_friends_box.itemChanged.connect(self.on_talent_friend_changed);friends_layout.addWidget(self.talent_friends_box,1)
+        self.talent_friends_box=QGridLayout();self.talent_friends_box.setSpacing(8);self.talent_friend_tiles={};friends_scroll=QScrollArea();friends_scroll.setWidgetResizable(True);friends_scroll.setMaximumHeight(176);friends_host=QWidget();friends_host.setLayout(self.talent_friends_box);friends_scroll.setWidget(friends_host);friends_layout.addWidget(friends_scroll,1)
         talent_friends_row.addWidget(friends_panel,3);l.addLayout(talent_friends_row)
         self.refresh_talent_friends()
         self.refresh_talent_preview()
@@ -1283,7 +1307,10 @@ class Window(QMainWindow):
     def refresh_talent_friends(self):
         box=getattr(self,'talent_friends_box',None)
         if box is None:return
-        box.blockSignals(True);box.clear()
+        while box.count()>0:
+            child=box.takeAt(0);widget=child.widget()
+            if widget is not None:widget.deleteLater()
+        self.talent_friend_tiles={}
         eligible=[]
         for player in self.store.roster():
             if not player.get('enabled',True):continue
@@ -1292,47 +1319,61 @@ class Window(QMainWindow):
             if not photo or not Path(photo).is_file():continue
             eligible.append(player)
         valid={str(player.get('id')) for player in eligible}
-        self.talent_friend_ids=[pid for pid in (getattr(self,'talent_friend_ids',[]) or []) if pid in valid][:3]
+        self.talent_friend_ids=[pid for pid in (getattr(self,'talent_friend_ids',[]) or []) if pid in valid][:4]
         chosen=set(self.talent_friend_ids)
         if not eligible and hasattr(self,'talent_friends_status'):self.talent_friends_status.setText('No eligible friends \u2014 roster players need a headshot and Meta AI consent.')
-        for player in eligible:
+        for position,player in enumerate(eligible):
             pid=str(player.get('id'));name=str(player.get('display_name') or player.get('name',''))
-            item=QListWidgetItem(name);item.setData(Qt.UserRole,pid);item.setFlags(item.flags()|Qt.ItemIsUserCheckable);item.setCheckState(Qt.Checked if pid in chosen else Qt.Unchecked);box.addItem(item)
-        box.blockSignals(False)
+            tile=FriendTile(pid,self.on_talent_friend_toggled)
+            tile.name.setText(name);tile.setToolTip(name)
+            try:self.show_image(tile.photo,str(player.get('photo')),64,64)
+            except Exception:tile.photo.setText('No photo')
+            tile.set_selected(pid in chosen)
+            box.addWidget(tile,position//4,position%4)
+            self.talent_friend_tiles[pid]=tile
         self.update_talent_friends_status()
-    def on_talent_friend_clicked(self,item):
-        if item is None:return
-        item.setCheckState(Qt.Unchecked if item.checkState()==Qt.Checked else Qt.Checked)
-    def on_talent_friend_changed(self,item):
-        if item is None:return
-        try:box=self.talent_friends_box
-        except AttributeError:box=None
-        if box is not None:box.blockSignals(True)
-        try:
-            pid=str(item.data(Qt.UserRole) or '')
-            if not pid:return
-            chosen=[pid for pid in (getattr(self,'talent_friend_ids',[]) or [])]
-            if item.checkState()==Qt.Checked and pid not in chosen:chosen.append(pid)
-            if item.checkState()!=Qt.Checked and pid in chosen:chosen.remove(pid)
-            if len(chosen)>3:
-                chosen=chosen[:3]
-                if box is not None:
-                    for index in range(box.count()):
-                        other=box.item(index)
-                        if other is not None and str(other.data(Qt.UserRole) or '') not in chosen:other.setCheckState(Qt.Unchecked)
-                if hasattr(self,'cinematic_status'):self.cinematic_status.setText('Max of 3 friends per video (plus you).')
-            self.talent_friend_ids=chosen
-        finally:
-            if box is not None:box.blockSignals(False)
+    def on_talent_friend_toggled(self,pid):
+        if not pid:return
+        chosen=[pid for pid in (getattr(self,'talent_friend_ids',[]) or [])]
+        if pid in chosen:chosen.remove(pid)
+        else:
+            chosen.append(pid)
+            if len(chosen)>4:
+                chosen=chosen[:4]
+                if hasattr(self,'cinematic_status'):self.cinematic_status.setText('Max of 4 friends per video (plus you).')
+        self.talent_friend_ids=chosen
+        for other_pid,tile in (getattr(self,'talent_friend_tiles',{}) or {}).items():
+            try:tile.set_selected(other_pid in chosen)
+            except RuntimeError:pass
         self.update_talent_friends_status()
     def update_talent_friends_status(self):
         if not hasattr(self,'talent_friends_status'):return
         count=len(getattr(self,'talent_friend_ids',[]) or [])
-        self.talent_friends_status.setText((('No friends \u2014 just you' if not count else str(count)+'/3 friends selected')+' (Max Of 3 Can be used)'))
+        self.talent_friends_status.setText((('No friends \u2014 just you' if not count else str(count)+'/4 friends selected')+' (Max Of 4 Can be used)'))
         if hasattr(self,'talent_cameo_label'):
             wanted=set(getattr(self,'talent_friend_ids',[]) or [])
             names=[str(player.get('display_name') or player.get('name','')) for player in self.store.roster() if str(player.get('id')) in wanted]
             self.talent_cameo_label.setText('Featuring: '+', '.join(names) if names else 'Featuring: just you')
+        self.refresh_talent_cameo()
+    def refresh_talent_cameo(self):
+        strip=getattr(self,'talent_cameo_strip',None)
+        if strip is None:return
+        while strip.count()>0:
+            child=strip.takeAt(0)
+            widget=child.widget()
+            if widget is not None:widget.deleteLater()
+        for friend in self.selected_talent_friends():
+            cell=QVBoxLayout();cell.setContentsMargins(0,0,0,0);cell.setSpacing(2)
+            thumb=QLabel();thumb.setAlignment(Qt.AlignCenter);thumb.setFixedSize(56,56)
+            thumb.setStyleSheet('background:#080a0e;border:1px solid #f97316;border-radius:6px;color:#77818f;')
+            try:self.show_image(thumb,str(friend.get('photo')),56,56)
+            except Exception:thumb.setText('No photo')
+            caption=QLabel(str(friend.get('display_name') or friend.get('name','')))
+            caption.setAlignment(Qt.AlignCenter);caption.setWordWrap(True)
+            caption.setStyleSheet('font-size:10px;font-weight:700;color:#c4ccd8;')
+            cell.addWidget(thumb,0,Qt.AlignHCenter);cell.addWidget(caption)
+            holder=QWidget();holder.setLayout(cell);strip.addWidget(holder)
+        strip.addStretch(1)
     def selected_talent_friends(self):
         wanted=set(getattr(self,'talent_friend_ids',[]) or [])
         friends=[]
@@ -1340,7 +1381,7 @@ class Window(QMainWindow):
             if str(player.get('id')) in wanted and player.get('enabled',True) and player.get('consent_meta',False):
                 photo=str(player.get('photo') or '')
                 if photo and Path(photo).is_file():friends.append(player)
-        return friends[:3]
+        return friends[:4]
 
     def set_cinematic_talent(self):
         try:
@@ -1596,7 +1637,7 @@ class Window(QMainWindow):
         try:talent_ids=json.loads(row.get('talent_ids') or '[]')
         except Exception:talent_ids=[]
         faces=[]
-        for pid in list(talent_ids or [])[:3]:
+        for pid in list(talent_ids or [])[:4]:
             staged=self.videos_dir()/('talent_'+str(pid)+'.png')
             if staged.is_file():faces.append(str(staged))
         talent_png=self.videos_dir()/'talent.png'
@@ -2042,7 +2083,7 @@ class Window(QMainWindow):
         if now-self.last_poll>=self.poll.value() and not self.poll_busy:self.last_poll=now;self.poll_records()
         if self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked() and now-self.last_auto>=AUTO_OCR_INTERVAL_SECONDS and not self.capture_busy:
             self.last_auto=now;self.capture_once(automatic=True)
-    def poll_records(self):
+    def poll_records(self,source=None):
         self.poll_busy=True;values=dict(self.settings.values);mode=self.mode.currentText()
         def work():
             directory,records=E.load_matches(values);E.refresh_codmunity_stats(values,self.store);boot=self.store.meta('cod_bootstrapped',False);new=[]
@@ -2071,6 +2112,7 @@ class Window(QMainWindow):
         def done(new):
             self.poll_busy=False
             for mid in new:self.log('New match queued for Squad Night review: '+mid)
+            if source=='codmunity-tab':self.codmunity_status.setText('CODMunity matches are in the tracker.')
             self.refresh_history()
         self.async_task(work,done,lambda _:setattr(self,'poll_busy',False))
     def ensure_capture(self):
@@ -2366,6 +2408,18 @@ class Window(QMainWindow):
                 self.link_match.addItem(str(match.get('modeKey',match.get('mode','match')))+' · '+str(match.get('playedAt',''))+' · '+job['id'][-12:],job['id'])
         ix=self.link_match.findData(active_link)
         if ix>=0:self.link_match.setCurrentIndex(ix)
+        self.studio_match_picker.blockSignals(True)
+        active_studio=self.studio_match_picker.currentData()
+        self.studio_match_picker.clear()
+        for job in rows:
+            if job['status'] not in ('delivered','solo_delivered'):
+                match=json.loads(job['payload'])
+                self.studio_match_picker.addItem(str(match.get('modeKey',match.get('mode','match')))+' · '+str(match.get('playedAt',''))+' · '+job['id'][-12:],job['id'])
+        six=self.studio_match_picker.findData(active_studio)
+        if six>=0:self.studio_match_picker.setCurrentIndex(six)
+        self.studio_match_picker.blockSignals(False)
+        picked=self.studio_match_picker.currentData()
+        if picked and picked!=getattr(self,'active_id',None):self.load_studio(picked)
         self.dashboard_metrics['matches'].setText(f'{len(rows):,}')
         self.dashboard_metrics['squad_posts'].setText(f"{sum(j['status']=='delivered' for j in rows):,}")
         review_statuses={'needs_review','art_ready','ready','failed','uncertain','awaiting_artwork'}
@@ -2549,6 +2603,10 @@ class Window(QMainWindow):
     def open_latest(self):
         rows=self.store.history()
         if rows:self.load_studio(next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id']));self.nav.setCurrentRow(5)
+    def on_studio_match_changed(self,index):
+        try:mid=self.studio_match_picker.itemData(index)
+        except (AttributeError,RuntimeError):return
+        if mid:self.load_studio(mid)
     def load_studio(self,mid):
         job=self.store.get(mid)
         if not job:return
@@ -2568,6 +2626,8 @@ class Window(QMainWindow):
                 except (OSError,ValueError):self.last_frame=None
         ix=self.link_match.findData(mid)
         if ix>=0:self.link_match.setCurrentIndex(ix)
+        six=self.studio_match_picker.findData(mid)
+        if six>=0:self.studio_match_picker.setCurrentIndex(six)
         self.job_status.setText(job['error'] or 'Ready for review')
     def view_source(self):
         job=self.selected_job()

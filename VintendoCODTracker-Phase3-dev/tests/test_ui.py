@@ -125,6 +125,13 @@ class UITests(unittest.TestCase):
     def test_cod_ai_screenshot_controls_are_available(self):
         self.assertTrue(hasattr(self.window,'cod_ai_hotkey_status'))
         self.assertTrue(hasattr(self.window,'cod_ai_screenshots'))
+    def test_preview_video_widget_stays_hidden_without_a_video(self):
+        w=self.window
+        self.assertTrue(w.cinematic_video_widget.isHidden())
+        w.preview_cinematic_video(None)
+        self.assertTrue(w.cinematic_video_widget.isHidden())
+        self.assertFalse(w.preview_image.isHidden())
+        self.assertEqual(w.preview_sub.text(),'Watch the selected video.')
     def test_poster_studio_has_one_scoreboard_driven_generate_action(self):
         self.assertEqual(self.window.generate_poster_button.text(),'Generate AI End Game Picture')
         self.assertFalse(hasattr(self.window,'provider'));self.assertFalse(hasattr(self.window,'theme'))

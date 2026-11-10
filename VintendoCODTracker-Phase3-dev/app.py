@@ -953,11 +953,11 @@ class Window(QMainWindow):
         preview_title=QLabel('Preview');preview_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');right_layout.addWidget(preview_title)
         preview_sub=QLabel('Watch the selected video.');preview_sub.setStyleSheet('color:#99a8bc');right_layout.addWidget(preview_sub)
         self.preview_sub=preview_sub
-        self.preview_image=QLabel('Select a screenshot to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(220);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');right_layout.addWidget(self.preview_image,1)
+        self.preview_image=QLabel('Select a screenshot to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(180);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');right_layout.addWidget(self.preview_image,1)
         self.cinematic_video_widget=QVideoWidget();self.cinematic_fullscreen_filter=FullscreenExitFilter(lambda:bool(getattr(self,'cinematic_video_widget',None) and self.cinematic_video_widget.isFullScreen()),self.exit_cinematic_fullscreen,self.toggle_cinematic_fullscreen)
         app_instance=QApplication.instance()
         if app_instance is not None:app_instance.installEventFilter(self.cinematic_fullscreen_filter)
-        self.cinematic_video_widget.setMinimumHeight(220);self.cinematic_video_widget.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;');right_layout.addWidget(self.cinematic_video_widget,1)
+        self.cinematic_video_widget.setMinimumHeight(180);self.cinematic_video_widget.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;');right_layout.addWidget(self.cinematic_video_widget,1);self.cinematic_video_widget.hide()
         self.cinematic_player=QMediaPlayer(self);self.cinematic_audio=QAudioOutput(self);self.cinematic_audio.setVolume(.8);self.cinematic_player.setAudioOutput(self.cinematic_audio);self.cinematic_player.setVideoOutput(self.cinematic_video_widget);self.cinematic_player.errorOccurred.connect(lambda error,message:self.cinematic_status.setText('Video preview error: '+str(message)[:200]) if error else None)
         self.cinematic_seek=QSlider(Qt.Horizontal);self.cinematic_seek.setRange(0,0)
         self.cinematic_time=QLabel('0:00 / 0:00');self.cinematic_time.setStyleSheet('color:#c4ccd8;font-weight:700;')
@@ -1594,7 +1594,7 @@ class Window(QMainWindow):
         self.cinematic_player.stop()
         if path and Path(path).is_file():self.cinematic_player.setSource(QUrl.fromLocalFile(path));self.cinematic_player.play();self.cinematic_play_button.setText('Pause')
         else:self.cinematic_player.setSource(QUrl());self.cinematic_play_button.setText('Play')
-        has_video=bool(path and Path(path).is_file());self.preview_image.setVisible(not has_video);self.cinematic_video_widget.setVisible(True);self.preview_sub.setText(Path(path).name if has_video else 'Watch the selected video.')
+        has_video=bool(path and Path(path).is_file());self.preview_image.setVisible(not has_video);self.cinematic_video_widget.setVisible(has_video);self.preview_sub.setText(Path(path).name if has_video else 'Watch the selected video.')
         self.post_cinematic_button.setEnabled(has_video)
         if hasattr(self,'cinematic_play_button'):self.cinematic_play_button.setEnabled(has_video)
         if hasattr(self,'cinematic_fullscreen_button'):self.cinematic_fullscreen_button.setEnabled(has_video)
@@ -1778,7 +1778,7 @@ class Window(QMainWindow):
         if self.cod_ai_screenshots.count():
             if not self.cod_ai_screenshots.currentItem():self.cod_ai_screenshots.setCurrentRow(0)
         else:
-            self.preview_image.setText('Select a screenshot to preview it here');self.preview_sub.setText('Watch the selected video.')
+            self.preview_image.show();self.cinematic_video_widget.hide();self.preview_image.setText('Select a screenshot to preview it here');self.preview_sub.setText('Watch the selected video.')
         self.maybe_offer_screenshot_cleanup()
     def ask_screenshot_cleanup(self,used_count,total_count):
         box=QMessageBox(self);box.setWindowTitle('Many screenshots');box.setText('You seem to have a bunch of screenshots. Would you like to delete the ones you have already used in videos?');box.setInformativeText(f'{used_count} used of {total_count} screenshots would be deleted. Queue entries stay for history.');yes_button=box.addButton('Yes',QMessageBox.YesRole);box.addButton('No',QMessageBox.NoRole);box.setDefaultButton(yes_button);box.exec();return box.clickedButton() is yes_button

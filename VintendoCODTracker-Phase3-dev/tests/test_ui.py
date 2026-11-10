@@ -139,6 +139,15 @@ class UITests(unittest.TestCase):
         self.assertEqual(self.window.generate_poster_button.text(),'GENERATE MATCH POSTER')
         self.assertFalse(hasattr(self.window,'provider'));self.assertFalse(hasattr(self.window,'theme'))
     def test_solo_startup_does_not_initialize_ocr(self):self.assertIsNone(self.window.capture);self.assertIsNone(self.window.browser)
+    def test_activate_squad_night_button_acknowledges_every_click(self):
+        w=self.window
+        w.mode.setCurrentText('Solo Ops');w.nav.setCurrentRow(2)
+        button=self._button_by_text('Activate Squad Night')
+        self.assertIsNotNone(button);self.assertTrue(button.isEnabled())
+        button.click()
+        self.assertEqual(w.mode.currentText(),'Squad Night');self.assertEqual(w.nav.currentRow(),0)
+        button.click()
+        self.assertEqual(w.mode.currentText(),'Squad Night');self.assertEqual(w.nav.currentRow(),0)
     def test_mode_switch_roundtrip(self):
         self.window.mode.setCurrentText('Squad Night');self.window.auto_detect.setChecked(True);self.window.mode.setCurrentText('Solo Ops');self.assertFalse(self.window.auto_detect.isChecked());self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
     def test_roi_verification_cannot_be_assumed(self):self.assertFalse(self.window.verified.isChecked())

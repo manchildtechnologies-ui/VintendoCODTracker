@@ -764,7 +764,11 @@ class Window(QMainWindow):
         for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  Poster Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  GENERATE MATCH POSTER stages the complete job for Vintendo Squad AI and writes a single-prompt import file plus a numbered photo map.', '05  Use the supported import controls in Meta AI Automation or the regular Meta AI page. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
-        self.row(l,self.button('Activate Squad Night',lambda:self.mode.setCurrentText('Squad Night'),True));l.addStretch()
+        self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True));l.addStretch()
+    def activate_squad_night(self):
+        if self.mode.currentText()!='Squad Night':self.mode.setCurrentText('Squad Night')
+        else:self.log('Squad Night is already active. Press Start to begin.')
+        self.nav.setCurrentRow(0)
     def build_capture(self):
         l=self.page('Scoreboard Capture','Set the scoreboard region once. At match end, press Ctrl + Shift + F8 while the final scoreboard is visible; OCR prepares a draft for review.');self.capture_subtitle=l.itemAt(1).widget()
         self.monitor=QComboBox();self.roi_label=QLabel('Region: '+str(self.settings.values.get('roi') or 'not selected'))

@@ -1491,4 +1491,8 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.current_player,'boot-a');self.assertEqual(called,[True])
         w._boot_refresh_distributions()
         self.assertEqual(called,[True])
+    def test_window_opens_within_screen_bounds(self):
+        w=self.window
+        self.assertGreaterEqual(w.width(),1100);self.assertLessEqual(w.width(),1600)
+        self.assertGreaterEqual(w.height(),730);self.assertLessEqual(w.height(),1000)
 if __name__=='__main__':unittest.main()

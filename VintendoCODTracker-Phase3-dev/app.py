@@ -613,7 +613,13 @@ class Window(QMainWindow):
         self.tracking=False;self.paused=False;self.solo=None;self.capture=None;self.capture_busy=False;self.screenshot_busy=False;self.poll_busy=False;self.active_id=None;self.last_capture=None;self.last_frame=None;self.outputs=[];self.browser=None;self.closing=False
         self.tab_prototype=os.environ.get('VINTENDO_TAB_PROTOTYPE')=='1'
         self.track_both_startup=os.environ.get('VINTENDO_TRACK_BOTH')=='1'
-        self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker');self.resize(1600,1000);self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
+        self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker');self._fit_to_screen();self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
+    def _fit_to_screen(self):
+        try:avail=self.screen().availableGeometry()
+        except (AttributeError,RuntimeError):avail=None
+        if avail is None:self.resize(1600,1000);return
+        self.resize(min(1600,max(1100,int(avail.width()*0.94))),min(1000,max(730,int(avail.height()*0.92))))
+        self.move(avail.center()-self.rect().center())
         self.setStyleSheet(STYLE);central=QWidget();central.setObjectName('centralWindow');self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(0,0,0,0);root.setSpacing(0)
         self.app_tabs=QTabWidget();self.app_tabs.setDocumentMode(True);root.addWidget(self.app_tabs)
         tracker_shell=QWidget();tracker_shell_layout=QHBoxLayout(tracker_shell);tracker_shell_layout.setContentsMargins(0,0,0,0);tracker_shell_layout.setSpacing(0);self.app_tabs.addTab(tracker_shell,'Vintendo COD Tracker')
@@ -1396,20 +1402,23 @@ class Window(QMainWindow):
         return out
     def roster_card_widget(self,player,rank=None):
         card=QWidget()
-        layout=QHBoxLayout(card);layout.setContentsMargins(10,8,10,8);layout.setSpacing(10)
-        thumb=QLabel();thumb.setFixedSize(48,48)
+        layout=QHBoxLayout(card);layout.setContentsMargins(14,12,14,12);layout.setSpacing(14)
+        thumb=QLabel();thumb.setFixedSize(56,56)
         photo=str(player.get('photo') or '')
-        thumb.setPixmap(self.rounded_thumb(photo,48) if photo and Path(photo).is_file() else self.default_avatar(48))
+        thumb.setPixmap(self.rounded_thumb(photo,56) if photo and Path(photo).is_file() else self.default_avatar(56))
         layout.addWidget(thumb)
-        text=QVBoxLayout();text.setSpacing(2)
+        text=QVBoxLayout();text.setSpacing(4)
         display=str(player.get('display_name') or player.get('name',''))
         name_label=QLabel(display);name_label.setObjectName('rosterCardName')
         sub=QLabel('COD: '+str(player.get('name','')));sub.setObjectName('rosterCardSub')
         text.addWidget(name_label);text.addWidget(sub)
+        enabled=bool(player.get('enabled',True))
+        status=QLabel(('\u25cf Enabled' if enabled else '\u25cb Disabled'));status.setObjectName('rosterEnabled');status.setStyleSheet('font-size:10px;font-weight:700;color:#4ade80;background:transparent;' if enabled else 'font-size:10px;font-weight:700;color:#6b7280;background:transparent;')
+        text.addWidget(status)
         layout.addLayout(text,1)
         info=rank or {}
         ladder=info.get('rank')
-        rank_col=QVBoxLayout();rank_col.setSpacing(2)
+        rank_col=QVBoxLayout();rank_col.setSpacing(4)
         if ladder is not None and self._is_local_roster_player(player):
             color=self.LADDER_TIER_COLORS.get(ladder['tier'],'#e5e9ef')
             badge=QLabel('●  '+ladder['tier']);badge.setObjectName('rosterRankTier');badge.setStyleSheet('font-size:13px;font-weight:900;color:'+color+';')
@@ -1442,10 +1451,8 @@ class Window(QMainWindow):
             rank_col.addWidget(line)
             bottom=QLabel(bottom_text);bottom.setObjectName('rosterRankNext');bottom.setStyleSheet('font-size:10px;font-weight:700;color:#9da8b7;')
             rank_col.addWidget(bottom)
-        rank_wrap=QWidget();rank_wrap.setLayout(rank_col);rank_wrap.setMinimumWidth(132);layout.addWidget(rank_wrap,0)
-        enabled=bool(player.get('enabled',True))
+        rank_wrap=QWidget();rank_wrap.setLayout(rank_col);rank_wrap.setMinimumWidth(168);layout.addWidget(rank_wrap,0)
         status=QLabel(('● Enabled' if enabled else '○ Disabled'));status.setStyleSheet('font-size:11px;font-weight:700;color:#4ade80;background:transparent;' if enabled else 'font-size:11px;font-weight:700;color:#6b7280;background:transparent;')
-        layout.addWidget(status,0,Qt.AlignVCenter)
         return card
     def build_studio(self):
         l=self.page('AI Studio','CODMunity + verified scoreboard → prepared Meta AI inputs → Meta AI artwork with in-scene match results → Discord.')
@@ -3111,7 +3118,7 @@ class Window(QMainWindow):
             rank_by_id[str(player.get('id'))]=self._roster_rank_info(player,game,mode,scope)
         self.roster_list.blockSignals(True);self.roster_list.clear()
         for player in visible:
-            item=QListWidgetItem();item.setData(Qt.UserRole,str(player.get('id')));item.setSizeHint(QSize(0,78))
+            item=QListWidgetItem();item.setData(Qt.UserRole,str(player.get('id')));item.setSizeHint(QSize(0,92))
             self.roster_list.addItem(item);self.roster_list.setItemWidget(item,self.roster_card_widget(player,rank_by_id.get(str(player.get('id')))))
         self.roster_list.blockSignals(False)
         if getattr(self,'current_player',None) in self.roster_visible_ids:

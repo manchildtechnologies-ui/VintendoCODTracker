@@ -43,20 +43,9 @@ jobs:
           $env:VINTENDO_NO_AUTO_START = "1"
           ./VintendoCODTracker.exe --verify-build
 
-      - name: Stage extension zip (no backups)
-        shell: pwsh
-        run: |
-          $stage = "$env:RUNNER_TEMP\ext-stage"
-          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-          Copy-Item -Path ..\Vintendo-COD-Automation-Phase3-dev -Destination $stage -Recurse `
-            -Exclude *.backup-*,*.bak
-          Get-ChildItem $stage -Recurse -Include *.backup-*,*.bak -File | Remove-Item -Force
-          Compress-Archive -Path "$stage\*" -DestinationPath "$env:RUNNER_TEMP\VintendoExtension.zip" -Force
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             VintendoCODTracker-Phase3-dev/VintendoCODTracker.exe
-            ${{ runner.temp }}\VintendoExtension.zip
           generate_release_notes: true

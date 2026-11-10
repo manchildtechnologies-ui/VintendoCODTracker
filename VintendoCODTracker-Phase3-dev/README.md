@@ -2,7 +2,7 @@
 
 ## Phase 3 development copy
 
-This copy includes the automatic match-to-Meta AI queue. For pairing and current behavior, see [PHASE3_AUTOMATION.md](PHASE3_AUTOMATION.md); Phase 3 verification and limitations are recorded in [PHASE3_TEST_RESULTS.md](PHASE3_TEST_RESULTS.md). The prior manual import flow described later remains available as a fallback.
+This copy includes the automatic match-to-Meta AI queue through the in-app Tracker Browser; no extension install or pairing is needed. Current behavior is covered in [PHASE3_AUTOMATION.md](PHASE3_AUTOMATION.md); Phase 3 verification and limitations are recorded in [PHASE3_TEST_RESULTS.md](PHASE3_TEST_RESULTS.md). The manual import flow described later remains available as a fallback.
 
 The dashboard uses the existing PySide6 interface with a red-and-black tactical theme. The sidebar brand uses `assets/vintendo-cod-tracker-logo.png`; the build script includes it in packaged builds. Optional decorative backgrounds can be placed in `assets/dashboard-operator.png`, `assets/dashboard-operator.webp`, `assets/dashboard-atmosphere.png`, or `assets/dashboard-atmosphere.webp`; when none is present, the dashboard draws a lightweight gradient placeholder. Artwork is decorative and never replaces live UI controls or match data.
 
@@ -74,13 +74,9 @@ Each generation job is tracked persistently (match id, verified stats, matched s
 
 If the browser download event is unavailable, use **Import downloaded Meta AI image** to select the image you downloaded from the consumer website. The same validation, deterministic scoreboard overlay, duplicate protection and optional automatic Discord posting then apply. There is no API or alternate artwork generator in the app.
 
-## Vintendo Squad AI Chrome extension
+## Vintendo Squad AI Chrome extension (retired)
 
-The unpacked Manifest V3 extension in [Chrome-Extension](Chrome-Extension/README.md) connects to the running app through an authenticated HTTP service bound only to `127.0.0.1:8765`. Extension pairing uses a random bearer token protected by Windows DPAPI in app settings; the extension stores its copy in Chrome's extension-local storage. Chrome may omit `Origin` on an extension's loopback preflight, so the bridge validates the extension runtime ID header and bearer token; if Chrome supplies an Origin, it must exactly match the packaged extension ID. Host and client must be loopback, request sizes are bounded, image bytes/type/dimensions are validated, and webhook settings are never returned. It is not reachable through the LAN listener.
-
-The popup shows up to ten active jobs plus recent completions, match context, every verified squad row/rank, per-player photo match status and filename, the complete prompt, download status, retry and cancel actions. **Prepare Reference Photos** stages only unambiguous roster matches with recorded Meta AI photo consent and opens that match's folder. The adjacent import-ready `.txt` is a single prompt line for the third-party prompt-file importer; numbered images and a CSV/JSON map preserve each player's identity. **Open Meta AI** uses the current Chrome profile so normal interactive login persists. Website prompt import, photo upload, submission and image download remain user actions. Chrome's download record has no source-tab ID, so the extension associates a download only when its referrer is Meta AI and the one active Meta tab is the tab opened for the armed match. If it cannot determine the source, the user imports through the match-bound page and confirms the match ID. The app then applies the verified-stat poster overlay, duplicate protection and Discord delivery.
-
-Install using the steps in [Chrome-Extension/README.md](Chrome-Extension/README.md). Pairing controls are in the app's **Application Settings** page. A local mock fixture and separate test-only extension manifest live under `tests/extension_mock`; the production manifest does not register a content script and has no Meta page host permission. The mock is not evidence that the consumer Meta AI site permits automated prompt entry or uploads.
+The extension and its loopback pairing bridge were removed. Meta videos and posters are made in the in-app Tracker Browser: the prompt is copied to the clipboard and the staged reference photos open in a folder for manual upload to Meta AI. No extension install or pairing token is needed. Website prompt import, photo upload, submission and image download remain visible user actions. The app then applies the verified-stat poster overlay, duplicate protection and Discord delivery.
 
 ## Delivery reliability and controls
 

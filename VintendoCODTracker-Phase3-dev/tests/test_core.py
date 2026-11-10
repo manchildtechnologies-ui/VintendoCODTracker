@@ -30,10 +30,6 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(E.Settings(self.root).cinematic_webhook(),'test-cinematic-secret-not-a-real-webhook')
     def test_settings_persist(self):
         s=E.Settings(self.root);s.values['player']='fixture';s.save();self.assertEqual(E.Settings(self.root).values['player'],'fixture')
-    def test_extension_pairing_token_is_dpapi_protected_and_rotatable(self):
-        settings=E.Settings(self.root);first=settings.extension_token();raw=settings.path.read_text(encoding='utf-8')
-        self.assertNotIn(first,raw);second=settings.rotate_extension_token();self.assertNotEqual(first,second)
-        self.assertEqual(E.Settings(self.root).extension_token(),second)
     def test_squad_auto_post_migration_preserves_future_opt_out(self):
         legacy=self.root/'old-settings';legacy.mkdir();(legacy/'settings.json').write_text(json.dumps({'auto_post':False,'player':'fixture'}))
         migrated=E.Settings(legacy);self.assertTrue(migrated.values['auto_post']);self.assertEqual(migrated.values['player'],'fixture')

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 import engine as E
-from local_bridge import valid_mp4
+from engine import valid_mp4
 
 
 class CinematicJobStoreTests(unittest.TestCase):

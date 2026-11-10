@@ -233,8 +233,6 @@ class Task(QRunnable):
         try:self.signals.done.emit(result)
         except RuntimeError:pass
 
-class Bridge(QObject):
-    image=Signal(str,str);status=Signal(str)
 
 PAGE_BANNERS={'Dashboard':'dashboard.png','Scoreboard Capture':'scoreboard.png','Match History':'match-history.png','Player Roster':'roster.png','AI Studio':'ai-studio.png','ScreenShots and Videos':'screenshots.png','Tracker Browser':'browser.png','Settings':'settings.png'}
 class ScoreboardHotkeyFilter(QAbstractNativeEventFilter):
@@ -518,7 +516,6 @@ class Window(QMainWindow):
         self.tracking=False;self.paused=False;self.solo=None;self.capture=None;self.capture_busy=False;self.screenshot_busy=False;self.poll_busy=False;self.active_id=None;self.last_capture=None;self.last_frame=None;self.outputs=[];self.browser=None;self.closing=False
         self.tab_prototype=os.environ.get('VINTENDO_TAB_PROTOTYPE')=='1'
         self.track_both_startup=os.environ.get('VINTENDO_TRACK_BOTH')=='1'
-        self.bridge=Bridge();self.bridge.image.connect(self.received_art);self.bridge.status.connect(self.log)
         self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker');self.resize(1600,1000);self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
         self.setStyleSheet(STYLE);central=QWidget();central.setObjectName('centralWindow');self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(0,0,0,0);root.setSpacing(0)
         self.app_tabs=QTabWidget();self.app_tabs.setDocumentMode(True);root.addWidget(self.app_tabs)
@@ -670,7 +667,7 @@ class Window(QMainWindow):
     def notice(self,text):QMessageBox.information(self,'Vintendo COD Tracker',text)
     def ask(self,text):return QMessageBox.question(self,'Vintendo COD Tracker',text)==QMessageBox.Yes
     def request_exit(self):
-        if self.ask('Exit Vintendo COD Tracker?\n\nTracking stops, the Chrome bridge disconnects, and all windows close.'):self.shutdown()
+        if self.ask('Exit Vintendo COD Tracker?\n\nTracking stops and all windows close.'):self.shutdown()
     def async_task(self,fn,done=None,failed=None):
         task=Task(fn);self.tasks.add(task)
         def finish(result):
@@ -718,7 +715,7 @@ class Window(QMainWindow):
         health=QFrame();health.setObjectName('dashboardPanel');health_layout=QVBoxLayout(health);health_layout.setContentsMargins(13,12,13,13);health_layout.setSpacing(10)
         health_title=QLabel('▮  SYSTEM STATUS');health_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');health_layout.addWidget(health_title)
         self.dashboard_health={}
-        for key,label in (('codmunity','CODMunity data'),('ocr','Scoreboard OCR'),('bridge','Chrome bridge'),('discord','Discord webhook')):
+        for key,label in (('codmunity','CODMunity data'),('ocr','Scoreboard OCR'),('discord','Discord webhook')):
             line=QFrame();line.setObjectName('healthRow');row=QHBoxLayout(line);row.setContentsMargins(9,7,9,7);indicator=QLabel('●');indicator.setObjectName('healthDot');name=QLabel(label);value=QLabel('Checking');value.setObjectName('healthValue');row.addWidget(indicator);row.addWidget(name,1);row.addWidget(value);health_layout.addWidget(line);self.dashboard_health[key]=(indicator,value)
         body.addWidget(health,0,2)
 
@@ -741,7 +738,7 @@ class Window(QMainWindow):
         self.data_status=QPlainTextEdit();self.data_status.setReadOnly(True);l.addWidget(self.data_status,1)
     def build_squad(self):
         l=self.page('Squad Night','CODMunity match context plus the captured scoreboard become one verified, match-bound poster job.')
-        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture stages the complete job for Vintendo Squad AI and writes a single-prompt import file plus a numbered photo map.', '05  Use the supported import controls in Meta AI Automation or the regular Meta AI page. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
+        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture stages the complete job for Meta AI and writes a single-prompt import file plus a numbered photo map.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
         self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True));l.addStretch()
@@ -898,7 +895,7 @@ class Window(QMainWindow):
         layout.addWidget(status,0,Qt.AlignVCenter)
         return card
     def build_studio(self):
-        l=self.page('AI Studio','CODMunity + verified scoreboard → complete extension job → Meta AI artwork with in-scene match results → Discord.')
+        l=self.page('AI Studio','CODMunity + verified scoreboard → prepared Meta AI inputs → Meta AI artwork with in-scene match results → Discord.')
         self.studio_match_picker=QComboBox();self.studio_match_picker.setMaximumWidth(460);self.studio_match_picker.setToolTip('Pick a recent match to load it into AI Studio.');self.studio_match_picker.currentIndexChanged.connect(self.on_studio_match_changed);self.studio_match_row=self.row(l,QLabel('Pick a match'),self.studio_match_picker);self.studio_match_row.addStretch(1)
         self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
         self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
@@ -1021,10 +1018,6 @@ class Window(QMainWindow):
         try:mode=str(self.settings.values.get('tracker_browser_mode') or 'dedicated').strip().lower()
         except Exception:mode='dedicated'
         return mode if mode in ('dedicated','attach') else 'dedicated'
-    def meta_submission(self):
-        try:mode=str(self.settings.values.get('meta_submission') or 'inapp').strip().lower()
-        except Exception:mode='inapp'
-        return mode if mode in ('inapp','extension') else 'inapp'
     def tracker_chrome_data_dir(self):
         try:base=Path(E.DATA)
         except Exception:base=Path.home()/'.vintendo-cod-tracker'
@@ -1087,18 +1080,12 @@ class Window(QMainWindow):
         active=[row for row in rows if str((row or {}).get('status') or '') not in ('completed','failed')]
         ready=[row for row in rows if str((row or {}).get('status') or '')=='completed' and str((row or {}).get('video') or '')]
         self.browser_queue.setText(f'Cinematic queue: {len(active)} active, {len(ready)} finished video(s) ready in the COD AI tab.')
-        self.browser_status.setText('Bridge: checking 127.0.0.1:8765…')
-        def check():
-            import socket
-            try:socket.create_connection(('127.0.0.1',8765),timeout=2).close();return True
-            except OSError:return False
-        def show_bridge(ok):
-            if getattr(self,'browser_hold_message',False):return
-            try:
-                self.browser_status.setText('Bridge: CONNECTED on 127.0.0.1:8765. The extension polls automatically.' if ok else 'Bridge: OFFLINE. Start the tracker with Launch-Phase3-Tracker.cmd, then press Open Tracker Chrome.')
-            except (RuntimeError, AttributeError):pass
-        self.async_task(check,show_bridge)
-
+        if getattr(self,'browser_hold_message',False):return
+        try:alive=bool(getattr(self.browser_host,'hwnd',None) and ctypes.windll.user32.IsWindow(self.browser_host.hwnd))
+        except Exception:alive=False
+        if alive:
+            try:self.browser_status.setText('Tracker Chrome is embedded in this tab. Leave its Meta AI tab untouched while a video generates.')
+            except (RuntimeError,AttributeError):pass
     def find_tracker_chrome_windows(self):
         user32=ctypes.windll.user32;found=[]
         callback_type=ctypes.WINFUNCTYPE(ctypes.c_bool,wintypes.HWND,wintypes.LPARAM)
@@ -1192,14 +1179,10 @@ class Window(QMainWindow):
         self.browser_retries=QSpinBox();self.browser_retries.setRange(0,3);self.browser_retries.setValue(int(self.settings.values.get('browser_retries',1)))
         f=QFormLayout();f.addRow('Polling interval (seconds)',self.poll);f.addRow('Meta page navigation timeout',self.browser_timeout);f.addRow('Wait for image download',self.download_timeout);f.addRow('Browser/navigation retries',self.browser_retries);f.addRow('Application data',QLabel(str(E.DATA)));automation_layout.addLayout(f)
         self.row(automation_layout,self.button('Open data folder',lambda:os.startfile(str(E.DATA))),self.button('Open logs folder',lambda:os.startfile(str(E.DATA))))
-        automation_layout.addWidget(QLabel('Chrome extension bridge: loopback-only at 127.0.0.1:8765. The pairing token is protected with Windows DPAPI.'))
-        self.extension_bridge_status=QLabel('Starting when the application runs normally.');self.extension_bridge_status.setStyleSheet('color:#99a8bc')
-        automation_layout.addWidget(self.extension_bridge_status)
-        self.row(automation_layout,self.button('Copy Chrome pairing token',self.copy_extension_token),self.button('Rotate pairing token',self.rotate_extension_token),self.button('Reconnect bridge',self.reconnect_extension_bridge))
+        automation_layout.addWidget(QLabel('Meta videos are made in the in-app Tracker Browser. No extension install or pairing token is needed.'))
         browser_mode_note=QLabel('Tracker Chrome profile: the dedicated profile keeps the Meta AI login isolated from your own Chrome; attaching reuses a Meta AI tab you already have open in your own Chrome.');browser_mode_note.setWordWrap(True);automation_layout.addWidget(browser_mode_note)
         self.browser_mode_combo=QComboBox();self.browser_mode_combo.addItems(['Dedicated tracker profile (recommended)','Use my already-open Chrome']);self.browser_mode_combo.setCurrentIndex(1 if self.tracker_browser_mode()=='attach' else 0);browser_mode_form=QFormLayout();browser_mode_form.addRow('Tracker Chrome profile',self.browser_mode_combo);automation_layout.addLayout(browser_mode_form)
-        self.meta_submission_combo=QComboBox();self.meta_submission_combo.addItems(['In-app Tracker Browser (recommended)','Legacy Chrome extension']);self.meta_submission_combo.setCurrentIndex(0 if self.meta_submission()=='inapp' else 1);submission_form=QFormLayout();submission_form.addRow('Meta video submission',self.meta_submission_combo);automation_layout.addLayout(submission_form)
-        help_text=QLabel('Vintendo COD Automation pairs through this local bridge. After pairing, identified matches are queued automatically; the extension submits the prompt and matched reference images, then returns the generated artwork. Verified match results are requested as part of the Meta AI scene; the tracker does not paint a stats panel over it.');help_text.setWordWrap(True);automation_layout.addWidget(help_text);automation_layout.addStretch()
+        automation_layout.addStretch()
         self.settings_tabs.addTab(self.discord_settings_panel,'Discord')
         hotkeys_tab=QWidget();hotkeys_layout=QVBoxLayout(hotkeys_tab);hotkeys_layout.setContentsMargins(12,12,12,12);hotkeys_layout.setSpacing(12)
         hotkeys_note=QLabel('Global hotkeys work while the tracker is minimized. Click a box, then press the new keys (hold Ctrl, Shift or Alt plus another key).');hotkeys_note.setWordWrap(True);hotkeys_layout.addWidget(hotkeys_note)
@@ -1219,27 +1202,6 @@ class Window(QMainWindow):
         self.row(l,self.button('Save all settings',self.save_settings,True))
         self.update_version_label=QLabel(f'Installed version {APP_VERSION}. Updates come from GitHub Releases.');self.update_version_label.setStyleSheet('color:#99a8bc')
         self.row(l,self.update_version_label,self.button('Check for Updates',lambda:self.check_for_app_update(manual=True)))
-    def reconnect_extension_bridge(self):
-        old=getattr(self,'extension_bridge',None)
-        if old:
-            try:old.close()
-            except Exception:pass
-            self.extension_bridge=None
-        self.extension_bridge_status.setText('Reconnecting…');self.refresh_dashboard_status()
-        if self.start_extension_bridge():
-            self.cinematic_status.setText('Bridge reconnected. Queued screenshots can now be sent to Meta AI.')
-    def start_extension_bridge(self):
-        try:
-            from local_bridge import LocalBridge
-            self.extension_bridge=LocalBridge(self.store,E.DATA,self.settings.extension_token(),videos_dir=self.videos_dir(),
-                solo_player_name=self.settings.values.get('player',''),
-                on_artwork=self.bridge.image.emit,on_prepare=self.open_prepared_photos,
-                on_log=self.bridge.status.emit,
-                port=0 if os.environ.get('VINTENDO_BRIDGE_SMOKE_TEST')=='1' else 8765)
-            port=self.extension_bridge.start();self.extension_bridge_status.setText(f'CONNECTED LOCALLY  /  127.0.0.1:{port}');self.refresh_dashboard_status()
-            return True
-        except Exception as exc:
-            self.extension_bridge=None;self.extension_bridge_status.setText('DISCONNECTED  /  '+str(exc)[:180]);self.refresh_dashboard_status();self.log('Chrome extension bridge failed to start: '+str(exc));return False
 
     def media_dir(self,key,default_name):
         custom=str(self.settings.values.get(key) or '').strip()
@@ -1641,7 +1603,6 @@ class Window(QMainWindow):
         source,_=QFileDialog.getOpenFileName(self,'Choose a COD gameplay screenshot',str(self.screenshots_dir()),'Images (*.png *.jpg *.jpeg *.webp)')
         if source:self.queue_cinematic_source(source)
     def poll_inapp_cinematics(self):
-        if self.meta_submission()!='inapp':return
         if getattr(self,'_inapp_active',None):return
         try:pending=self.store.pending_cinematics(1)
         except Exception:return
@@ -1711,8 +1672,6 @@ class Window(QMainWindow):
         source=item.data(Qt.UserRole)
         if source:self.queue_cinematic_source(source)
     def queue_cinematic_source(self,source):
-        if not getattr(self,'extension_bridge',None) or not self.extension_bridge.running:
-            self.cinematic_status.setText('Chrome bridge is disconnected. Open Settings and press Reconnect bridge, then pair Vintendo COD Automation.');return
         try:
             from PIL import Image
             source_path=Path(source);cid='cin-'+uuid.uuid4().hex
@@ -1745,7 +1704,7 @@ class Window(QMainWindow):
                     else:prompt+=f' An attached image named {friend_target.name} is a reference photo of {poster}: give a visible operator that same face, headwear, and shirt.'
                 except OSError:continue
             if not self.store.create_cinematic(cid,source_path.name,target,prompt,talent_ids=friend_ids):raise RuntimeError('Could not create a unique cinematic job.')
-            self.cinematic_status.setText(f'Queued {cid}. The screenshot is stored locally; the extension will open Frame to Video and submit it. Discord posting is manual.'+(' Featuring '+', '.join(cast_names)+'.' if cast_names else ''))
+            self.cinematic_status.setText(f'Queued {cid}. The screenshot is stored locally; the in-app Tracker Browser will submit it. Discord posting is manual.'+(' Featuring '+', '.join(cast_names)+'.' if cast_names else ''))
             self.log('Cinematic test queued: '+cid);self.refresh_cinematic_results()
         except Exception as exc:
             self.cinematic_status.setText('Cinematic test could not be queued: '+str(exc)[:300]);self.log('Cinematic test failed: '+str(exc))
@@ -1914,23 +1873,6 @@ class Window(QMainWindow):
             self.cod_ai_capture_status.setText(detail);self.cod_ai_capture_status.setStyleSheet('color:#ffb15e;font-weight:800;');self.log(detail)
             if self.tray.isVisible():self.tray.showMessage('COD AI screenshot failed',str(message)[:240],QSystemTrayIcon.Warning,3500)
         self.async_task(work,done,failed)
-    def open_prepared_photos(self,mid,folder):
-        try:os.startfile(str(folder));self.bridge.status.emit('Consent-filtered reference photos staged for '+mid+'.')
-        except Exception as exc:self.bridge.status.emit('Photos staged; Explorer could not open the folder: '+str(exc))
-    def copy_extension_token(self):
-        try:
-            if not getattr(self,'extension_bridge',None):
-                if not self.start_extension_bridge():return
-            QApplication.clipboard().setText(self.settings.extension_token())
-            self.notice('Chrome pairing token copied. Paste it in Vintendo COD Automation Options, enable automatic handoff, and save.')
-        except Exception as exc:self.notice('Could not create or copy the pairing token: '+str(exc))
-    def rotate_extension_token(self):
-        if not self.ask('Rotate the local Chrome pairing token? The extension will disconnect until paired again.'):return
-        try:
-            if getattr(self,'extension_bridge',None):self.extension_bridge.close()
-            self.settings.rotate_extension_token();self.extension_bridge=None
-            if self.start_extension_bridge():self.copy_extension_token()
-        except Exception as exc:self.notice('Could not rotate the pairing token: '+str(exc))
     def build_logs(self):
         panel=QWidget();l=QVBoxLayout(panel);l.setContentsMargins(12,12,12,12);l.setSpacing(12)
         desc=QLabel('Operational events and recoverable errors. Webhook URLs are redacted.');desc.setWordWrap(True);l.addWidget(desc)
@@ -1999,10 +1941,9 @@ class Window(QMainWindow):
         if self.ask('Update downloaded. Restart now to apply it?') and updater.apply_and_restart(dest):QApplication.quit()
     def save_settings(self):
         try:
-            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'),meta_submission=('extension' if self.meta_submission_combo.currentIndex()==1 else 'inapp'))
+            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
             self.settings.values.update(scoreboard_hotkey_vk=self.scoreboard_hotkey_edit.vk,scoreboard_hotkey_mod=self.scoreboard_hotkey_edit.mod,screenshot_hotkey_vk=self.screenshot_hotkey_edit.vk,screenshot_hotkey_mod=self.screenshot_hotkey_edit.mod,screenshots_dir=self.screenshots_dir_edit.text().strip(),videos_dir=self.videos_dir_edit.text().strip(),webhook_channel=self.webhook_channel.text().strip(),cinematic_webhook_channel=self.cinematic_webhook_channel.text().strip());self.settings.set_webhook(self.webhook.text());self.settings.set_cinematic_webhook(self.cinematic_webhook.text());self.settings.save();self.log('Settings saved with DPAPI-protected webhook. Restart tracking to apply integration changes.');self.refresh_dashboard_status()
             self.unregister_global_hotkeys();self.register_global_hotkeys();self.refresh_hotkey_labels()
-            if getattr(self,'extension_bridge',None) is not None:self.extension_bridge.videos_dir=self.videos_dir()
             if hasattr(self,'cod_ai_screenshots'):self.refresh_cod_ai_screenshots()
             if hasattr(self,'cod_ai_screenshots'):self.update_screenshot_grid()
             if hasattr(self,'cinematic_results'):self.update_cinematic_grid()
@@ -2598,8 +2539,6 @@ class Window(QMainWindow):
         roi_ready=bool(isinstance(roi,(list,tuple)) and len(roi)==4 and roi[2]>roi[0] and roi[3]>roi[1])
         ocr_state='AUTO SCAN' if roi_ready and self.tracking and self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked() else 'REGION READY' if roi_ready else 'SET UP REGION'
         self._set_dashboard_health('ocr',ocr_state,roi_ready)
-        bridge=getattr(self,'extension_bridge',None);bridge_ready=bool(bridge and getattr(bridge,'running',False))
-        self._set_dashboard_health('bridge','LISTENING' if bridge_ready else 'OFFLINE',bridge_ready)
         discord_ready=bool(hasattr(self,'webhook') and self.webhook.text().strip())
         self._set_dashboard_health('discord','WEBHOOK SAVED' if discord_ready else 'NOT CONFIGURED',discord_ready)
         if self.tracking and self.paused:tracking='PAUSED';color='#e3b95e'
@@ -2712,31 +2651,29 @@ class Window(QMainWindow):
             self.active_id=mid;job=self.store.get(mid)
             self.log('One-click poster: newest actionable match selected automatically.')
         if not job:self.notice('Select a match or save a verified scoreboard first.');return
-        bridge=getattr(self,'extension_bridge',None)
-        if not bridge or not bridge.running:
-            self.notice('The Vintendo Squad AI local bridge is unavailable. Restart the tracker, then retry.');return
         prompt=self.ensure_match_prompt(job)
         prepared=None
         if not prompt:
-            try:prepared=bridge.prepare(job['id'])
+            try:prepared=E.prepare_poster_job(self.store,E.DATA,job['id'],solo_player_name=self.settings.values.get('player',''),on_log=self.log)
             except Exception as exc:
-                message='Could not prepare this match for Vintendo COD Automation: '+str(exc)
+                message='Could not prepare this match for Meta AI: '+str(exc)
                 self.job_status.setText(message[:300]);self.notice(message);self.log('Poster preparation failed for '+job['id']+': '+str(exc));return
             job=self.store.get(job['id']);prompt=self.ensure_match_prompt(job)
             if not prompt:
-                message='Could not prepare this match for Vintendo COD Automation: no identified players'
+                message='Could not prepare this match for Meta AI: no identified players'
                 self.job_status.setText(message);self.notice(message);return
         try:
             if prepared is None:
-                prepared=bridge.prepare(job['id'])
+                prepared=E.prepare_poster_job(self.store,E.DATA,job['id'],solo_player_name=self.settings.values.get('player',''),on_log=self.log)
             if not prepared:raise ValueError('The match job could not be prepared.')
             QApplication.clipboard().setText(prepared['prompt'])
-            bridge.on_prepare(job['id'],prepared['folder'])
+            try:os.startfile(prepared['folder'])
+            except OSError as exc:self.log('Photos staged; Explorer could not open the folder: '+str(exc))
             self.active_id=job['id'];self.load_studio(job['id']);self.refresh_history()
-            self.job_status.setText('Complete match request prepared for Vintendo Squad AI. Prompt file and mapped photos are ready; use the extension and its supported import controls.')
-            self.log(f"Match {job['id']} prepared for Vintendo Squad AI: {len(prepared['photos'])} consented reference photo(s); prompt copied and import folder opened.")
+            self.job_status.setText('Match request prepared for Meta AI. Prompt copied; attach the staged reference photos in the opened folder.')
+            self.log(f"Match {job['id']} prepared for Meta AI: {len(prepared['photos'])} consented reference photo(s); prompt copied and import folder opened.")
         except Exception as exc:
-            message='Could not prepare this match for Vintendo COD Automation: '+str(exc)
+            message='Could not prepare this match for Meta AI: '+str(exc)
             self.job_status.setText(message[:300]);self.notice(message);self.log('Poster preparation failed for '+job['id']+': '+str(exc))
     def received_art(self,mid,path):
         current=self.store.get(mid)
@@ -2827,7 +2764,6 @@ class Window(QMainWindow):
         self.codmunity_poll.stop();self.codmunity_host.detach()
         try:self.browser_host.detach()
         except Exception:pass
-        if getattr(self,'extension_bridge',None):self.extension_bridge.close();self.extension_bridge=None
         if self.browser:self.browser.close()
         if self.capture and not self.capture_busy:self.capture.close()
         self.tray.hide();QApplication.quit()
@@ -2846,8 +2782,6 @@ def main():
     if '--verify-build' in sys.argv or os.environ.get('VINTENDO_VERIFY_BUILD')=='1':
         import verification
         sys.exit(verification.run())
-    if '--bridge-smoke-test' in sys.argv and not os.environ.get('VINTENDO_DATA_DIR'):
-        raise SystemExit('--bridge-smoke-test requires VINTENDO_DATA_DIR pointing to a disposable test folder.')
     E.DATA.mkdir(parents=True,exist_ok=True)
     logging.basicConfig(level=logging.INFO,handlers=[RotatingFileHandler(E.DATA/'application.log',maxBytes=2_000_000,backupCount=3,encoding='utf-8')],format='%(asctime)s %(levelname)s %(message)s')
     app=QApplication(sys.argv);app.setApplicationName('Vintendo COD Tracker');app.setOrganizationName('Vintendo')
@@ -2862,8 +2796,7 @@ def main():
             prepare_tab_preview_data(source,E.DATA)
         except Exception as exc:QMessageBox.critical(None,'CODMunity Tab Preview','Could not copy the tracker settings and roster into preview data:\n\n'+str(exc));return
     from PySide6.QtNetwork import QLocalServer,QLocalSocket
-    bridge_smoke='--bridge-smoke-test' in sys.argv or os.environ.get('VINTENDO_BRIDGE_SMOKE_TEST')=='1'
-    smoke=is_smoke_run() or bridge_smoke
+    smoke=is_smoke_run()
     server=None
     if not smoke and not prototype:
         name='VintendoCODTracker-'+__import__('hashlib').sha256(str(E.DATA).encode()).hexdigest()[:16]
@@ -2871,58 +2804,15 @@ def main():
         if socket.waitForConnected(300):return
         QLocalServer.removeServer(name);server=QLocalServer();server.listen(name)
     window=Window();window.show()
-    if (server is not None or bridge_smoke) and not prototype:
-        if server is not None:server.newConnection.connect(window.showNormal)
-        if bridge_smoke:
-            window.auto_post.setChecked(False)
-            window.open_prepared_photos=lambda *_: None
-        window.start_extension_bridge()
+    if server is not None and not prototype:
+        server.newConnection.connect(window.showNormal)
     if server is not None and os.environ.get('VINTENDO_NO_AUTO_START','0')!='1':
         QTimer.singleShot(1500,window.start)
         QTimer.singleShot(20000,window.check_for_app_update)
-    if smoke and not bridge_smoke:
+    if smoke:
         def finish():
             window.grab().save(str(E.DATA/'startup-smoke.png'));E.atomic_json(E.DATA/'smoke-result.json',{'startup':'passed','pages':window.nav.count(),'mode':window.mode.currentText(),'ocr_initialized':window.capture is not None});window.shutdown()
         QTimer.singleShot(2500,finish)
-    if bridge_smoke:
-        def finish_bridge():
-            result={'startup':'failed'};mid=None
-            try:
-                import urllib.request
-                from PIL import Image
-                import io
-                bridge_id=__import__('local_bridge').EXTENSION_ID
-                headers={'Origin':'chrome-extension://'+bridge_id,'Authorization':'Bearer '+window.settings.extension_token(),'X-Vintendo-Extension-ID':bridge_id}
-                mid,_=window.store.add({'matchId':'bridge-smoke-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win','playedAt':'2026-11-07T00:00:00Z'})
-                window.store.update(mid,players=json.dumps([{'name':'Mock Alpha','verified':True,'stats':{'kills':4}}]),prompt='Create a 16:9 mock image.',gen_state='queued')
-                reference=E.DATA/'bridge-smoke-reference.png'
-                Image.new('RGB',(320,240),'orange').save(reference)
-                window.store.save_player({'id':'bridge-smoke-alpha','name':'Mock Alpha','aliases':[],
-                    'photo':str(reference),'consent_meta':True,'enabled':True})
-                def request(path,method='GET',body=None,content_type='application/json'):
-                    outgoing=dict(headers)
-                    if body is not None:outgoing['Content-Type']=content_type
-                    req=urllib.request.Request(f'http://127.0.0.1:{window.extension_bridge.port}/v1'+path,data=body,headers=outgoing,method=method)
-                    with urllib.request.urlopen(req,timeout=3) as response:return response.status,json.loads(response.read())
-                status,payload=request('/status')
-                if status!=200 or payload.get('connected') is not True:raise RuntimeError('Bridge status request failed.')
-                status,prepared=request('/jobs/'+urllib.parse.quote(mid,safe='')+'/prepare','POST',b'{}')
-                if status!=200:raise RuntimeError('Extension job prepare request failed.')
-                status,_=request('/jobs/'+urllib.parse.quote(mid,safe='')+'/state','POST',b'{"state":"awaiting_download"}')
-                if status!=200:raise RuntimeError('Generation state update failed.')
-                image=Image.new('RGB',(640,360),'navy');buffer=io.BytesIO();image.save(buffer,format='PNG')
-                status,received=request('/jobs/'+urllib.parse.quote(mid,safe='')+'/artwork','POST',buffer.getvalue(),'image/png')
-                if status!=201:raise RuntimeError('Extension artwork upload failed: '+str(received))
-                result={'startup':'passed','bridge_status':200,'loopback':True,'queue_count':payload.get('pendingCount'),'pages':window.nav.count(),'upload_status':status,'job_id':mid,'artwork_bound':received.get('job',{}).get('matchId')==mid}
-            except Exception as exc:result={'startup':'failed','error':str(exc)[:240]}
-            def finish_bridge_signal():
-                if mid:
-                    row=window.store.get(mid);result['app_received_artwork']=bool(row and row.get('artwork') and Path(row['artwork']).is_file())
-                    if not result.get('app_received_artwork'):result['startup']='failed'
-                E.atomic_json(E.DATA/'bridge-smoke-result.json',result);window.shutdown();app.quit()
-            QTimer.singleShot(400,finish_bridge_signal)
-        import urllib.parse
-        QTimer.singleShot(700,finish_bridge)
     sys.exit(app.exec())
 
 if __name__=='__main__':

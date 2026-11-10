@@ -37,5 +37,4 @@ If Not hasChrome Then
     If Len(chromePath) > 0 Then sh.Run Chr(34) & chromePath & Chr(34) & " https://www.meta.ai/", 0, False
 End If
 
-sh.Run Chr(34) & root & "\.venv\Scripts\pythonw.exe" & Chr(34) & " " & Chr(34) & root & "\artwork_watcher.py" & Chr(34), 0, False
 sh.Run Chr(34) & root & "\.venv\Scripts\pythonw.exe" & Chr(34) & " " & Chr(34) & root & "\launcher.py" & Chr(34), 0, False

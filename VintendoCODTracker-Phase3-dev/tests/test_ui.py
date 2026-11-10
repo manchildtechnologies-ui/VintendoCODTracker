@@ -71,41 +71,27 @@ class UITests(unittest.TestCase):
         for button in self.window.findChildren(QPushButton):
             if button.text()==text:return button
         return None
-    def test_send_to_meta_button_explains_offline_bridge(self):
+    def test_send_to_meta_queues_without_bridge(self):
         from PIL import Image
         folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
         target=folder/('COD_send_'+uuid.uuid4().hex+'.png');Image.new('RGB',(320,180),'red').save(target)
         self.window.refresh_cod_ai_screenshots()
         send=self._button_by_text('Send Selected Material to Meta Ai to Make A Video')
         self.assertIsNotNone(send)
-        self.window.extension_bridge=None
+        self.assertIsNone(getattr(self.window,'extension_bridge',None))
+        found=[self.window.cod_ai_screenshots.item(i) for i in range(self.window.cod_ai_screenshots.count())
+              if self.window.cod_ai_screenshots.item(i).data(Qt.UserRole)==str(target)]
+        self.assertTrue(found);self.window.cod_ai_screenshots.setCurrentItem(found[0])
         send.click()
-        self.assertIn('Reconnect bridge',self.window.cinematic_status.text())
-    def test_reconnect_button_rebinds_bridge(self):
-        from unittest.mock import patch
-        from types import SimpleNamespace
-        made={}
-        class FakeBridge:
-            def __init__(self,*args,**kwargs):made.update(kwargs);self.running=False
-            def start(self):self.running=True;return 8765
-            def close(self):made['closed']=True;self.running=False
-        closed=[]
-        self.window.extension_bridge=SimpleNamespace(running=True,close=lambda:closed.append(True))
-        with patch('local_bridge.LocalBridge',FakeBridge):
-            self.window.reconnect_extension_bridge()
-        self.assertTrue(closed)
-        self.assertIn('CONNECTED LOCALLY',self.window.extension_bridge_status.text())
-        self.assertTrue(self.window.extension_bridge.running)
-    def test_reconnect_button_reports_bind_failure(self):
-        from unittest.mock import patch
-        class DeadBridge:
-            def __init__(self,*args,**kwargs):pass
-            def start(self):raise OSError('address in use')
-            def close(self):pass
-        with patch('local_bridge.LocalBridge',DeadBridge):
-            self.window.reconnect_extension_bridge()
-        self.assertIn('DISCONNECTED',self.window.extension_bridge_status.text())
-        self.assertIn('address in use',self.window.extension_bridge_status.text())
+        self.assertIn('Queued',self.window.cinematic_status.text())
+        cid=self.window.cinematic_status.text().split('Queued ')[1].split('.')[0].strip()
+        try:self.assertTrue(self.window.store.get_cinematic(cid))
+        finally:
+            try:self.window.store.update_cinematic(cid,status='failed')
+            except Exception:pass
+            shutil.rmtree(Path(app.E.DATA)/'Cinematics'/cid,ignore_errors=True)
+            try:(Path(app.E.DATA)/'Cinematics'/'input'/(cid+'.png')).unlink(missing_ok=True)
+            except OSError:pass
     def test_sidebar_fits_without_horizontal_scroll(self):
         self.assertGreaterEqual(self.window.sidebar.width(),275)
         self.assertEqual(self.window.nav.horizontalScrollBarPolicy(),Qt.ScrollBarAlwaysOff)
@@ -513,27 +499,23 @@ class UITests(unittest.TestCase):
     def test_headshots_only_for_identified_consenting_players(self):
         from PIL import Image
         from unittest.mock import patch
-        from types import SimpleNamespace
-        from local_bridge import LocalBridge
         w=self.window;mid,_=w.store.add({'matchId':'photo-test-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'});w.active_id=mid
         w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8}),dict(name='Beta',verified=True,stats={'kills':3}),dict(name='NotIdentified',verified=False,stats={'kills':900})]))
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
         roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True),dict(id='beta',name='Beta',photo=str(photo),consent_meta=False,enabled=True),dict(id='other',name='NotIdentified',photo=str(photo),consent_meta=True,enabled=True)]
-        handoff=Path(app.E.DATA)/('test-handoff-'+uuid.uuid4().hex)
-        local=LocalBridge(w.store,handoff,'fixture-token')
-        bridge=SimpleNamespace(running=True,prepare=local.prepare,on_prepare=lambda job,folder:w.open_prepared_photos(job,folder),close=lambda:None)
-        w.extension_bridge=bridge;w.notice=lambda _:None
+        w.notice=lambda _:None
         with patch.object(w.store,'roster',return_value=roster),patch('os.startfile'):
             w.load_studio(mid);self.assertTrue(w.prompt.toPlainText());w.prepare_artwork()
         self.assertIn('prepared',w.job_status.text().lower())
-        assignments=app.E.read_json(handoff/'handoff'/app.E.disk_id(mid)/'photo-assignments.json')
+        handoff=app.E.DATA/'handoff'/app.E.disk_id(mid)
+        self.addCleanup(shutil.rmtree,handoff,True)
+        assignments=app.E.read_json(handoff/'photo-assignments.json')
         by_user={item['username']:item for item in assignments}
         self.assertEqual(by_user['Alpha']['status'],'ready');self.assertTrue(by_user['Alpha']['filename'])
         self.assertEqual(by_user['Beta']['status'],'not_consented');self.assertIn('not consented',by_user['Beta']['reason'])
     def test_one_click_prepare_picks_newest_codmunity_match_without_scoreboard(self):
         from PIL import Image
-        from types import SimpleNamespace
-        from local_bridge import LocalBridge
+        from unittest.mock import patch
         import tempfile
         w=self.window;w.active_id=None
         tmp=tempfile.mkdtemp(prefix='oneclick-store-')
@@ -543,11 +525,9 @@ class UITests(unittest.TestCase):
         mid,_=w.store.add(record)
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
         w.store.save_player({'id':'vintendo','name':'Vintendo','photo':str(photo),'consent_meta':True,'enabled':True,'aliases':[]})
-        handoff=app.E.DATA/('test-handoff-'+uuid.uuid4().hex)
-        local=LocalBridge(w.store,handoff,'fixture-token',solo_player_name='Vintendo',on_prepare=lambda *a:None,on_artwork=lambda *a:None,on_log=lambda *a:None)
-        w.extension_bridge=SimpleNamespace(running=True,prepare=local.prepare,on_prepare=lambda *a:None,close=lambda:None)
-        w.notice=lambda _:None
-        w.prepare_artwork()
+        w.notice=lambda _:None;w.settings.values['player']='Vintendo'
+        with patch('os.startfile'):w.prepare_artwork()
+        self.addCleanup(shutil.rmtree,app.E.DATA/'handoff'/app.E.disk_id(mid),True)
         self.assertEqual(w.active_id,mid)
         row=w.store.get(mid);self.assertEqual(row['gen_state'],'prepared');self.assertTrue(row['prompt'])
         self.assertTrue(w.prompt.toPlainText())
@@ -967,7 +947,6 @@ class UITests(unittest.TestCase):
     def test_queue_cinematic_with_friends_stages_cast_and_prompt(self):
         import shutil as _shutil
         import tempfile
-        import types
         from PIL import Image
         tmpdir=Path(tempfile.mkdtemp());self.addCleanup(_shutil.rmtree,tmpdir,True)
         self.window.store=app.E.Store(tmpdir/'history.sqlite3')
@@ -978,8 +957,6 @@ class UITests(unittest.TestCase):
         w.store.save_player(dict(id='f2',name='Friend2',display_name='F2',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True))
         w.talent_friend_ids=['f1','f2']
         src=tmpdir/'shot.png';Image.new('RGB',(64,36),'green').save(src)
-        real_bridge=getattr(w,'extension_bridge',None)
-        w.extension_bridge=types.SimpleNamespace(running=True,close=lambda:None)
         created=[]
         real_create=w.store.create_cinematic
         def spy(cid,filename,image,prompt,talent_ids=None):
@@ -1004,7 +981,6 @@ class UITests(unittest.TestCase):
             self.assertNotIn('talent-f1.png',created[1][2])
         finally:
             w.store.create_cinematic=real_create
-            w.extension_bridge=real_bridge
             for job_id in cids:
                 try:w.store.update_cinematic(job_id,status='failed')
                 except Exception:pass

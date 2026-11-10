@@ -53,16 +53,111 @@ class Settings:
     def set_webhook(self,value): self.values['protected_webhook']=protect_text(value.strip())
     def cinematic_webhook(self): return unprotect_text(self.values.get('protected_cinematic_webhook',''))
     def set_cinematic_webhook(self,value): self.values['protected_cinematic_webhook']=protect_text(value.strip())
-    def extension_token(self):
-        value=self.values.get('extension_token_protected','')
-        if not value:
-            import secrets
-            value=secrets.token_urlsafe(36);self.values['extension_token_protected']=protect_text(value);self.save()
-        else:value=unprotect_text(value)
-        return value
-    def rotate_extension_token(self):
-        import secrets
-        value=secrets.token_urlsafe(36);self.values['extension_token_protected']=protect_text(value);self.save();return value
+def valid_mp4(data):
+    return len(data)>=1024 and data[4:8]==b'ftyp' and b'moov' in data and b'mdat' in data
+
+
+def _job_json(value,default):
+    try:return json.loads(value) if isinstance(value,str) else default
+    except (ValueError,TypeError):return default
+
+
+def prepare_poster_job(store,data_dir,mid,*,solo_player_name='',on_log=None):
+    """Stage consent-filtered reference photos and prompt files for one match.
+
+    Local-only replacement for the retired extension bridge prepare step: the
+    returned folder is opened for the user, who completes the Meta AI handoff
+    manually by pasting the copied prompt and attaching the staged photos.
+    """
+    data_dir=Path(data_dir)
+    def note(message):
+        try:
+            if on_log:on_log(message)
+        except Exception:pass
+    row=store.get(mid)
+    if not row:return None
+    match=_job_json(row.get('payload'),{})
+    players=_job_json(row.get('players'),[])
+    if not any(isinstance(p,dict) and p.get('verified') for p in players):
+        solo_name=(match.get('playerName') or match.get('player') or match.get('username') or solo_player_name)
+        if match.get('integration_source')=='CODMunity' and solo_name:
+            personal=codmunity_personal_row(match,solo_name)
+            if personal is not None:players=[personal]
+            else:
+                stats=match.get('stats') if isinstance(match.get('stats'),dict) else {}
+                stats={key:value for key,value in stats.items() if isinstance(value,(int,float)) and not isinstance(value,bool)}
+                players=[{'name':str(solo_name).strip(),'stats':stats,'verified':True,'source':'CODMunity'}]
+        else:raise ValueError('No identified match participants with verified statistics are available.')
+    players=[p for p in players if isinstance(p,dict) and p.get('verified') and str(p.get('name','')).strip()]
+    if not 1<=len(players)<=4:raise ValueError('Automatic poster jobs require one to four identified players.')
+    match=with_scoreboard_context(match,row.get('ocr',''))
+    context=extract_match_context(match,row.get('ocr',''))
+    if context['result'] not in ('Victory','Defeat'):
+        raise ValueError('Match outcome is unknown; automation will not guess win or loss.')
+    store.update(mid,payload=match,players=json.dumps(players,ensure_ascii=False))
+    folder=data_dir/'handoff'/disk_id(mid)
+    folder.mkdir(parents=True,exist_ok=True)
+    for old in folder.glob('reference-*.jpg'):old.unlink(missing_ok=True)
+    mappings=match_reference_photos(players,store.roster())
+    photos=[]
+    # The poster/Meta handoff supports at most four reference images.
+    # Keep the full assignment list below so any additional eligible
+    # players are explicitly reported instead of silently disappearing.
+    max_headshots=4
+    from PIL import Image
+    ready_count=0
+    for order,item in enumerate(mappings,1):
+        if item['status']!='ready':continue
+        if ready_count>=max_headshots:
+            item.update(status='limit_reached',reason='Only four player headshots can be staged for one poster job.')
+            continue
+        source=Path(item['photoPath'])
+        if source.stat().st_size>20*1024*1024:
+            item.update(status='invalid_photo',reason='Reference photo exceeds the safe 20 MB staging limit.');continue
+        target=folder/('reference-'+str(order).zfill(2)+'-'+disk_id(item['rosterName'])+'.jpg')
+        with Image.open(source) as image:
+            converted=image.convert('RGB');converted.thumbnail((1400,1400));converted.save(target,'JPEG',quality=88,optimize=True)
+            while target.stat().st_size>10*1024*1024:
+                converted.thumbnail((max(80,int(converted.width*.75)),max(80,int(converted.height*.75))))
+                converted.save(target,'JPEG',quality=82,optimize=True)
+        item['filename']=target.name
+        photos.append({'username':item['username'],'filename':target.name,'bytes':target.stat().st_size,'consented':True})
+        ready_count+=1
+    assignments=[]
+    for item in mappings:
+        assignments.append({'row':item['row'],'username':item['username'],'status':item['status'],
+            'matchedRosterName':item.get('rosterName',''),'posterName':item.get('posterName',item.get('rosterName') or item.get('username','')),'reason':item.get('reason',''),
+            'candidates':item.get('candidates',[]),'filename':item.get('filename',''),
+            'consented':bool(item.get('consented'))})
+    unready=[item for item in assignments if item['status']!='ready' or not item.get('filename')]
+    if unready:
+        details='; '.join(f"{item['username']}: {item['reason'] or item['status']}" for item in unready)
+        note('Poster proceeding without headshot(s): '+details[:240])
+    prompt=automatic_match_prompt(players,context['game_mode'],context['result'],assignments,snapshot=store.meta('codmunity_stats'))
+    atomic_json(folder / 'photo-assignments.json', assignments)
+    (folder / 'prompt.txt').write_text(prompt, encoding='utf-8')
+    import_prompt=re.sub(r'\s+',' ',prompt).strip()
+    (folder/'Meta-AI-Automation-Import.txt').write_text(import_prompt,encoding='utf-8')
+    mapping_rows=['scoreboard_row,username,photo_file,status,roster_match']
+    for item in assignments:
+        fields=[str(item.get('row',0)+1),item['username'],item.get('filename',''),item['status'],item.get('matchedRosterName','')]
+        mapping_rows.append(','.join('"'+value.replace('"','""')+'"' for value in fields))
+    (folder/'reference-photo-mapping.csv').write_text('\n'.join(mapping_rows)+'\n',encoding='utf-8')
+    instructions=['VINTENDO COD TRACKER — MATCH-BOUND META AI INPUTS',f'Match/job ID: {mid}',
+        'This tracker no longer uses a browser extension. The prompt is copied to the clipboard; paste it into Meta AI and attach the numbered reference images listed below.',
+        'Meta-AI-Automation-Import.txt holds the same prompt flattened to one line.',
+        'Only the numbered reference JPEGs listed in reference-photo-mapping.csv are staged for this request.',
+        'Each filename is mapped to one verified scoreboard username. Do not relabel or substitute photos.',
+        f'Consented reference images staged: {len(photos)} (maximum four per poster job).',
+        'After Meta AI generates the artwork, download it and link it to this match with the track Import action.']
+    if unready:
+        instructions.append('Players without a staged headshot are named in the prompt with NO REFERENCE IMAGE; portray them generically without guessing likeness.')
+    (folder/'Vintendo-Squad-Import-Instructions.txt').write_text('\n'.join(instructions)+'\n',encoding='utf-8')
+    store.update(mid, prompt=prompt, status='awaiting_artwork', error='')
+    store.record_handoff(mid, prompt, len(photos))
+    store.update(mid, gen_state='prepared')
+    return {'folder': str(folder), 'photos': photos, 'prompt': prompt}
+
 
 def legacy():
     directory=ROOT/'core'/'legacy'

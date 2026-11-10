@@ -519,7 +519,7 @@ class Window(QMainWindow):
         self.tab_prototype=os.environ.get('VINTENDO_TAB_PROTOTYPE')=='1'
         self.track_both_startup=os.environ.get('VINTENDO_TRACK_BOTH')=='1'
         self.bridge=Bridge();self.bridge.image.connect(self.received_art);self.bridge.status.connect(self.log)
-        self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker');self.resize(1450,930);self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
+        self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker');self.resize(1600,1000);self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
         self.setStyleSheet(STYLE);central=QWidget();central.setObjectName('centralWindow');self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(0,0,0,0);root.setSpacing(0)
         self.app_tabs=QTabWidget();self.app_tabs.setDocumentMode(True);root.addWidget(self.app_tabs)
         tracker_shell=QWidget();tracker_shell_layout=QHBoxLayout(tracker_shell);tracker_shell_layout.setContentsMargins(0,0,0,0);tracker_shell_layout.setSpacing(0);self.app_tabs.addTab(tracker_shell,'Vintendo COD Tracker')

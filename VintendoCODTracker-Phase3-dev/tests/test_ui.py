@@ -148,6 +148,12 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.mode.currentText(),'Squad Night');self.assertEqual(w.nav.currentRow(),0)
         button.click()
         self.assertEqual(w.mode.currentText(),'Squad Night');self.assertEqual(w.nav.currentRow(),0)
+    def test_tracker_browser_search_survives_capture_engine_scan(self):
+        import ctypes
+        from capture_engine import CaptureEngine
+        CaptureEngine().game_windows()
+        self.assertEqual(ctypes.windll.user32.EnumWindows.argtypes,None)
+        self.assertIsInstance(self.window.find_tracker_chrome_windows(),list)
     def test_mode_switch_roundtrip(self):
         self.window.mode.setCurrentText('Squad Night');self.window.auto_detect.setChecked(True);self.window.mode.setCurrentText('Solo Ops');self.assertFalse(self.window.auto_detect.isChecked());self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
     def test_roi_verification_cannot_be_assumed(self):self.assertFalse(self.window.verified.isChecked())

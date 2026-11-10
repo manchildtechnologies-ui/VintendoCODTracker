@@ -35,7 +35,7 @@ class CaptureEngine:
     def game_windows(self):
         if not hasattr(ctypes,'windll'):raise RuntimeError('Automatic game-monitor detection is available only on Windows.')
         import psutil
-        user32=ctypes.windll.user32
+        user32=ctypes.WinDLL('user32',use_last_error=True)
         class RECT(ctypes.Structure):_fields_=[('left',ctypes.c_long),('top',ctypes.c_long),('right',ctypes.c_long),('bottom',ctypes.c_long)]
         result=[];callback_type=ctypes.WINFUNCTYPE(ctypes.c_bool,ctypes.c_void_p,ctypes.c_void_p)
         user32.IsWindowVisible.argtypes=[wintypes.HWND];user32.IsWindowVisible.restype=wintypes.BOOL

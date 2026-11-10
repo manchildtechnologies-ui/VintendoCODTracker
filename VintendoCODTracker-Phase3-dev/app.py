@@ -624,7 +624,9 @@ class Window(QMainWindow):
         except OSError as exc:self.codmunity_status.setText('Could not start CODMunity Desktop: '+str(exc))
     def find_codmunity_window(self):
         user32=ctypes.windll.user32;handles=[]
-        @ctypes.WINFUNCTYPE(ctypes.c_bool,wintypes.HWND,wintypes.LPARAM)
+        callback_type=ctypes.WINFUNCTYPE(ctypes.c_bool,wintypes.HWND,wintypes.LPARAM)
+        user32.EnumWindows.argtypes=[callback_type,wintypes.LPARAM];user32.EnumWindows.restype=wintypes.BOOL
+        @callback_type
         def enum_callback(hwnd,lparam):
             if not user32.IsWindowVisible(hwnd):return True
             pid=wintypes.DWORD();user32.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
@@ -1120,7 +1122,9 @@ class Window(QMainWindow):
 
     def find_tracker_chrome_windows(self):
         user32=ctypes.windll.user32;found=[]
-        @ctypes.WINFUNCTYPE(ctypes.c_bool,wintypes.HWND,wintypes.LPARAM)
+        callback_type=ctypes.WINFUNCTYPE(ctypes.c_bool,wintypes.HWND,wintypes.LPARAM)
+        user32.EnumWindows.argtypes=[callback_type,wintypes.LPARAM];user32.EnumWindows.restype=wintypes.BOOL
+        @callback_type
         def enum_callback(hwnd,lparam):
             if user32.IsWindowVisible(hwnd):
                 buf=ctypes.create_unicode_buffer(256)

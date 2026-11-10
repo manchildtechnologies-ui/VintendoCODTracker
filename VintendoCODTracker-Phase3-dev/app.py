@@ -5,7 +5,7 @@ from urllib.parse import quote
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from PySide6.QtCore import Qt,QUrl,QTimer,QObject,QEvent,Signal,QRunnable,QThreadPool,QRect,QAbstractNativeEventFilter,QSize,QPoint,QPropertyAnimation,QEasingCurve
+from PySide6.QtCore import Qt,QUrl,QTimer,QObject,QEvent,Signal,QRunnable,QThreadPool,QRect,QAbstractNativeEventFilter,QSize,QPoint,QPointF,QPropertyAnimation,QEasingCurve
 from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor,QBrush,QPalette,QAction,QFontDatabase,QLinearGradient,QDesktopServices
@@ -237,6 +237,26 @@ class Task(QRunnable):
         except RuntimeError:pass
 
 
+class Sparkline(QWidget):
+    """Tiny K/D progression line; empty state paints nothing but the track."""
+    def __init__(self,parent=None):
+        super().__init__(parent);self._values=[]
+    def setValues(self,values):
+        clean=[]
+        for value in values or []:
+            if isinstance(value,bool):continue
+            if isinstance(value,(int,float)) and value==value and abs(value)!=float('inf'):clean.append(float(value))
+        self._values=clean[-30:];self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(),QColor('#151922'))
+        vals=self._values
+        if len(vals)<2:return
+        lo=min(vals);hi=max(vals);span=(hi-lo) or 1.0
+        width,height=self.width(),self.height();pad=3
+        points=[QPointF(pad+i*(width-2*pad)/max(1,len(vals)-1),height-pad-(v-lo)/span*(height-2*pad)) for i,v in enumerate(vals)]
+        painter.setPen(QPen(QColor('#9fdc3a'),2));painter.drawPolyline(points)
+        painter.setPen(QPen(QColor('#4ade80'),4));painter.drawPoint(points[-1])
 PAGE_BANNERS={'Dashboard':'dashboard.png','Scoreboard Capture':'scoreboard.png','Match History':'match-history.png','Player Roster':'roster.png','AI Studio':'ai-studio.png','ScreenShots and Videos':'screenshots.png','Tracker Browser':'browser.png','Settings':'settings.png'}
 class ScoreboardHotkeyFilter(QAbstractNativeEventFilter):
     def __init__(self,callbacks):super().__init__();self.callbacks=callbacks
@@ -727,6 +747,15 @@ class Window(QMainWindow):
         review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   OPEN AI STUDIO',lambda:self.nav.setCurrentRow(5))
         tools_layout.addWidget(review);tools_layout.addWidget(capture);tools_layout.addWidget(poster);body.addWidget(tools,1,2)
         self.hotkey_hint=QLabel('At match end, press Ctrl + Shift + F8 while the scoreboard is visible.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
+        intel=QFrame();intel.setObjectName('dashboardPanel');intel_layout=QHBoxLayout(intel);intel_layout.setContentsMargins(13,10,13,10);intel_layout.setSpacing(12)
+        intel_title=QLabel('◈  PLAYER INTEL');intel_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');intel_layout.addWidget(intel_title)
+        self.intel_badge=QLabel('—');self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;color:#6b7280;');intel_layout.addWidget(self.intel_badge)
+        self.intel_kd=QLabel('Select a player in Player Roster');self.intel_kd.setStyleSheet('font-size:12px;font-weight:700;color:#c4ccd8;');intel_layout.addWidget(self.intel_kd)
+        self.intel_next=QLabel('');self.intel_next.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;');intel_layout.addWidget(self.intel_next)
+        intel_layout.addStretch(1)
+        self.intel_spark=Sparkline();self.intel_spark.setFixedSize(120,34);intel_layout.addWidget(self.intel_spark)
+        self.intel_updated=QLabel('');self.intel_updated.setStyleSheet('font-size:11px;color:#9da8b7;');intel_layout.addWidget(self.intel_updated)
+        l.addWidget(intel)
         body.setColumnStretch(0,1);body.setColumnStretch(1,1);body.setColumnStretch(2,0);body.setRowStretch(0,3);body.setRowStretch(1,2);l.addLayout(body,1)
 
         footer=QFrame();footer.setObjectName('dashboardFooter');footer_layout=QHBoxLayout(footer);footer_layout.setContentsMargins(13,8,13,8)
@@ -739,12 +768,96 @@ class Window(QMainWindow):
         self.profile=self.edit(self.settings.values.get('profile_url',''));form.addRow('Optional CODMunity profile URL',self.profile);l.addLayout(form)
         self.row(l,self.button('Test local data',self.test_data))
         self.data_status=QPlainTextEdit();self.data_status.setReadOnly(True);l.addWidget(self.data_status,1)
+    def squad_game_changed(self,*_):
+        if not hasattr(self,'squad_mode'):return
+        game=self.squad_game.currentData()
+        modes=[('Resurgence','resurgence'),('Battle Royale','battle_royale'),('All modes','all')] if game=='warzone' else [('Multiplayer','multiplayer')]
+        self.squad_mode.blockSignals(True);self.squad_mode.clear()
+        for label,value in modes:self.squad_mode.addItem(label,value)
+        self.squad_mode.blockSignals(False);self.refresh_squad_intel()
+    def refresh_squad_intel(self,*_):
+        if not hasattr(self,'squad_board'):return
+        import player_stats_service as PSS
+        game=self.squad_game.currentData() or 'warzone'
+        mode=self.squad_mode.currentData() or 'resurgence'
+        metric=self.squad_metric.currentData() or 'percentile'
+        players=[p for p in self.store.roster() if p.get('enabled',True)]
+        table=PSS.squad_table(self.store,players,game,mode,'lifetime',sort_by=metric)
+        self.squad_table_rows=table
+        self.squad_board.blockSignals(True);self.squad_board.setRowCount(0)
+        for row in table:
+            snap,totals=row['snapshot'],row['totals']
+            name=snap.get('display_name') or snap.get('username') or '?'
+            if row['available']:
+                values=[name,f"{snap['kd']:.2f}",f"{snap['rank']['percentile']:.1f}%",snap['rank']['tier'],str(int(totals['wins'])),str(totals['matches'])]
+            else:
+                values=[name,'—','—','Unavailable',str(int(totals['wins'])),str(totals['matches'])]
+            at=self.squad_board.rowCount();self.squad_board.insertRow(at)
+            for col,text in enumerate(values):
+                cell=QTableWidgetItem(text);cell.setFlags(cell.flags()&~Qt.ItemIsEditable);self.squad_board.setItem(at,col,cell)
+        self.squad_board.blockSignals(False)
+        for combo in self.squad_picks:
+            current=combo.currentData()
+            combo.blockSignals(True);combo.clear();combo.addItem('—',None)
+            for p in players:combo.addItem(str(p.get('display_name') or p.get('name') or '?'),str(p.get('id')))
+            index=combo.findData(current);combo.setCurrentIndex(index if index>=0 else 0);combo.blockSignals(False)
+        self.refresh_squad_compare()
+    def refresh_squad_compare(self,*_):
+        if not hasattr(self,'squad_cmp_cards'):return
+        import player_stats_service as PSS
+        game=self.squad_game.currentData() or 'warzone'
+        mode=self.squad_mode.currentData() or 'resurgence'
+        by_id={str(p.get('id')):p for p in self.store.roster()}
+        for slot,card in enumerate(self.squad_cmp_cards):
+            pid=self.squad_picks[slot].currentData() if slot<len(self.squad_picks) else None
+            player=by_id.get(str(pid)) if pid else None
+            if player is None:
+                card.setText('—');continue
+            snap=PSS.snapshot_for_player(self.store,player,game,mode,'lifetime')
+            totals=PSS.totals_for_player(self.store,player,game,mode)
+            name=snap.get('display_name') or snap.get('username') or '?'
+            if snap['rank'] is not None:
+                color=self.LADDER_TIER_COLORS.get(snap['rank']['tier'],'#e5e9ef')
+                card.setText(f"{name}\n{snap['rank']['tier']} · {snap['kd']:.2f} K/D\n{int(totals['wins'])}W / {totals['matches']} matches")
+                card.setStyleSheet('background:#141923;border:1px solid '+color+';border-radius:6px;padding:8px;font-size:12px;font-weight:700;color:#e5e9ef;')
+            else:
+                card.setText(f"{name}\nRANK UNAVAILABLE")
+                card.setStyleSheet('background:#141923;border:1px solid #343a46;border-radius:6px;padding:8px;font-size:11px;color:#9da8b7;')
     def build_squad(self):
         l=self.page('Squad Night','CODMunity match context plus the captured scoreboard become one verified, match-bound poster job.')
         for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture stages the complete job for Meta AI and writes a single-prompt import file plus a numbered photo map.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
-        self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True));l.addStretch()
+        self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True))
+        squad_title=QLabel('SQUAD LEADERBOARD');squad_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;letter-spacing:1px;');l.addWidget(squad_title)
+        squad_controls=QHBoxLayout();squad_controls.setSpacing(8)
+        self.squad_game=QComboBox();self.squad_game.addItem('Warzone','warzone');self.squad_game.addItem('MW4','mw4')
+        self.squad_mode=QComboBox()
+        self.squad_metric=QComboBox();self.squad_metric.addItem('Percentile','percentile');self.squad_metric.addItem('K/D','kd');self.squad_metric.addItem('Wins','wins');self.squad_metric.addItem('Win rate','win_rate');self.squad_metric.addItem('Kills','kills');self.squad_metric.addItem('Matches','matches')
+        squad_controls.addWidget(QLabel('Game'));squad_controls.addWidget(self.squad_game);squad_controls.addWidget(QLabel('Mode'));squad_controls.addWidget(self.squad_mode)
+        squad_controls.addWidget(QLabel('Sort'));squad_controls.addWidget(self.squad_metric)
+        squad_controls.addWidget(self.button('Refresh board',self.refresh_squad_intel));squad_controls.addStretch(1)
+        squad_controls_wrap=QWidget();squad_controls_wrap.setLayout(squad_controls);l.addWidget(squad_controls_wrap)
+        self.squad_game.currentIndexChanged.connect(self.squad_game_changed)
+        self.squad_mode.currentIndexChanged.connect(self.refresh_squad_intel)
+        self.squad_metric.currentIndexChanged.connect(self.refresh_squad_intel)
+        self.squad_board=QTableWidget(0,6);self.squad_board.setHorizontalHeaderLabels(['Player','K/D','Percentile','Tier','Wins','Matches']);self.squad_board.setEditTriggers(QTableWidget.NoEditTriggers);self.squad_board.setSelectionBehavior(QTableWidget.SelectRows);self.squad_board.verticalHeader().hide();self.squad_board.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);self.squad_board.setMinimumHeight(180)
+        l.addWidget(self.squad_board)
+        compare_title=QLabel('FOUR-PLAYER COMPARE');compare_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;letter-spacing:1px;');l.addWidget(compare_title)
+        picks_row=QHBoxLayout();picks_row.setSpacing(8)
+        self.squad_picks=[]
+        for slot in range(4):
+            combo=QComboBox();combo.addItem('—',None);combo.currentIndexChanged.connect(self.refresh_squad_compare);picks_row.addWidget(combo,1);self.squad_picks.append(combo)
+        picks_wrap=QWidget();picks_wrap.setLayout(picks_row);l.addWidget(picks_wrap)
+        cmp_row=QHBoxLayout();cmp_row.setSpacing(8)
+        self.squad_cmp_cards=[]
+        for _ in range(4):
+            card=QLabel('—');card.setAlignment(Qt.AlignCenter);card.setMinimumHeight(64)
+            card.setStyleSheet('background:#141923;border:1px solid #343a46;border-radius:6px;padding:8px;font-size:11px;color:#9da8b7;')
+            cmp_row.addWidget(card,1);self.squad_cmp_cards.append(card)
+        cmp_wrap=QWidget();cmp_wrap.setLayout(cmp_row);l.addWidget(cmp_wrap)
+        self.squad_game_changed()
+        l.addStretch()
     def activate_squad_night(self):
         if self.mode.currentText()!='Squad Night':self.mode.setCurrentText('Squad Night')
         else:self.log('Squad Night is already active. Press Start to begin.')
@@ -999,7 +1112,7 @@ class Window(QMainWindow):
         self._roster_loading=True
         self.roster_profile_url.setText(profile_url)
         self._roster_loading=False
-        self.refresh_profile_tab();self.refresh_codmunity_panel();self.refresh_roster_rank_card()
+        self.refresh_profile_tab();self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Player statistics not connected · Public profile identity resolved and saved.')
     def refresh_codmunity_distribution(self):
         player=self._codmunity_player_record()
@@ -1032,7 +1145,7 @@ class Window(QMainWindow):
         updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
         self._save_codmunity_fields(pid,{'codmunity_player_stats':payload,
             'codmunity_player_stats_updated_at':updated_at,'codmunity_player_stats_source':'configured_provider'})
-        self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card()
+        self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Player statistics connected · configured provider response saved.')
     def on_codmunity_distribution(self,pid,key,distribution):
         if str(self.current_player or '')!=str(pid):return
@@ -1043,11 +1156,11 @@ class Window(QMainWindow):
         cached=dict(self.store.meta('codmunity_public_distributions',{}) or {});cached[key]=record
         self.store.set_meta('codmunity_public_distributions',cached)
         self._codmunity_live_key=(pid,key)
-        self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card()
+        self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Player statistics not connected · Community distribution verified from the public endpoint.')
     def on_codmunity_failure(self,pid,kind,message,key=None):
         if str(self.current_player or '')!=str(pid):return
-        self.refresh_codmunity_panel();self.refresh_roster_rank_card()
+        self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         player=self._codmunity_player_record(pid) or {}
         cached=(self.store.meta('codmunity_public_distributions',{}) or {}).get(key) if key else None
         if kind=='distribution' and cached:
@@ -1164,15 +1277,15 @@ class Window(QMainWindow):
         ladder=info.get('rank')
         rank_col=QVBoxLayout();rank_col.setSpacing(2)
         if ladder is not None:
-            color=self.LADDER_TIER_COLORS.get(ladder.tier,'#e5e9ef')
-            badge=QLabel('●  '+ladder.tier);badge.setObjectName('rosterRankTier');badge.setStyleSheet('font-size:13px;font-weight:900;color:'+color+';')
-            kd_line=QLabel(f"{info['kd']:.2f} K/D  ·  {ladder.percentile:.1f}%");kd_line.setObjectName('rosterRankKd');kd_line.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
+            color=self.LADDER_TIER_COLORS.get(ladder['tier'],'#e5e9ef')
+            badge=QLabel('●  '+ladder['tier']);badge.setObjectName('rosterRankTier');badge.setStyleSheet('font-size:13px;font-weight:900;color:'+color+';')
+            kd_line=QLabel(f"{info['kd']:.2f} K/D  ·  {ladder['percentile']:.1f}%");kd_line.setObjectName('rosterRankKd');kd_line.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
             rank_col.addWidget(badge);rank_col.addWidget(kd_line)
             bottom=QHBoxLayout();bottom.setSpacing(6)
-            bar=QProgressBar();bar.setRange(0,100);bar.setValue(int(round(ladder.progress_percent)));bar.setTextVisible(False);bar.setFixedHeight(6)
+            bar=QProgressBar();bar.setRange(0,100);bar.setValue(int(round(ladder['progress'])));bar.setTextVisible(False);bar.setFixedHeight(6)
             bar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:'+color+';border-radius:3px;}')
             bottom.addWidget(bar,1)
-            if ladder.next_tier is not None:next_label=QLabel(f"{ladder.next_tier} @ {ladder.next_tier_kd:.2f}")
+            if ladder['next_tier'] is not None:next_label=QLabel(f"{ladder['next_tier']} @ {ladder['next_kd']:.2f}")
             else:next_label=QLabel('MAX RANK')
             next_label.setObjectName('rosterRankNext');next_label.setStyleSheet('font-size:10px;font-weight:700;color:#9da8b7;')
             bottom.addWidget(next_label);rank_col.addLayout(bottom)
@@ -1191,6 +1304,7 @@ class Window(QMainWindow):
         self.studio_match_picker=QComboBox();self.studio_match_picker.setMaximumWidth(460);self.studio_match_picker.setToolTip('Pick a recent match to load it into AI Studio.');self.studio_match_picker.currentIndexChanged.connect(self.on_studio_match_changed);self.studio_match_row=self.row(l,QLabel('Pick a match'),self.studio_match_picker);self.studio_match_row.addStretch(1)
         self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
         self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
+        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');l.addWidget(self.include_stats_checkbox)
         self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);l.addWidget(self.generate_poster_button)
         self.photo_assignments=QLabel('Consented reference photos are matched automatically when available.');self.photo_assignments.setWordWrap(True);l.addWidget(self.photo_assignments)
         self.studio_heads_title=QLabel('Players Identified from ScreenShots');self.studio_heads_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');l.addWidget(self.studio_heads_title)
@@ -2519,7 +2633,15 @@ class Window(QMainWindow):
         game=self.codmunity_game.currentData() or 'warzone' if hasattr(self,'codmunity_game') else 'warzone'
         mode=self.codmunity_mode.currentData() or 'resurgence' if hasattr(self,'codmunity_mode') else 'resurgence'
         scope=self.codmunity_scope.currentData() or 'lifetime' if hasattr(self,'codmunity_scope') else 'lifetime'
-        info=self._roster_rank_info(player,self.store.history(),game,mode,self._cached_community_distribution(player,game,mode,scope))
+        info=self._roster_rank_info(player,game,mode,scope)
+        try:
+            import player_stats_service as PSSnap
+            PSSnap.record_snapshot(self.store,str(player.get('id')),game,mode,scope)
+            for event in PSSnap.detect_stat_events(self.store,str(player.get('id')),game,mode,scope):
+                who=player.get('display_name') or player.get('name')
+                if event['type']=='rank_promotion':self.log(f"Achievement unlocked: {who} promoted to {event['to_tier']} ({game} {mode}).")
+                elif event['type']=='pb_kd':self.log(f"Achievement unlocked: {who} new personal-best K/D {event['kd']:.2f} ({game} {mode}).")
+        except Exception as exc:self.log('Stat snapshot skipped: '+str(exc))
         kd_value=info.get('kd');rank=info.get('rank')
         if kd_value is None:
             self.roster_rank_tier.setText('RANK UNAVAILABLE');self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;'+gray)
@@ -2531,20 +2653,20 @@ class Window(QMainWindow):
         if rank is None:
             color='#e5e9ef'
             self.roster_rank_tier.setText('RANK UNAVAILABLE');self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;'+gray)
-            self.roster_rank_kd.setText(f'{kd_value:.2f} K/D');self.roster_rank_pct.setText('—')
+            self.roster_rank_kd.setText(f"{kd_value:.2f} K/D · {info.get('source')}" if info.get('source') else f'{kd_value:.2f} K/D');self.roster_rank_pct.setText('—')
             self.roster_rank_kdbar.setRange(0,1200);self.roster_rank_kdbar.setValue(min(1200,int(round(kd_value*100))))
             self.roster_rank_kdbar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:'+color+';border-radius:3px;}')
             for block,label in self.roster_rank_segs:
                 block.setStyleSheet('background:#232833;border-radius:2px;');label.setStyleSheet('font-size:8px;color:#6b7280;')
             self.roster_rank_next.setText('Refresh community data to rank this K/D.');return
-        color=self.LADDER_TIER_COLORS.get(rank.tier,'#e5e9ef')
-        self.roster_rank_tier.setText('●  '+rank.tier.upper());self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;color:'+color+';')
-        self.roster_rank_kd.setText(f'{kd_value:.2f} K/D');self.roster_rank_pct.setText(f'{rank.percentile:.1f}%')
+        color=self.LADDER_TIER_COLORS.get(rank['tier'],'#e5e9ef')
+        self.roster_rank_tier.setText('●  '+rank['tier'].upper());self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;color:'+color+';')
+        self.roster_rank_kd.setText(f"{kd_value:.2f} K/D · {info.get('source')}" if info.get('source') else f'{kd_value:.2f} K/D');self.roster_rank_pct.setText(f"{rank['percentile']:.1f}%")
         self.roster_rank_kdbar.setRange(0,1200);self.roster_rank_kdbar.setValue(min(1200,int(round(kd_value*100))))
         self.roster_rank_kdbar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:'+color+';border-radius:3px;}')
         tier_index=max(0,len(codmunity_player_stats.LADDER_TIERS)-1)
         for index,(_,tier_name) in enumerate(codmunity_player_stats.LADDER_TIERS):
-            if tier_name==rank.tier:tier_index=index;break
+            if tier_name==rank['tier']:tier_index=index;break
         for index,(block,label) in enumerate(self.roster_rank_segs):
             if index<=tier_index:
                 seg_color=self.LADDER_TIER_COLORS.get(codmunity_player_stats.LADDER_TIERS[index][1],'#e5e9ef')
@@ -2552,8 +2674,43 @@ class Window(QMainWindow):
                 label.setStyleSheet('font-size:8px;font-weight:700;color:'+seg_color+';')
             else:
                 block.setStyleSheet('background:#232833;border-radius:2px;');label.setStyleSheet('font-size:8px;color:#6b7280;')
-        if rank.next_tier is not None:self.roster_rank_next.setText(f'Next: {rank.next_tier} @ {rank.next_tier_kd:.2f} K/D')
+        if rank['next_tier'] is not None:self.roster_rank_next.setText(f"Next: {rank['next_tier']} @ {rank['next_kd']:.2f} K/D")
         else:self.roster_rank_next.setText('MAX RANK')
+    def refresh_player_intel(self):
+        if not hasattr(self,'intel_badge'):return
+        import player_stats_service as PSS
+        gray='color:#6b7280;'
+        player=None
+        pid=getattr(self,'current_player',None)
+        if pid:player=self._codmunity_player_record(pid)
+        if player is None:
+            wanted=str(self.settings.values.get('player','')).casefold()
+            if wanted:
+                for candidate in self.store.roster():
+                    names=[str(candidate.get('name') or '').casefold()]+[str(a).casefold() for a in (candidate.get('aliases') or []) if isinstance(a,str)]
+                    if wanted in names:player=candidate;break
+        if player is None:
+            self.intel_badge.setText('—');self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;'+gray)
+            self.intel_kd.setText('Select a player in Player Roster');self.intel_next.setText('')
+            self.intel_spark.setValues([]);self.intel_updated.setText('');return
+        game=self.codmunity_game.currentData() or 'warzone' if hasattr(self,'codmunity_game') else 'warzone'
+        mode=self.codmunity_mode.currentData() or 'resurgence' if hasattr(self,'codmunity_mode') else 'resurgence'
+        scope=self.codmunity_scope.currentData() or 'lifetime' if hasattr(self,'codmunity_scope') else 'lifetime'
+        snap=PSS.snapshot_for_player(self.store,player,game,mode,scope)
+        if snap['rank'] is None:
+            self.intel_badge.setText('RANK UNAVAILABLE');self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;'+gray)
+            self.intel_kd.setText(f"{snap['kd']:.2f} K/D" if snap['kd'] is not None else 'K/D —')
+            self.intel_next.setText('');self.intel_spark.setValues([]);self.intel_updated.setText('');return
+        color=self.LADDER_TIER_COLORS.get(snap['rank']['tier'],'#e5e9ef')
+        self.intel_badge.setText('●  '+snap['rank']['tier'].upper());self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;color:'+color+';')
+        self.intel_kd.setText(f"{snap['kd']:.2f} K/D · {snap['rank']['percentile']:.1f}%" + (f" · {snap['kd_source']}" if snap.get('kd_source') else ''))
+        if snap['rank']['next_tier'] is not None:self.intel_next.setText(f"Next: {snap['rank']['next_tier']} @ {snap['rank']['next_kd']:.2f}")
+        else:self.intel_next.setText('MAX RANK')
+        history=PSS.snapshot_history(self.store,snap['player_id'],game,mode,scope)
+        self.intel_spark.setValues([h.get('kd') for h in history if isinstance(h.get('kd'),(int,float))])
+        awards=PSS.awards_for_player(self.store,snap['player_id'])
+        stamp=str(snap.get('updated_at') or '')
+        self.intel_updated.setText((f"★ {len(awards)} award(s) · " if awards else '')+('updated '+stamp[:16].replace('T',' ') if stamp else ''))
     def _codmunity_comparison_changed(self,*_):
         try:self.refresh_codmunity_panel()
         except (AttributeError,RuntimeError):pass
@@ -2561,36 +2718,12 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         try:self.refresh_roster_rank_card()
         except (AttributeError,RuntimeError):pass
-    def _cached_community_distribution(self,player,game,mode,scope):
-        key='|'.join((str(game),str(mode),str(scope)))
-        saved=(self.store.meta('codmunity_public_distributions',{}) or {}).get(key)
-        if not isinstance(saved,dict):
-            saved=(player.get('codmunity_distributions') or {}).get(key)
-        distribution=None
-        if isinstance(saved,dict):
-            try:
-                distribution=codmunity_player_stats.CommunityDistribution.from_payload({'data':{
-                    'game':saved.get('game'),'mode':saved.get('mode'),'scope':saved.get('scope'),
-                    'sampled':saved.get('sampled'),'usersTotal':saved.get('users_total'),
-                    'dist':{'kd':saved.get('kd')}}})
-            except (TypeError,ValueError):
-                distribution=None
-        return distribution
-    def _roster_rank_info(self,player,history_rows,game,mode,distribution):
-        username=str(player.get('codmunity_username') or '')
-        display=str(player.get('codmunity_display_name') or '')
-        names=[username,str(player.get('name') or '')]+list(player.get('aliases') or [])
-        if display and display!='—':names.append(display)
-        stored_stats=player.get('codmunity_player_stats')
-        player_kd=codmunity_player_stats.player_kd_for_mode(stored_stats,str(game or ''),str(mode or ''))
-        kd_value=player_kd.kd if player_kd.kd is not None else None
-        if kd_value is None:
-            sample=codmunity_player_stats.tracked_match_kd(history_rows,names,str(game or ''),str(mode or ''))
-            if sample.kd is not None:kd_value=sample.kd
-        if kd_value is None or distribution is None:return {'kd':kd_value,'rank':None}
-        try:rank=codmunity_player_stats.ladder_rank(kd_value,distribution)
-        except ValueError:return {'kd':kd_value,'rank':None}
-        return {'kd':kd_value,'rank':rank}
+        try:self.refresh_player_intel()
+        except (AttributeError,RuntimeError):pass
+    def _roster_rank_info(self,player,game,mode,scope):
+        import player_stats_service as PSS
+        snap=PSS.snapshot_for_player(self.store,player,game,mode,scope)
+        return {'kd':snap['kd'],'rank':snap['rank'],'source':snap['kd_source']}
     def refresh_roster(self):
         self.roster_rows=self.store.roster()
         query=self.roster_search.text().strip().casefold() if hasattr(self,'roster_search') else ''
@@ -2604,11 +2737,9 @@ class Window(QMainWindow):
         game=self.codmunity_game.currentData() or 'warzone' if hasattr(self,'codmunity_game') else 'warzone'
         mode=self.codmunity_mode.currentData() or 'resurgence' if hasattr(self,'codmunity_mode') else 'resurgence'
         scope=self.codmunity_scope.currentData() or 'lifetime' if hasattr(self,'codmunity_scope') else 'lifetime'
-        history_rows=self.store.history()
         rank_by_id={}
         for player in visible:
-            distribution=self._cached_community_distribution(player,game,mode,scope)
-            rank_by_id[str(player.get('id'))]=self._roster_rank_info(player,history_rows,game,mode,distribution)
+            rank_by_id[str(player.get('id'))]=self._roster_rank_info(player,game,mode,scope)
         self.roster_list.blockSignals(True);self.roster_list.clear()
         for player in visible:
             item=QListWidgetItem();item.setData(Qt.UserRole,str(player.get('id')));item.setSizeHint(QSize(0,78))
@@ -2668,7 +2799,7 @@ class Window(QMainWindow):
             else:self.consent_status.setText('No consent — this player will be shown generically (NO REFERENCE IMAGE).');self.consent_status.setStyleSheet('font-size:11px;color:#e5a13d;')
         finally:self._roster_loading=False
         self.refresh_profile_tab();self.set_roster_dirty(False);self.roster_status.setText('')
-        self.refresh_codmunity_panel();self.refresh_roster_rank_card()
+        self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         if hasattr(self,'roster_tabs') and hasattr(self,'_profile_tab_index') and self.roster_tabs.currentIndex()==self._profile_tab_index:self.load_roster_profile_page()
     def show_roster_empty(self):
         self._roster_loading=True
@@ -2676,7 +2807,7 @@ class Window(QMainWindow):
             self.current_player=None
             self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('No player selected');self.roster_big_sub.setText('');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.roster_profile_url.clear();self.codmunity_username.clear();self.roster_enabled.setChecked(True)
         finally:self._roster_loading=False
-        self.refresh_codmunity_panel();self.refresh_roster_rank_card()
+        self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
     def mark_roster_dirty(self):
         if getattr(self,'_roster_loading',False):return
         self.set_roster_dirty(True)
@@ -2697,7 +2828,7 @@ class Window(QMainWindow):
             self.current_player=None;self.roster_name.clear();self.roster_display_name.clear();self.roster_aliases.clear();self.codmunity_username.clear();self.roster_profile_url.clear();self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.photo_consent.setChecked(False);self.roster_enabled.setChecked(True);self.roster_photo_removed=False
             self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('New player');self.roster_big_sub.setText('Fill in the details, then Save Player.');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.name_match_result.setText('')
         finally:self._roster_loading=False
-        self.set_roster_dirty(False);self.roster_status.setText('');self.refresh_codmunity_panel();self.refresh_roster_rank_card()
+        self.set_roster_dirty(False);self.roster_status.setText('');self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
     def pick_photo(self):
         path,_=QFileDialog.getOpenFileName(self,'Choose player headshot','','Images (*.png *.jpg *.jpeg *.webp)')
         if path:self.photo_path.setText(path);self.headshot_filename.setText(Path(path).name);self.show_image(self.photo_preview,path,420,220);self.roster_photo_removed=False;self.mark_roster_dirty()
@@ -2751,19 +2882,23 @@ class Window(QMainWindow):
         elif not self.roster_photo_removed:photo=stored_photo
         display_name=self.roster_display_name.text().strip() or name
         codmunity_username=self.codmunity_username.text().strip()
+        for other in self.store.roster():
+            if str(other.get('id'))==str(pid):continue
+            if codmunity_username and str(other.get('codmunity_username') or '').casefold()==codmunity_username.casefold():
+                self.roster_status.setText('That CODMunity username is already linked to '+str(other.get('name') or 'another player')+'.');self.roster_tabs.setCurrentIndex(0);self.codmunity_username.setFocus();return
         saved_player=self._codmunity_player_record(pid) or {'id':pid}
         previous_username=str(saved_player.get('codmunity_username') or '')
         if previous_username.casefold()!=codmunity_username.casefold():
             for key in ('codmunity_uid','codmunity_display_name','codmunity_identity_updated_at'):
                 saved_player.pop(key,None)
         saved_player.update(dict(id=pid,name=name,display_name=display_name,aliases=[v.strip() for v in self.roster_aliases.text().split(';') if v.strip()],profile_url=self.roster_profile_url.text().strip(),photo=photo,enabled=self.roster_enabled.isChecked(),consent_meta=self.photo_consent.isChecked(),codmunity_username=codmunity_username))
-        self.store.save_player(saved_player);self.current_player=pid;self.set_roster_dirty(False);self.refresh_roster();self.roster_status.setText('Saved '+name+'.');self.load_roster_player(pid);self.refresh_talent_friends();self.log('Player saved: '+name+' (poster name: '+display_name+')')
+        self.store.save_player(saved_player);self.current_player=pid;self.set_roster_dirty(False);self.refresh_roster();self.roster_status.setText('Saved '+name+'.');self.load_roster_player(pid);self.refresh_talent_friends();self.refresh_squad_intel();self.log('Player saved: '+name+' (poster name: '+display_name+')')
     def delete_player(self):
         if not self.current_player:return
         player=next((p for p in self.roster_rows if str(p.get('id'))==str(self.current_player)),None)
         label=player.get('name','this player') if player else 'this player'
         if self.ask("Delete player '"+label+"'? This cannot be undone."):
-            self.store.delete_player(self.current_player);self.new_player();self.refresh_roster();self.refresh_talent_friends();self.roster_status.setText('Deleted '+label+'.')
+            self.store.delete_player(self.current_player);self.new_player();self.refresh_roster();self.refresh_talent_friends();self.refresh_squad_intel();self.roster_status.setText('Deleted '+label+'.')
     def test_name(self):
         player,score=E.match_player(self.name_test.text(),self.store.roster())
         if player:self.name_match_result.setText('Match: '+player['name']+'  ·  confidence '+f'{score:.0%}');self.name_match_result.setStyleSheet('font-size:11px;color:#4ade80;')
@@ -3000,6 +3135,31 @@ class Window(QMainWindow):
         job=self.selected_job()
         if not job:return
         dialog=QDialog(self);dialog.setWindowTitle('Stored match data and provenance');dialog.resize(850,600);layout=QVBoxLayout(dialog);text=QPlainTextEdit(json.dumps({**job,'payload':json.loads(job['payload']),'players':json.loads(job['players'])},indent=2));text.setReadOnly(True);layout.addWidget(text);dialog.exec()
+    def _ai_stat_block(self,job,players):
+        """Verified-only stat lines for the AI prompt; '' when opted out or empty."""
+        try:
+            if not getattr(self,'include_stats_checkbox',None) or not self.include_stats_checkbox.isChecked():return ''
+        except (AttributeError,RuntimeError):return ''
+        try:
+            import player_stats_service as PSS
+        except ImportError:return ''
+        match=json.loads(job.get('payload') or '{}') if isinstance(job.get('payload'),str) else (job.get('payload') or {})
+        if not isinstance(match,dict):return ''
+        game=str(match.get('game') or 'warzone');mode=str(match.get('modeKey') or match.get('mode') or 'resurgence')
+        roster=self.store.roster()
+        blocks=[]
+        for row in players or []:
+            if not isinstance(row,dict) or not row.get('verified'):continue
+            stats=row.get('stats') if isinstance(row.get('stats'),dict) else {}
+            detail=E.match_player_detail(str(row.get('name') or ''),roster)
+            if detail.get('status')!='matched' or not detail.get('player'):continue
+            snap=PSS.snapshot_for_player(self.store,detail['player'],game,mode,'lifetime')
+            kills=stats.get('kills',stats.get('eliminations'));deaths=stats.get('deaths')
+            block=PSS.prompt_stat_block(snap,{'kills':kills,'deaths':deaths,'result':match.get('result')})
+            if block:blocks.append(block)
+            if len(blocks)>=4:break
+        if not blocks:return ''
+        return '\n'.join(blocks)
     def ensure_match_prompt(self,job,players=None):
         players=json.loads(job['players'] or '[]') if players is None else players
         existing=str(job.get('prompt') or '').split('\nREFERENCE PHOTO MAPPING:')[0]
@@ -3008,6 +3168,10 @@ class Window(QMainWindow):
                 try:existing=E.match_poster_prompt(players,json.loads(job['payload']),job.get('ocr',''),roster=self.store.roster(),snapshot=self.store.meta('codmunity_stats'))
                 except ValueError as exc:existing='';self.job_status.setText(str(exc))
                 else:self.store.update(job['id'],prompt=existing,theme=None)
+            marker='PLAYER STATISTICS:'
+            if marker in existing:existing=existing.split(marker)[0].rstrip()
+            block=self._ai_stat_block(job,players)
+            if block:existing=(existing+'\n'+marker+'\n'+block).rstrip()
             self.prompt.setPlainText(existing)
             self.generate_poster_button.setEnabled(bool(existing))
             return existing

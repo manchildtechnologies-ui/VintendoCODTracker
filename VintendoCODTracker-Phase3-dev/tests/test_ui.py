@@ -778,6 +778,23 @@ class UITests(unittest.TestCase):
         self.window.save_player()
         cleared=next(p for p in self.window.store.roster() if p['id']==pid)
         self.assertEqual(cleared['photo'],'')
+    def test_ai_prompt_stat_block_is_opt_in(self):
+        w=self.window
+        w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
+        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
+        mid,_=w.store.add({'matchId':'ai-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win','ocr':'VICTORY'})
+        w.store.update(mid,players=json.dumps([{'name':'VintendoPower','verified':True,'stats':{'kills':19,'deaths':8}}]))
+        job=w.store.get(mid)
+        w.include_stats_checkbox.setChecked(True)
+        with_text=w.ensure_match_prompt(job)
+        self.assertIn('PLAYER STATISTICS:',with_text)
+        self.assertIn('Casual',with_text)
+        self.assertIn('2.38',with_text)
+        w.include_stats_checkbox.setChecked(False)
+        without_text=w.ensure_match_prompt(w.store.get(mid))
+        self.assertNotIn('PLAYER STATISTICS:',without_text)
+        w.include_stats_checkbox.setChecked(True)
+        self.assertIn('PLAYER STATISTICS:',w.ensure_match_prompt(w.store.get(mid)))
     def test_roster_cards_show_ladder_rank_or_placeholder(self):
         from PySide6.QtWidgets import QLabel
         w=self.window
@@ -799,6 +816,7 @@ class UITests(unittest.TestCase):
         w.load_roster_player('rank-a')
         self.assertIn('SOLID',w.roster_rank_tier.text())
         self.assertIn('3.41',w.roster_rank_kd.text())
+        self.assertIn('1 tracked match',w.roster_rank_kd.text())
         self.assertIn('%',w.roster_rank_pct.text())
         self.assertIn('Sweat',w.roster_rank_next.text())
         w.load_roster_player('rank-b')

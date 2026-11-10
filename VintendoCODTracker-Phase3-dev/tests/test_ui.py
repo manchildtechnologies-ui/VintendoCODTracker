@@ -188,19 +188,30 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.active_id,mid)
         self.assertIn(mid,w.studio_match.text())
         self.assertTrue(w.generate_poster_button.isEnabled())
-    def test_mission_pills_follow_real_stages(self):
+    def test_mission_core_animates_real_stages(self):
         w=self.window
         w.set_automation_stage('generating','test job overdrive')
-        self.assertIn('#f97316',w.auto_stages['generating'].styleSheet())
-        self.assertIn('#2ea36b',w.auto_stages['queued'].styleSheet())
+        self.assertEqual(w.auto_core.stage,'generating')
+        self.assertTrue(w.auto_core._timer.isActive())
         self.assertIn('test job overdrive',w.browser_status.text())
         w._auto_stage_tick()
-        self.assertIn('GENERATING',w.auto_elapsed.text())
+        self.assertTrue(w.auto_core.elapsed_text)
         w.set_automation_stage('failed','boom')
-        self.assertIn('#ef6b77',w.auto_stages['generating'].styleSheet())
+        self.assertEqual(w.auto_core.stage,'failed')
+        self.assertFalse(w.auto_core._timer.isActive())
         self.assertIn('boom',w.browser_status.text())
         w.set_automation_stage('ready')
+        self.assertEqual(w.auto_core.stage,'ready')
         self.assertIn('idle in the background',w.browser_status.text())
+    def test_mission_core_paints_every_stage(self):
+        from PySide6.QtGui import QPixmap
+        core=app.MissionCore()
+        core.resize(220,220)
+        for stage in ('ready','queued','submitting','generating','collecting','collected','posted','failed'):
+            core.set_stage(stage);core.set_elapsed('01:23')
+            pix=QPixmap(220,220);core.render(pix)
+        self.assertEqual(core.stage,'failed')
+        self.assertEqual(core.elapsed_text,'01:23')
     def test_login_card_appears_on_login_failure(self):
         w=self.window
         mid,_=w.store.add({'matchId':'login-fail-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
@@ -1312,7 +1323,7 @@ class UITests(unittest.TestCase):
         labels=[b.text() for b in page.findChildren(QPushButton)]
         self.assertIn('Log into Meta AI',labels)
         self.assertTrue(all('Open Tracker Chrome' not in text and 'Embed' not in text for text in labels))
-        self.assertEqual(set(self.window.auto_stages),{'queued','submitting','generating','collected','posted'})
+        self.assertIsInstance(self.window.auto_core,app.MissionCore)
         found=True
         self.assertTrue(found)
 

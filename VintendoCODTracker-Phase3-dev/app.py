@@ -187,6 +187,62 @@ class FriendTile(QWidget):
         super().mousePressEvent(event)
         if event.button()==Qt.LeftButton and callable(self._on_toggle):self._on_toggle(self.pid)
 
+class MissionCore(QWidget):
+    """Animated automation dial. The sweep is indeterminate motion only; the ring ticks and center label always show the real automation stage."""
+    STAGES=('queued','submitting','generating','collected','posted')
+    INDEX={'queued':0,'submitting':1,'generating':2,'collecting':3,'collected':3,'posted':4}
+    COLORS={'queued':'#8a93a3','submitting':'#f97316','generating':'#fdba74','collecting':'#fdba74','collected':'#56e99a','posted':'#56e99a','failed':'#ef6b77','ready':'#5b6572'}
+    def __init__(self,parent=None):
+        super().__init__(parent);self.setMinimumSize(200,200)
+        self.stage='ready';self.elapsed_text=''
+        self._angle=0
+        self._timer=QTimer(self);self._timer.setInterval(60);self._timer.timeout.connect(self._advance)
+    def set_stage(self,stage):
+        self.stage=str(stage or 'ready')
+        if self.stage in ('submitting','generating','collecting'):
+            if not self._timer.isActive():self._timer.start()
+        else:
+            try:self._timer.stop()
+            except Exception:pass
+        self.update()
+    def set_elapsed(self,text):
+        self.elapsed_text=str(text or '');self.update()
+    def _advance(self):
+        self._angle=(self._angle+(9 if self.stage=='generating' else 5))%360;self.update()
+    def paintEvent(self,event):
+        side=min(self.width(),self.height())
+        cx,cy=self.width()/2,self.height()/2;radius=side/2-14
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
+        color=QColor(self.COLORS.get(self.stage,'#5b6572'))
+        painter.setPen(QPen(QColor('#343a46'),2));painter.setBrush(QColor('#0b0e13'))
+        painter.drawEllipse(QPointF(cx,cy),radius,radius)
+        if self.stage=='failed':
+            painter.setPen(QPen(QColor('#ef6b77'),3));painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QPointF(cx,cy),radius-5,radius-5)
+        current=self.INDEX.get(self.stage,-1)
+        for index in range(5):
+            import math as _math
+            theta=_math.radians(-90+index*72)
+            inner=radius-4;outer=radius-12
+            x1=cx+inner*_math.cos(theta);y1=cy+inner*_math.sin(theta)
+            x2=cx+outer*_math.cos(theta);y2=cy+outer*_math.sin(theta)
+            tick=QColor('#2ea36b') if 0<=current and index<current else (color if index==current and current>=0 else QColor('#343a46'))
+            painter.setPen(QPen(tick,4));painter.drawLine(int(x1),int(y1),int(x2),int(y2))
+        if self.stage in ('submitting','generating','collecting'):
+            pen=QPen(color,6);pen.setCapStyle(Qt.RoundCap);painter.setPen(pen);painter.setBrush(Qt.NoBrush)
+            span=70 if self.stage=='generating' else 45
+            box=QRect(int(cx-radius+9),int(cy-radius+9),int((radius-9)*2),int((radius-9)*2))
+            painter.drawArc(box,int(self._angle*16),int(span*16))
+        if self.stage=='posted':
+            pen=QPen(QColor('#56e99a'),5);pen.setCapStyle(Qt.RoundCap);pen.setJoinStyle(Qt.RoundJoin);painter.setPen(pen)
+            painter.drawLine(int(cx-22),int(cy+2),int(cx-8),int(cy+16));painter.drawLine(int(cx-8),int(cy+16),int(cx+24),int(cy-14))
+        label=self.stage.upper() if self.stage!='ready' else 'IDLE'
+        font=self.font();font.setBold(True);font.setPointSize(15);painter.setFont(font)
+        painter.setPen(QColor('#ef6b77') if self.stage=='failed' else QColor('#f2f4f7'))
+        painter.drawText(QRect(0,int(cy-38),self.width(),28),Qt.AlignCenter,label)
+        font.setPointSize(11);font.setBold(False);painter.setFont(font);painter.setPen(QColor('#99a8bc'))
+        painter.drawText(QRect(0,int(cy+8),self.width(),22),Qt.AlignCenter,self.elapsed_text)
+        painter.end()
 class WindowsWindowHost:
     """Reparent one existing Windows top-level window into a QWidget surface."""
     GWL_STYLE=-16; WS_CHILD=0x40000000; WS_POPUP=0x80000000
@@ -1440,7 +1496,6 @@ class Window(QMainWindow):
         self._init_mission_panel()
         self.refresh_tracker_browser()
     def _init_mission_panel(self):
-        self.auto_stages={}
         try:surface=self.browser_surface
         except (AttributeError,RuntimeError):return
         try:
@@ -1448,13 +1503,12 @@ class Window(QMainWindow):
             if layout is None:layout=QVBoxLayout(surface);layout.setContentsMargins(14,12,14,12);layout.setSpacing(10)
         except (AttributeError,RuntimeError):return
         try:
-            stage_row=QHBoxLayout();stage_row.setSpacing(8)
-            for key in ('queued','submitting','generating','collected','posted'):
-                pill=QLabel(key.upper());pill.setAlignment(Qt.AlignCenter)
-                pill.setStyleSheet('background:#141922;border:1px solid #343a46;border-radius:14px;color:#5b6572;font-size:11px;font-weight:900;padding:8px 4px;')
-                stage_row.addWidget(pill,1);self.auto_stages[key]=pill
-            layout.addLayout(stage_row)
-            self.auto_elapsed=QLabel('');self.auto_elapsed.setStyleSheet('color:#99a8bc;font-size:11px;');layout.addWidget(self.auto_elapsed)
+            core_row=QHBoxLayout();core_row.setSpacing(8)
+            core_row.addStretch(1)
+            self.auto_core=MissionCore(surface)
+            core_row.addWidget(self.auto_core)
+            core_row.addStretch(1)
+            layout.addLayout(core_row)
             self.login_card=QFrame();self.login_card.setObjectName('dashboardPanel')
             login_layout=QVBoxLayout(self.login_card);login_layout.setContentsMargins(14,12,14,12);login_layout.setSpacing(8)
             login_title=QLabel('META AI NEEDS YOU TO LOG IN');login_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');login_layout.addWidget(login_title)
@@ -1468,15 +1522,9 @@ class Window(QMainWindow):
     def set_automation_stage(self,stage,detail=''):
         order=('queued','submitting','generating','collected','posted')
         self.auto_stage=str(stage or 'ready');self.auto_stage_detail=str(detail or '')
-        try:
-            for key,pill in self.auto_stages.items():
-                if self.auto_stage=='failed':style='background:#2a1215;border:1px solid #7f2d35;border-radius:14px;color:#ef6b77;font-size:11px;font-weight:900;padding:8px 4px;'
-                elif key==self.auto_stage:style='background:#2a1c10;border:2px solid #f97316;border-radius:14px;color:#fdba74;font-size:11px;font-weight:900;padding:8px 4px;'
-                elif self.auto_stage in order and order.index(key)<order.index(self.auto_stage):style='background:#0f2417;border:1px solid #2ea36b;border-radius:14px;color:#56e99a;font-size:11px;font-weight:900;padding:8px 4px;'
-                else:style='background:#141922;border:1px solid #343a46;border-radius:14px;color:#5b6572;font-size:11px;font-weight:900;padding:8px 4px;'
-                try:pill.setStyleSheet(style)
-                except (AttributeError,RuntimeError):pass
+        try:self.auto_core.set_stage('collected' if self.auto_stage=='collecting' else self.auto_stage)
         except (AttributeError,RuntimeError):pass
+        pass
         try:
             if self.auto_stage=='failed':self.browser_status.setText('Automation stopped: '+self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('color:#ef6b77;font-weight:700;')
             elif self.auto_stage_detail:self.browser_status.setText(self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('')
@@ -1491,7 +1539,7 @@ class Window(QMainWindow):
                 try:self.auto_stage_timer.stop()
                 except Exception:pass
                 self.auto_stage_started=0
-                try:self.auto_elapsed.setText('')
+                try:self.auto_core.set_elapsed('')
                 except (AttributeError,RuntimeError):pass
         except (AttributeError,RuntimeError):pass
         if self.auto_stage=='login_needed':
@@ -1503,7 +1551,8 @@ class Window(QMainWindow):
             started=getattr(self,'auto_stage_started',0) or 0
             if not started:return
             seconds=int(_time.monotonic()-started)
-            self.auto_elapsed.setText(f'ELAPSED {seconds//60:02d}:{seconds%60:02d} · {str(getattr(self,"auto_stage","")).upper()}')
+            try:self.auto_core.set_elapsed(f'{seconds//60:02d}:{seconds%60:02d}')
+            except (AttributeError,RuntimeError):pass
         except (AttributeError,RuntimeError):pass
     def refresh_auto_queue(self):
         if not hasattr(self,'browser_queue'):return

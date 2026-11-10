@@ -188,6 +188,43 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.active_id,mid)
         self.assertIn(mid,w.studio_match.text())
         self.assertTrue(w.generate_poster_button.isEnabled())
+    def test_mission_pills_follow_real_stages(self):
+        w=self.window
+        w.set_automation_stage('generating','test job overdrive')
+        self.assertIn('#f97316',w.auto_stages['generating'].styleSheet())
+        self.assertIn('#2ea36b',w.auto_stages['queued'].styleSheet())
+        self.assertIn('test job overdrive',w.browser_status.text())
+        w._auto_stage_tick()
+        self.assertIn('GENERATING',w.auto_elapsed.text())
+        w.set_automation_stage('failed','boom')
+        self.assertIn('#ef6b77',w.auto_stages['generating'].styleSheet())
+        self.assertIn('boom',w.browser_status.text())
+        w.set_automation_stage('ready')
+        self.assertIn('idle in the background',w.browser_status.text())
+    def test_login_card_appears_on_login_failure(self):
+        w=self.window
+        mid,_=w.store.add({'matchId':'login-fail-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        pumped=[]
+        w._pump_full_auto=lambda:pumped.append(True)
+        w._poster_manual=False
+        w.notice=lambda *args:(_ for _ in ()).throw(AssertionError('no modal in background flow'))
+        w._fail_inapp_poster(mid,'login','Meta AI is signed out')
+        self.assertFalse(w.login_card.isHidden())
+        self.assertEqual(pumped,[True])
+        row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle')
+    def test_toggle_browser_without_window_reports_clearly(self):
+        w=self.window;w.auto_browser_hwnd=None
+        w.toggle_auto_browser()
+        self.assertIn('not open',w.browser_status.text())
+    def test_open_login_window_refuses_during_active_job(self):
+        w=self.window;w._inapp_poster_active='job-123'
+        try:w.open_login_window()
+        finally:w._inapp_poster_active=None
+        self.assertIn('wait for it',w.browser_status.text())
+    def test_verify_login_without_context_reports(self):
+        w=self.window;w._login_context=None
+        w.verify_login()
+        self.assertIn('Press Log into Meta AI first',w.browser_status.text())
     def test_open_tracker_chrome_login_notice_then_meta_home(self):
         from unittest.mock import patch
         from PySide6.QtWidgets import QMessageBox
@@ -1272,7 +1309,11 @@ class UITests(unittest.TestCase):
         names=[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())]
         self.assertIn('Tracker Browser',names)
         page,layout=self.window.pages['Tracker Browser']
-        found=[b for b in page.findChildren(QPushButton) if 'Open Tracker Chrome' in b.text()]
+        labels=[b.text() for b in page.findChildren(QPushButton)]
+        self.assertIn('Log into Meta AI',labels)
+        self.assertTrue(all('Open Tracker Chrome' not in text and 'Embed' not in text for text in labels))
+        self.assertEqual(set(self.window.auto_stages),{'queued','submitting','generating','collected','posted'})
+        found=True
         self.assertTrue(found)
 
     def test_browser_mode_defaults_to_dedicated(self):

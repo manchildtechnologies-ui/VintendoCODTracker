@@ -1432,12 +1432,205 @@ class Window(QMainWindow):
         QTimer.singleShot(0,self.update_screenshot_grid);QTimer.singleShot(0,self.update_cinematic_grid)
         self.refresh_cinematic_results()
     def build_tracker_browser(self):
-        l=self.page('Tracker Browser','The automation browser runs here so both Chrome windows do not need juggling. Leave the embedded Meta AI tab untouched while a video generates.')
+        l=self.page('Tracker Browser','The automation browser works hidden in the background. Watch every poster and video job live below — nothing here needs clicking while a job runs.')
         self.browser_status=QLabel('Tracker browser: checking…');self.browser_status.setWordWrap(True);l.addWidget(self.browser_status)
         self.browser_queue=QLabel('');self.browser_queue.setWordWrap(True);self.browser_queue.setStyleSheet('color:#99a8bc');l.addWidget(self.browser_queue)
         self.browser_surface=QFrame();self.browser_surface.setObjectName('dashboardPanel');self.browser_surface.setMinimumSize(800,450);l.addWidget(self.browser_surface,1)
-        self.row(l,self.button('Open Tracker Chrome',self.open_tracker_chrome,True),self.button('Embed front Chrome window',self.embed_tracker_chrome,True),self.button('Release window',self.release_tracker_chrome),self.button('Refresh browser status',self.refresh_tracker_browser))
+        self.row(l,self.button('Log into Meta AI',self.open_login_window),self.button('Show / hide browser',self.toggle_auto_browser),self.button('Refresh queue',self.refresh_auto_queue))
+        self._init_mission_panel()
         self.refresh_tracker_browser()
+    def _init_mission_panel(self):
+        self.auto_stages={}
+        try:surface=self.browser_surface
+        except (AttributeError,RuntimeError):return
+        try:
+            layout=surface.layout()
+            if layout is None:layout=QVBoxLayout(surface);layout.setContentsMargins(14,12,14,12);layout.setSpacing(10)
+        except (AttributeError,RuntimeError):return
+        try:
+            stage_row=QHBoxLayout();stage_row.setSpacing(8)
+            for key in ('queued','submitting','generating','collected','posted'):
+                pill=QLabel(key.upper());pill.setAlignment(Qt.AlignCenter)
+                pill.setStyleSheet('background:#141922;border:1px solid #343a46;border-radius:14px;color:#5b6572;font-size:11px;font-weight:900;padding:8px 4px;')
+                stage_row.addWidget(pill,1);self.auto_stages[key]=pill
+            layout.addLayout(stage_row)
+            self.auto_elapsed=QLabel('');self.auto_elapsed.setStyleSheet('color:#99a8bc;font-size:11px;');layout.addWidget(self.auto_elapsed)
+            self.login_card=QFrame();self.login_card.setObjectName('dashboardPanel')
+            login_layout=QVBoxLayout(self.login_card);login_layout.setContentsMargins(14,12,14,12);login_layout.setSpacing(8)
+            login_title=QLabel('META AI NEEDS YOU TO LOG IN');login_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');login_layout.addWidget(login_title)
+            login_hint=QLabel('Log in once in the window that opens, then press Verify. The browser hides itself again afterwards.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
+            self.row(login_layout,self.button('Open login window',self.open_login_window,True),self.button("I've logged in — verify",self.verify_login))
+            self.login_card.hide();layout.addWidget(self.login_card)
+            layout.addStretch(1)
+        except (AttributeError,RuntimeError):pass
+        self.auto_stage_timer=QTimer(self);self.auto_stage_timer.setInterval(1000);self.auto_stage_timer.timeout.connect(self._auto_stage_tick)
+        self.auto_stage='ready';self.auto_stage_started=0;self.auto_browser_hwnd=None
+    def set_automation_stage(self,stage,detail=''):
+        order=('queued','submitting','generating','collected','posted')
+        self.auto_stage=str(stage or 'ready');self.auto_stage_detail=str(detail or '')
+        try:
+            for key,pill in self.auto_stages.items():
+                if self.auto_stage=='failed':style='background:#2a1215;border:1px solid #7f2d35;border-radius:14px;color:#ef6b77;font-size:11px;font-weight:900;padding:8px 4px;'
+                elif key==self.auto_stage:style='background:#2a1c10;border:2px solid #f97316;border-radius:14px;color:#fdba74;font-size:11px;font-weight:900;padding:8px 4px;'
+                elif self.auto_stage in order and order.index(key)<order.index(self.auto_stage):style='background:#0f2417;border:1px solid #2ea36b;border-radius:14px;color:#56e99a;font-size:11px;font-weight:900;padding:8px 4px;'
+                else:style='background:#141922;border:1px solid #343a46;border-radius:14px;color:#5b6572;font-size:11px;font-weight:900;padding:8px 4px;'
+                try:pill.setStyleSheet(style)
+                except (AttributeError,RuntimeError):pass
+        except (AttributeError,RuntimeError):pass
+        try:
+            if self.auto_stage=='failed':self.browser_status.setText('Automation stopped: '+self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('color:#ef6b77;font-weight:700;')
+            elif self.auto_stage_detail:self.browser_status.setText(self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('')
+            elif self.auto_stage=='ready':self.browser_status.setText('Automation browser is idle in the background.');self.browser_status.setStyleSheet('')
+        except (AttributeError,RuntimeError):pass
+        try:
+            if self.auto_stage in ('submitting','generating','collecting'):
+                import time as _time
+                if not getattr(self,'auto_stage_started',0):self.auto_stage_started=_time.monotonic()
+                if not self.auto_stage_timer.isActive():self.auto_stage_timer.start()
+            else:
+                try:self.auto_stage_timer.stop()
+                except Exception:pass
+                self.auto_stage_started=0
+                try:self.auto_elapsed.setText('')
+                except (AttributeError,RuntimeError):pass
+        except (AttributeError,RuntimeError):pass
+        if self.auto_stage=='login_needed':
+            try:self.login_card.show()
+            except (AttributeError,RuntimeError):pass
+    def _auto_stage_tick(self):
+        try:
+            import time as _time
+            started=getattr(self,'auto_stage_started',0) or 0
+            if not started:return
+            seconds=int(_time.monotonic()-started)
+            self.auto_elapsed.setText(f'ELAPSED {seconds//60:02d}:{seconds%60:02d} · {str(getattr(self,"auto_stage","")).upper()}')
+        except (AttributeError,RuntimeError):pass
+    def refresh_auto_queue(self):
+        if not hasattr(self,'browser_queue'):return
+        try:rows=self.store.recent_cinematics(30)
+        except Exception:rows=[]
+        active=[row for row in rows if str((row or {}).get('status') or '') not in ('completed','failed')]
+        ready=[row for row in rows if str((row or {}).get('status') or '')=='completed' and str((row or {}).get('video') or '')]
+        try:self.browser_queue.setText(f'Cinematic queue: {len(active)} active, {len(ready)} finished video(s) ready in the COD AI tab.')
+        except (AttributeError,RuntimeError):pass
+    def _auto_browser_alive(self):
+        hwnd=getattr(self,'auto_browser_hwnd',None)
+        if not hwnd:return None
+        try:
+            if ctypes.windll.user32.IsWindow(hwnd):return hwnd
+        except Exception:return None
+        self.auto_browser_hwnd=None
+        return None
+    def toggle_auto_browser(self):
+        hwnd=self._auto_browser_alive()
+        if hwnd is None:
+            try:self.browser_status.setText('The automation browser is not open right now. It opens on its own when a job runs — or press Log into Meta AI.')
+            except (AttributeError,RuntimeError):pass
+            return
+        try:
+            user32=ctypes.windll.user32
+            visible=bool(user32.IsWindowVisible(hwnd))
+            user32.ShowWindow(hwnd,6 if visible else 9)
+            try:self.browser_status.setText('Automation browser window: '+('hidden in the background.' if visible else 'brought forward. Hide it again any time.'))
+            except (AttributeError,RuntimeError):pass
+            self.log('Automation browser window hidden.' if visible else 'Automation browser window shown.')
+        except Exception as exc:
+            try:self.browser_status.setText('Could not move the browser window: '+str(exc)[:160])
+            except (AttributeError,RuntimeError):pass
+    def open_login_window(self):
+        if getattr(self,'_inapp_active',None) or getattr(self,'_inapp_poster_active',None):
+            try:self.browser_status.setText('A job is running right now — wait for it to finish, then log in.')
+            except (AttributeError,RuntimeError):pass
+            return
+        if getattr(self,'_login_context',None) is not None:
+            if self._auto_browser_alive():self.toggle_auto_browser()
+            try:self.login_card.show()
+            except (AttributeError,RuntimeError):pass
+            return
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            try:self.browser_status.setText('Playwright is not installed in the tracker environment.')
+            except (AttributeError,RuntimeError):pass
+            return
+        try:self.browser_status.setText('Opening the automation browser for Meta AI login…')
+        except (AttributeError,RuntimeError):pass
+        def work():
+            try:known=set(self.find_tracker_chrome_windows())
+            except Exception:known=set()
+            try:
+                playwright=sync_playwright().start()
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
+                page=context.new_page()
+                try:meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics').ensure_logged_in(page)
+                except Exception:pass
+                try:page.close()
+                except Exception:pass
+                self._login_context=context;self._login_playwright=playwright
+                self._record_auto_browser(known)
+            except Exception as exc:
+                QTimer.singleShot(0,lambda:self.browser_status.setText('Could not open the login window: '+str(exc)[:200]));return
+            QTimer.singleShot(0,self._login_opened)
+        thread=threading.Thread(target=work,daemon=True);thread.start()
+    def _login_opened(self):
+        try:self.login_card.show()
+        except (AttributeError,RuntimeError):pass
+        try:self.browser_status.setText('Log into Meta AI in the opened window, then press Verify. The browser hides itself afterwards.')
+        except (AttributeError,RuntimeError):pass
+    def verify_login(self):
+        context=getattr(self,'_login_context',None)
+        if context is None:
+            try:self.browser_status.setText('Press Log into Meta AI first.')
+            except (AttributeError,RuntimeError):pass
+            return
+        try:self.browser_status.setText('Checking the Meta AI login…')
+        except (AttributeError,RuntimeError):pass
+        def work():
+            try:
+                page=context.new_page()
+                try:meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics').ensure_logged_in(page)
+                finally:
+                    try:page.close()
+                    except Exception:pass
+            except Exception as exc:
+                QTimer.singleShot(0,lambda:self._login_failed(str(exc)));return
+            QTimer.singleShot(0,self._login_verified)
+        self.async_task(work)
+    def _login_failed(self,detail):
+        try:self.browser_status.setText('Still signed out ('+detail+'). Log in, then verify again.')
+        except (AttributeError,RuntimeError):pass
+    def _login_verified(self):
+        try:
+            context=getattr(self,'_login_context',None)
+            if context is not None:
+                try:context.close()
+                except Exception:pass
+            playwright=getattr(self,'_login_playwright',None)
+            if playwright is not None:
+                try:playwright.stop()
+                except Exception:pass
+        except Exception:pass
+        self._login_context=None;self._login_playwright=None
+        try:self.login_card.hide()
+        except (AttributeError,RuntimeError):pass
+        self.set_automation_stage('ready')
+        try:self.browser_status.setText('Logged in. The browser is hidden in the background again.')
+        except (AttributeError,RuntimeError):pass
+        self.log('Meta AI login verified; automation browser hidden.')
+    def _record_auto_browser(self,known):
+        try:current=set(self.find_tracker_chrome_windows())
+        except Exception:return
+        fresh=[hwnd for hwnd in current if hwnd not in (known or set())]
+        if fresh:self.auto_browser_hwnd=fresh[0]
+    def _show_login_card(self,message):
+        try:self.login_card.show()
+        except (AttributeError,RuntimeError):pass
+        try:self.browser_status.setText(message[:240]);self.browser_status.setStyleSheet('color:#fdba74;font-weight:700;')
+        except (AttributeError,RuntimeError):pass
+        self.set_automation_stage('failed',message)
+    def _driver_stage(self,stage,detail=''):
+        mapping={'composing':'submitting','uploading':'submitting','generating':'generating','collecting':'collecting'}
+        QTimer.singleShot(0,lambda:self.set_automation_stage(mapping.get(stage,stage),detail))
     def chrome_executable(self):
         candidates=[Path(os.environ.get('ProgramFiles',r'C:\Program Files'))/'Google'/'Chrome'/'Application'/'chrome.exe',
                     Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Google'/'Chrome'/'Application'/'chrome.exe']
@@ -2084,11 +2277,14 @@ class Window(QMainWindow):
         try:self.store.update_cinematic(job_id,status='awaiting_download')
         except Exception:pass
         try:
+            known_windows=set()
+            try:known_windows=set(self.find_tracker_chrome_windows())
+            except Exception:pass
             with sync_playwright() as playwright:
                 context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp')
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
-                try:video=driver.submit_image_to_video(page,screenshot,faces,prompt,str(self.videos_dir()))
+                try:self._record_auto_browser(known_windows);video=driver.submit_image_to_video(page,screenshot,faces,prompt,str(self.videos_dir()),on_stage=self._driver_stage)
                 finally:
                     try:page.close()
                     except Exception:pass
@@ -2109,7 +2305,7 @@ class Window(QMainWindow):
     def _fail_inapp_cinematic(self,job_id,message):
         try:self.store.update_cinematic(job_id,status='failed',error=str(message)[:300])
         except Exception:pass
-        try:self.on_log('In-app cinematic failed: '+job_id+' — '+str(message)[:160])
+        try:self.on_log('In-app cinematic failed: '+job_id+' — '+str(message)[:160]);QTimer.singleShot(0,lambda:self._show_login_card(message) if ('login' in str(message).lower() or 'signed out' in str(message).lower()) else self.set_automation_stage('failed',message))
         except Exception:pass
         self._inapp_active=None
         QTimer.singleShot(0,self.refresh_cinematic_results)
@@ -3300,7 +3496,9 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
         self._poster_manual=manual
-        return bool(self._start_poster_automation(mid,prepared['folder'],photo_names,final_prompt))
+        launched=bool(self._start_poster_automation(mid,prepared['folder'],photo_names,final_prompt))
+        if launched:self.set_automation_stage('submitting',mid)
+        return launched
     def _toggle_full_auto(self):
         try:on=bool(self.full_auto.isChecked())
         except (AttributeError,RuntimeError):return
@@ -3334,6 +3532,7 @@ class Window(QMainWindow):
         try:
             if not self.auto_post.isChecked():self.auto_post.setChecked(True);self.settings.values['auto_post']=True;self.log('Full Auto enabled automatic Discord posting.')
         except (AttributeError,RuntimeError):pass
+        self.set_automation_stage('queued',target)
         try:launched=self._prepare_and_launch(target,manual=False)
         except Exception as exc:
             try:self.store.update(target,gen_state='idle',error=str(exc)[:300])
@@ -3363,6 +3562,9 @@ class Window(QMainWindow):
         return True
     def _run_inapp_poster(self,job_id,playwright_factory,folder,filenames,prompt_text):
         try:
+            known_windows=set()
+            try:known_windows=set(self.find_tracker_chrome_windows())
+            except Exception:pass
             with playwright_factory() as playwright:
                 context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp')
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
@@ -3370,7 +3572,8 @@ class Window(QMainWindow):
                 try:
                     base=Path(folder)
                     photos=[str(base/name) for name in filenames]
-                    saved=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'))
+                    self._record_auto_browser(known_windows)
+                    saved=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'),on_stage=self._driver_stage)
                 finally:
                     try:page.close()
                     except Exception:pass
@@ -3402,6 +3605,7 @@ class Window(QMainWindow):
         self.received_art(job_id,str(target))
         self.job_status.setText('Poster submitted and finished image collected automatically.')
         self.log('In-app poster completed: '+job_id)
+        self.set_automation_stage('collected',job_id)
         self._pump_full_auto()
     def _fail_inapp_poster(self,job_id,step,detail):
         self._inapp_poster_active=None
@@ -3412,6 +3616,8 @@ class Window(QMainWindow):
         if 'login' in str(step).lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then press Generate AI End Game Picture again.'
         else:message=(f'Automatic submission stopped at {step}: {detail}')[:300]
         self.job_status.setText(message);self.log('In-app poster failed for '+job_id+': '+str(step)+' — '+str(detail)[:160])
+        if 'login' in str(step).lower():self._show_login_card(message)
+        else:self.set_automation_stage('failed',message)
         if getattr(self,'_poster_manual',True):
             self.notice(message)
             try:
@@ -3472,7 +3678,7 @@ class Window(QMainWindow):
         url=self.webhook.text().strip();match=json.loads(job['payload']);players=json.loads(job['players']);content=E.recap(match,players,snapshot=self.store.meta('codmunity_stats'));poster=job.get('poster') or job['image']
         if job['capture'] and not players:content+='\nOCR (not verified):\n'+job['ocr'][:600]
         def done(message_id):
-            self.store.update(mid,status='delivered',message_id=message_id,error='');E.reserve_legacy_match(match);self.refresh_history();self.log('Discord poster delivered: '+mid)
+            self.store.update(mid,status='delivered',message_id=message_id,error='');E.reserve_legacy_match(match);self.refresh_history();self.log('Discord poster delivered: '+mid);QTimer.singleShot(0,lambda:self.set_automation_stage('posted',mid))
         def failed(error):
             self.store.update(mid,status='uncertain' if 'uncertain' in error.lower() else 'failed',error=error);self.refresh_history()
         self.async_task(lambda:E.send_discord(url,poster,content),done,failed);self.refresh_history()

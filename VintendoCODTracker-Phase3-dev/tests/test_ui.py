@@ -366,8 +366,8 @@ class UITests(unittest.TestCase):
         from PIL import Image
         import numpy as np
         from unittest.mock import patch
-        w=self.window;w.mode.setCurrentText('Squad Night');w.auto_post.setChecked(False);mid,_=w.store.add({'matchId':'squad-test-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win','stats':{'kills':12}})
-        w.refresh_history();w.link_match.setCurrentIndex(w.link_match.findData(mid));w.last_frame=np.array(Image.new('RGB',(1200,500),'navy'))
+        w=self.window;import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'history.sqlite3');w.mode.setCurrentText('Squad Night');w.auto_post.setChecked(False);mid,_=w.store.add({'matchId':'squad-test-'+uuid.uuid4().hex,'modeKey':'resurgence','integration_source':'CODMunity','result':'win','stats':{'kills':12}})
+        w.refresh_history();w.last_frame=np.array(Image.new('RGB',(1200,500),'navy'))
         w.ocr_text.setPlainText('PLAYER  KILLS  DAMAGE  SCORE\nVintendo  12  3400  4500\nConcha  8  2000  3200');w.parse_ocr();w.verified.setChecked(True);w.save_capture()
         job=w.store.get(mid);self.assertTrue(job['capture']);self.assertEqual(len(json.loads(job['players'])),2);self.assertIn('16:9',job['prompt'])
         background=app.E.DATA/('fixture-art-'+uuid.uuid4().hex+'.png');Image.new('RGB',(1600,900),'navy').save(background);w.received_art(mid,str(background));w.render_overlay();self.wait_until(lambda:w.store.get(mid)['status']=='ready')
@@ -502,16 +502,14 @@ class UITests(unittest.TestCase):
     def test_save_capture_combines_ocr_placement_and_manual_result(self):
         import numpy as np
         from PIL import Image
-        w=self.window;w.mode.setCurrentText('Squad Night')
+        w=self.window;import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'history.sqlite3');w.mode.setCurrentText('Squad Night')
         w.last_frame=np.array(Image.new('RGB',(1200,500),'navy'))
         w.ocr_text.setPlainText('PLAYER  KILLS  PLACEMENT\nVintendo  12  1\nConcha  8  1');w.parse_ocr();w.verified.setChecked(True)
-        w.link_match.setCurrentIndex(0);self.assertIsNone(w.link_match.currentData())
         w.save_capture()
         job=w.store.get(w.active_id);context=app.E.extract_match_context(json.loads(job['payload']),job.get('ocr',''))
         self.assertEqual(context['result'],'Victory');self.assertEqual(context['placement'],'1st place')
         w.last_frame=np.array(Image.new('RGB',(1200,500),'maroon'))
         w.ocr_text.setPlainText('PLAYER  KILLS\nVintendo  12');w.parse_ocr();w.verified.setChecked(True)
-        w.link_match.setCurrentIndex(0)
         w.result_override.setCurrentIndex(w.result_override.findData('loss'))
         w.save_capture()
         forced=w.store.get(w.active_id);forced_context=app.E.extract_match_context(json.loads(forced['payload']),forced.get('ocr',''))
@@ -519,17 +517,16 @@ class UITests(unittest.TestCase):
     def test_save_capture_asks_win_or_lose_when_result_unknown(self):
         import numpy as np
         from PIL import Image
-        w=self.window;w.mode.setCurrentText('Squad Night')
+        w=self.window;import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'history.sqlite3');w.mode.setCurrentText('Squad Night')
         w.last_frame=np.array(Image.new('RGB',(1200,500),'teal'))
         w.ocr_text.setPlainText('PLAYER  KILLS\nVintendo  12');w.parse_ocr();w.verified.setChecked(True)
-        w.link_match.setCurrentIndex(0)
         w.ask_match_result=lambda:'win'
         w.save_capture()
         job=w.store.get(w.active_id)
         self.assertEqual(app.E.extract_match_context(json.loads(job['payload']),job.get('ocr',''))['result'],'Victory')
         w.last_frame=np.array(Image.new('RGB',(1200,500),'olive'))
         w.ocr_text.setPlainText('PLAYER  KILLS\nVintendo  5');w.parse_ocr();w.verified.setChecked(True)
-        w.link_match.setCurrentIndex(0);before=w.active_id
+        before=w.active_id
         w.ask_match_result=lambda:None;rows_before=len(w.store.history())
         w.save_capture()
         self.assertEqual(w.active_id,before)
@@ -1495,4 +1492,30 @@ class UITests(unittest.TestCase):
         w=self.window
         self.assertGreaterEqual(w.width(),1100);self.assertLessEqual(w.width(),1600)
         self.assertGreaterEqual(w.height(),730);self.assertLessEqual(w.height(),1000)
+    def test_boot_force_fetches_when_strip_key_missing(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.store.save_player({'id':'me','name':'Vintendo','display_name':'Vintendo','aliases':[],'photo':'','enabled':True})
+        w.store.set_meta('codmunity_public_distributions',{'other|key|here':{}})
+        called=[];w.refresh_all_distributions=lambda:called.append(True)
+        w._boot_dist_done=True;w._boot_refresh_distributions()
+        self.assertEqual(called,[])
+        w._boot_refresh_distributions(force=True)
+        self.assertEqual(called,[True])
+    def test_distribution_saves_despite_player_switch(self):
+        from types import SimpleNamespace
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.store.save_player({'id':'me','name':'Vintendo','display_name':'Vintendo','aliases':[],'photo':'','enabled':True})
+        w.current_player='ghost'
+        w._refresh_queue=[('warzone','resurgence','lifetime')];w._refresh_total=1;w._refresh_failed=0
+        dist=SimpleNamespace(game='warzone',mode='resurgence',scope='lifetime',kd=[0.8]*12,sampled=100,users_total=200)
+        w.on_codmunity_distribution('me','warzone|resurgence|lifetime',dist)
+        cached=w.store.meta('codmunity_public_distributions',{}) or {}
+        self.assertIn('warzone|resurgence|lifetime',cached)
+        self.assertIn('1/1',w.codmunity_status.text())
 if __name__=='__main__':unittest.main()

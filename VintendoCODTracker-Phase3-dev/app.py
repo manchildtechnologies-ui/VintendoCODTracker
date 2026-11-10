@@ -613,7 +613,16 @@ class Window(QMainWindow):
         self.tracking=False;self.paused=False;self.solo=None;self.capture=None;self.capture_busy=False;self.screenshot_busy=False;self.poll_busy=False;self.active_id=None;self.last_capture=None;self.last_frame=None;self.outputs=[];self.browser=None;self.closing=False
         self.tab_prototype=os.environ.get('VINTENDO_TAB_PROTOTYPE')=='1'
         self.track_both_startup=os.environ.get('VINTENDO_TRACK_BOTH')=='1'
-        self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker');self._fit_to_screen();self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
+        self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker'+self._build_tag());self._fit_to_screen();self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
+    def _build_tag(self):
+        try:
+            out=__import__('subprocess').check_output(['git','-C',str(E.ROOT),'rev-parse','--short','HEAD'],timeout=5)
+            tag=out.decode().strip()
+            if tag:return ' \u00b7 build '+tag
+        except Exception:pass
+        try:tag=(E.ROOT/'BUILD').read_text().strip().split()[0]
+        except (OSError,IndexError):return ''
+        return (' \u00b7 build '+tag) if tag else ''
     def _fit_to_screen(self):
         try:avail=self.screen().availableGeometry()
         except (AttributeError,RuntimeError):avail=None
@@ -828,15 +837,6 @@ class Window(QMainWindow):
         review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   OPEN AI STUDIO',lambda:self.nav.setCurrentRow(5))
         tools_layout.addWidget(review);tools_layout.addWidget(capture);tools_layout.addWidget(poster);body.addWidget(tools,1,2)
         self.hotkey_hint=QLabel('At match end, press Ctrl + Shift + F8 while the scoreboard is visible.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
-        intel=QFrame();intel.setObjectName('dashboardPanel');intel_layout=QHBoxLayout(intel);intel_layout.setContentsMargins(13,10,13,10);intel_layout.setSpacing(12)
-        intel_title=QLabel('◈  PLAYER INTEL');intel_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');intel_layout.addWidget(intel_title)
-        self.intel_badge=QLabel('—');self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;color:#6b7280;');intel_layout.addWidget(self.intel_badge)
-        self.intel_kd=QLabel('Select a player in Player Roster');self.intel_kd.setStyleSheet('font-size:12px;font-weight:700;color:#c4ccd8;');intel_layout.addWidget(self.intel_kd)
-        self.intel_next=QLabel('');self.intel_next.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;');intel_layout.addWidget(self.intel_next)
-        intel_layout.addStretch(1)
-        self.intel_spark=Sparkline();self.intel_spark.setFixedSize(120,34);intel_layout.addWidget(self.intel_spark)
-        self.intel_updated=QLabel('');self.intel_updated.setStyleSheet('font-size:11px;color:#9da8b7;');intel_layout.addWidget(self.intel_updated)
-        l.addWidget(intel)
         body.setColumnStretch(0,1);body.setColumnStretch(1,1);body.setColumnStretch(2,0);body.setRowStretch(0,3);body.setRowStretch(1,2);l.addLayout(body,1)
 
         footer=QFrame();footer.setObjectName('dashboardFooter');footer_layout=QHBoxLayout(footer);footer_layout.setContentsMargins(13,8,13,8)
@@ -950,7 +950,6 @@ class Window(QMainWindow):
         self.row(l,self.monitor,self.button('Refresh monitors',self.refresh_monitors),self.button('Select Area To Capture Score',self.pick_region),self.button('Capture Screen Shot',self.capture_once,True))
         l.addWidget(self.roi_label);self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');l.addWidget(self.hotkey_status)
         self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
-        self.link_match=QComboBox();self.link_match.setMaximumWidth(460);self.recent_match_row=self.row(l,QLabel('Recent Match Scores'),self.link_match);self.recent_match_row.addStretch(1)
         self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460);self.choose_result_row=self.row(l,QLabel('Choose Match Result'),self.result_override);self.choose_result_row.addStretch(1)
         split=QSplitter();self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(400,180);self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');split.addWidget(self.capture_preview);split.addWidget(self.ocr_text);l.addWidget(split,1)
         self.row(l,self.button('Paste Screenshot Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove',self.remove_ocr_row))
@@ -1197,11 +1196,13 @@ class Window(QMainWindow):
         self._roster_loading=False
         self.refresh_profile_tab();self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Public profile identity resolved and saved.')
-    def _boot_refresh_distributions(self):
-        if getattr(self,'_boot_dist_done',False):return
+    def _boot_refresh_distributions(self,force=False):
+        if getattr(self,'_boot_dist_done',False) and not force:return
         self._boot_dist_done=True
         try:
-            if self.store.meta('codmunity_public_distributions',{}):return
+            cached=self.store.meta('codmunity_public_distributions',{}) or {}
+            if not force and cached.get('warzone|resurgence|lifetime'):return
+            self.log('Loading verified community data.')
             if self._codmunity_player_record() is None:
                 wanted=str(self.settings.values.get('player','')).casefold()
                 roster=self.store.roster()
@@ -1273,7 +1274,6 @@ class Window(QMainWindow):
         self.codmunity_status.setText('Player statistics connected · configured provider response saved.')
     def on_codmunity_distribution(self,pid,key,distribution):
         finished=self._advance_refresh_queue()
-        if str(self.current_player or '')!=str(pid):return
         updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
         record={'game':distribution.game,'mode':distribution.mode,'scope':distribution.scope,
             'kd':list(distribution.kd),'sampled':distribution.sampled,'users_total':distribution.users_total,
@@ -2828,6 +2828,7 @@ class Window(QMainWindow):
         def work():
             directory,records=E.load_matches(values);E.refresh_codmunity_stats(values,self.store);boot=self.store.meta('cod_bootstrapped',False);new=[]
             state=E.read_json(E.DATA/'posted_matches.json',{}) or {};seen=set(state.get('posted_ids',[]));legacy=E.legacy()
+            self._poll_touched=False
             snapshot=self.store.meta('codmunity_stats') or {}
             local_player=str(values.get('player','vintendo') or 'vintendo')
             aliases=[hit.get(key) for hit in (snapshot.get('identity') or {}).get('hits',[]) for key in ('username','displayName') if hit.get(key)]
@@ -2842,7 +2843,7 @@ class Window(QMainWindow):
                 if existing:
                     enriched,_=E.enrich_codmunity_match(match,local_player,aliases)
                     updates=E.codmunity_row_updates(existing,enriched,local_player,aliases)
-                    if updates:self.store.update(mid,**updates)
+                    if updates:self.store.update(mid,**updates);self._poll_touched=True
                 if added and boot and status not in ('solo_delivered','baseline'):
                     context=E.extract_match_context(match,'')
                     mode_known=bool(context.get('game_mode')) and not str(context['game_mode']).startswith('Not shown')
@@ -2855,9 +2856,16 @@ class Window(QMainWindow):
         def done(new):
             self.poll_busy=False
             for mid in new:self.log('New match queued for Squad Night review: '+mid)
+            if source=='player-intel':self.log(f"Match check complete: {len(new)} new; {len(self.store.history())} tracked in total.")
             if source=='codmunity-tab':self.codmunity_status.setText('CODMunity matches are in the tracker.')
             self.refresh_history()
             self._pump_full_auto()
+            touched=getattr(self,'_poll_touched',False);self._poll_touched=False
+            try:self.refresh_player_intel()
+            except (AttributeError,RuntimeError):pass
+            if new or touched:
+                try:self.refresh_roster()
+                except (AttributeError,RuntimeError):pass
         self.async_task(work,done,lambda _:setattr(self,'poll_busy',False))
     def ensure_capture(self):
         if self.mode.currentText()!='Squad Night':raise RuntimeError('Enable Squad Night to use scoreboard capture.')
@@ -2938,12 +2946,19 @@ class Window(QMainWindow):
                     stats[key]=float(value) if '.' in value else int(value)
             rows.append(dict(name=name,stats=stats,verified=True,source='user_verified_ocr',confidence=1.0))
         return rows
+    def _latest_codmunity_match(self):
+        for job in self.store.history():
+            if job['status'] in ('delivered','solo_delivered'):continue
+            try:payload=json.loads(job['payload'])
+            except (ValueError,TypeError):continue
+            if isinstance(payload,dict) and payload.get('integration_source')=='CODMunity':return job['id']
+        return None
     def save_capture(self):
         if self.last_frame is None:self.notice('Capture a scoreboard first.');return
         if not self.verified.isChecked():self.notice('Review the scoreboard and confirm the verification checkbox.');return
         try:players=self.verified_players()
         except ValueError as exc:self.notice(str(exc));return
-        mid=self.link_match.currentData()
+        mid=self._latest_codmunity_match()
         if mid:
             existing=self.store.get(mid)
             if existing['status'] in ('delivered','solo_delivered') and not self.allow_both.isChecked():self.notice('This match was already delivered. Choose another record or explicitly enable an additional format in Discord Settings.');return
@@ -2965,7 +2980,7 @@ class Window(QMainWindow):
         if context.get('result') not in ('Victory','Defeat') and override=='auto':
             picked=self.ask_match_result()
             if picked in ('win','loss'):payload['result']=picked;payload['poster_context']=E.extract_match_context(payload,self.ocr_text.toPlainText());context=E.extract_match_context(payload,self.ocr_text.toPlainText())
-            else:self.log('Save cancelled: match result is still unknown. Link the CODMunity match, set the Result selector, or answer the win/loss question.');return
+            else:self.log('Save cancelled: match result is still unknown. Set the Result selector, or answer the win/loss question.');return
         if not mid:mid,_=self.store.add(dict(base_payload))
         folder=E.DATA/'captures';folder.mkdir(parents=True,exist_ok=True);path=folder/(E.disk_id(mid)+'.png')
         from PIL import Image
@@ -2976,7 +2991,7 @@ class Window(QMainWindow):
         self.log('Verified scoreboard saved. A Meta AI creative brief was prepared from the reviewed names and performance ranks.')
         self._pump_full_auto()
     def ask_match_result(self):
-        box=QMessageBox(self);box.setWindowTitle('Vintendo COD Tracker');box.setText('Did you win or lose?');box.setInformativeText('Neither the linked CODMunity match nor the scoreboard shows the result.');win_button=box.addButton('Win',QMessageBox.AcceptRole);lose_button=box.addButton('Lose',QMessageBox.AcceptRole);box.addButton('Cancel',QMessageBox.RejectRole);box.setDefaultButton(win_button);box.exec()
+        box=QMessageBox(self);box.setWindowTitle('Vintendo COD Tracker');box.setText('Did you win or lose?');box.setInformativeText('Neither the latest CODMunity match nor the scoreboard shows the result.');win_button=box.addButton('Win',QMessageBox.AcceptRole);lose_button=box.addButton('Lose',QMessageBox.AcceptRole);box.addButton('Cancel',QMessageBox.RejectRole);box.setDefaultButton(win_button);box.exec()
         if box.clickedButton() is win_button:return 'win'
         if box.clickedButton() is lose_button:return 'loss'
         return None
@@ -3046,40 +3061,7 @@ class Window(QMainWindow):
         if rank['next_tier'] is not None:self.roster_rank_next.setText(f"Next: {rank['next_tier']} @ {rank['next_kd']:.2f} K/D")
         else:self.roster_rank_next.setText('MAX RANK')
     def refresh_player_intel(self):
-        if not hasattr(self,'intel_badge'):return
-        import player_stats_service as PSS
-        gray='color:#6b7280;'
-        player=None
-        pid=getattr(self,'current_player',None)
-        if pid:player=self._codmunity_player_record(pid)
-        if player is None:
-            wanted=str(self.settings.values.get('player','')).casefold()
-            if wanted:
-                for candidate in self.store.roster():
-                    names=[str(candidate.get('name') or '').casefold()]+[str(a).casefold() for a in (candidate.get('aliases') or []) if isinstance(a,str)]
-                    if wanted in names:player=candidate;break
-        if player is None:
-            self.intel_badge.setText('—');self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;'+gray)
-            self.intel_kd.setText('Select a player in Player Roster');self.intel_next.setText('')
-            self.intel_spark.setValues([]);self.intel_updated.setText('');return
-        game=self.codmunity_game.currentData() or 'warzone' if hasattr(self,'codmunity_game') else 'warzone'
-        mode=self.codmunity_mode.currentData() or 'resurgence' if hasattr(self,'codmunity_mode') else 'resurgence'
-        scope=self.codmunity_scope.currentData() or 'lifetime' if hasattr(self,'codmunity_scope') else 'lifetime'
-        snap=PSS.snapshot_for_player(self.store,player,game,mode,scope)
-        if snap['rank'] is None:
-            self.intel_badge.setText('RANK UNAVAILABLE');self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;'+gray)
-            self.intel_kd.setText(f"{snap['kd']:.2f} K/D" if snap['kd'] is not None else 'K/D —')
-            self.intel_next.setText('');self.intel_spark.setValues([]);self.intel_updated.setText('');return
-        color=self.LADDER_TIER_COLORS.get(snap['rank']['tier'],'#e5e9ef')
-        self.intel_badge.setText('●  '+snap['rank']['tier'].upper());self.intel_badge.setStyleSheet('font-size:15px;font-weight:900;color:'+color+';')
-        self.intel_kd.setText(f"{snap['kd']:.2f} K/D · {snap['rank']['percentile']:.1f}%" + (f" · {snap['kd_source']}" if snap.get('kd_source') else ''))
-        if snap['rank']['next_tier'] is not None:self.intel_next.setText(f"Next: {snap['rank']['next_tier']} @ {snap['rank']['next_kd']:.2f}")
-        else:self.intel_next.setText('MAX RANK')
-        history=PSS.snapshot_history(self.store,snap['player_id'],game,mode,scope)
-        self.intel_spark.setValues([h.get('kd') for h in history if isinstance(h.get('kd'),(int,float))])
-        awards=PSS.awards_for_player(self.store,snap['player_id'])
-        stamp=str(snap.get('updated_at') or '')
-        self.intel_updated.setText((f"★ {len(awards)} award(s) · " if awards else '')+('updated '+stamp[:16].replace('T',' ') if stamp else ''))
+        return
     def _codmunity_comparison_changed(self,*_):
         try:self.refresh_codmunity_panel()
         except (AttributeError,RuntimeError):pass
@@ -3281,13 +3263,7 @@ class Window(QMainWindow):
         else:self.name_match_result.setText('No unambiguous match found.');self.name_match_result.setStyleSheet('font-size:11px;color:#e5a13d;')
     def refresh_history(self):
         if not hasattr(self,'history'):return
-        rows=self.store.history();active_link=self.link_match.currentData();self.link_match.clear();self.link_match.addItem('Unlinked scoreboard — create capture record',None)
-        for job in rows:
-            match=json.loads(job['payload'])
-            if job['status'] not in ('delivered','solo_delivered'):
-                self.link_match.addItem(str(match.get('modeKey',match.get('mode','match')))+' · '+str(match.get('playedAt',''))+' · '+job['id'][-12:],job['id'])
-        ix=self.link_match.findData(active_link)
-        if ix>=0:self.link_match.setCurrentIndex(ix)
+        rows=self.store.history()
         self.studio_match_picker.blockSignals(True)
         active_studio=self.studio_match_picker.currentData()
         self.studio_match_picker.clear()
@@ -3502,8 +3478,6 @@ class Window(QMainWindow):
                     for player in saved_players:self.add_ocr_row(row=player)
                     self.verified.setChecked(True)
                 except (OSError,ValueError):self.last_frame=None
-        ix=self.link_match.findData(mid)
-        if ix>=0:self.link_match.setCurrentIndex(ix)
         six=self.studio_match_picker.findData(mid)
         if six>=0:self.studio_match_picker.setCurrentIndex(six)
         self.job_status.setText(job['error'] or 'Ready for review')

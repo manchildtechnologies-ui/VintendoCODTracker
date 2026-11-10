@@ -777,6 +777,49 @@ class UITests(unittest.TestCase):
         self.window.save_player()
         cleared=next(p for p in self.window.store.roster() if p['id']==pid)
         self.assertEqual(cleared['photo'],'')
+    def test_codommunity_roster_identity_cache_rank_and_player_isolation(self):
+        import tempfile,json
+        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
+        w=self.window;w.store=app.E.Store(tmpdir/'history.sqlite3')
+        players=[
+            {'id':'codm-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,
+             'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'},
+            {'id':'codm-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False,
+             'codmunity_username':'Goomy11','codmunity_uid':'uid-secondary','codmunity_display_name':'Goomy','profile_url':'https://codmunity.gg/profile/Goomy11'},
+        ]
+        for player in players:w.store.save_player(player)
+        for suffix,name,kills,deaths in (('a','VintendoPower',341,100),('b','Goomy11',10,5)):
+            mid,_=w.store.add({'matchId':'codm-'+suffix,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:'+('01' if suffix=='a' else '02')+'Z','result':'win'})
+            w.store.update(mid,players=json.dumps([{'name':name,'verified':True,'stats':{'kills':kills,'deaths':deaths}}]))
+        w.store.set_meta('codmunity_public_distributions',{
+            'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime',
+                'kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],
+                'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00+00:00','source':'public_global_endpoint'}})
+        w.refresh_roster();w.load_roster_player('codm-a')
+        self.assertIn('vintendopower',w.codmunity_identity_label.text())
+        self.assertIn('uid-primary',w.codmunity_identity_label.text())
+        self.assertIn('https://codmunity.gg/profile/vintendopower',w.codmunity_profile_label.text())
+        self.assertEqual(w.codmunity_status.text(),'Player statistics not connected')
+        self.assertIn('3.41',w.codmunity_kd_value.text())
+        self.assertIn('not lifetime',w.codmunity_kd_value.text())
+        self.assertIn('Solid',w.codmunity_rank_value.text())
+        self.assertAlmostEqual(float(w.codmunity_percentile_value.text().rstrip('%')),49.2,places=1)
+        self.assertEqual(w.codmunity_next_kd_value.text(),'4.94')
+        self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
+        w.codmunity_stats_button.click()
+        self.assertEqual(w.codmunity_status.text(),'Player statistics not connected')
+        w.load_roster_player('codm-b')
+        self.assertIn('uid-secondary',w.codmunity_identity_label.text())
+        self.assertIn('2.00',w.codmunity_kd_value.text())
+        self.assertIn('local tracked matches',w.codmunity_kd_value.text())
+        self.assertNotIn('3.41',w.codmunity_kd_value.text())
+        self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
+        w.roster_display_name.setText('Goomy display updated');w.save_player()
+        saved=next(player for player in w.store.roster() if player['id']=='codm-b')
+        self.assertEqual(saved['codmunity_uid'],'uid-secondary')
+        self.assertEqual(saved['codmunity_username'],'Goomy11')
+        self.assertEqual(saved['display_name'],'Goomy display updated')
+        self.assertFalse(saved['consent_meta'])
     def test_cinematic_results_list_shows_several_rows(self):
         self.assertGreaterEqual(self.window.cinematic_results.minimumHeight(),140)
     def test_cod_ai_dashboard_has_workflow_and_no_standalone_delete_button(self):

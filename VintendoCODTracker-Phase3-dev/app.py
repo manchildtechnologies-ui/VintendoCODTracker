@@ -1,5 +1,7 @@
 from __future__ import annotations
 import os,sys,json,time,threading,subprocess,shutil,logging,re,uuid,ctypes,sqlite3
+from datetime import datetime,timezone
+from urllib.parse import quote
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -11,6 +13,7 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBo
 import engine as E
 import updater
 import meta_automation
+import codmunity_player_stats as codmunity_player_stats
 from version import APP_VERSION
 
 SCOREBOARD_HOTKEY_ID=0x5638
@@ -797,13 +800,63 @@ class Window(QMainWindow):
         self.roster_name=self.edit();self.roster_display_name=self.edit();self.roster_aliases=self.edit()
         self.roster_enabled=self.roster_switch('Enabled — include this player in the roster and match processing.')
         self.roster_profile_url=self.edit();self.roster_profile_url.setPlaceholderText('https://codmunity.gg/profile/username')
+        self.codmunity_username=self.edit();self.codmunity_username.setPlaceholderText('Enter CODMunity username (for example, vintendopower)')
         info_form.addRow('Enter Players Call of Duty Name from the Game',self.roster_name)
         info_form.addRow('Player Nick name (Shown in AI Pictures and Videos)',self.roster_display_name)
         info_form.addRow('Aliases (separate with ;)',self.roster_aliases)
+        info_form.addRow('CODMunity username',self.codmunity_username)
         info_form.addRow('CODMunity profile link',self.roster_profile_url)
         self.name_test=self.edit();self.name_test.setPlaceholderText('Enter a COD username from a screenshot...');self.roster_test_button=self.button('Test Name Match',self.test_name);test_row=QHBoxLayout();test_row.setContentsMargins(0,0,0,0);test_row.setSpacing(6);test_row.addWidget(self.name_test,1);test_row.addWidget(self.roster_test_button);test_row_widget=QWidget();test_row_widget.setLayout(test_row);info_form.addRow('Test Name From Screenshot',test_row_widget)
         info_form.addRow('',self.roster_enabled)
         self.roster_tabs.addTab(info_tab,'PLAYER INFO')
+        codmunity_tab=QWidget();codmunity_layout=QVBoxLayout(codmunity_tab);codmunity_layout.setContentsMargins(12,10,12,10);codmunity_layout.setSpacing(8)
+        codmunity_controls=QHBoxLayout();codmunity_controls.setSpacing(7)
+        self.codmunity_game=QComboBox();self.codmunity_game.addItem('Warzone','warzone');self.codmunity_game.addItem('MW4','mw4')
+        self.codmunity_mode=QComboBox()
+        self.codmunity_scope=QComboBox();self.codmunity_scope.addItem('Lifetime','lifetime');self.codmunity_scope.addItem('Recent','recent')
+        codmunity_controls.addWidget(QLabel('Comparison'));codmunity_controls.addWidget(self.codmunity_game);codmunity_controls.addWidget(self.codmunity_mode);codmunity_controls.addWidget(self.codmunity_scope)
+        self.codmunity_resolve_button=self.button('Resolve profile',self.resolve_codmunity_identity)
+        self.codmunity_stats_button=self.button('Refresh player stats',self.refresh_codmunity_player_stats)
+        self.codmunity_refresh_button=self.button('Refresh community data',self.refresh_codmunity_distribution)
+        codmunity_controls.addWidget(self.codmunity_resolve_button);codmunity_controls.addWidget(self.codmunity_stats_button);codmunity_controls.addWidget(self.codmunity_refresh_button);codmunity_layout.addLayout(codmunity_controls)
+        self.codmunity_status=QLabel('Player statistics not connected');self.codmunity_status.setObjectName('codmunityPlayerStatus');self.codmunity_status.setWordWrap(True);self.codmunity_status.setStyleSheet('font-size:12px;font-weight:800;color:#f0ad4e;padding:6px 8px;background:#171a20;border:1px solid #343a46;border-radius:5px;')
+        codmunity_layout.addWidget(self.codmunity_status)
+        self.codmunity_identity_label=QLabel('Username —  ·  Display name —  ·  UID —');self.codmunity_identity_label.setObjectName('codmunityIdentity');self.codmunity_identity_label.setWordWrap(True);self.codmunity_identity_label.setStyleSheet('font-size:11px;color:#d4dae4;')
+        codmunity_layout.addWidget(self.codmunity_identity_label)
+        self.codmunity_profile_label=QLabel('Profile link —');self.codmunity_profile_label.setObjectName('codmunityProfileLink');self.codmunity_profile_label.setWordWrap(True);self.codmunity_profile_label.setStyleSheet('font-size:11px;color:#9da8b7;')
+        codmunity_layout.addWidget(self.codmunity_profile_label)
+        comparison_grid=QGridLayout();comparison_grid.setHorizontalSpacing(18);comparison_grid.setVerticalSpacing(6)
+        self.codmunity_game_mode_value=self._codmunity_value_label()
+        self.codmunity_kd_value=self._codmunity_value_label()
+        self.codmunity_rank_value=self._codmunity_value_label()
+        self.codmunity_percentile_value=self._codmunity_value_label()
+        self.codmunity_progress_value=self._codmunity_value_label()
+        self.codmunity_next_kd_value=self._codmunity_value_label()
+        self.codmunity_median_value=self._codmunity_value_label()
+        self.codmunity_updated_value=self._codmunity_value_label()
+        for row,(title,value) in enumerate((
+            ('Game / mode',self.codmunity_game_mode_value),
+            ('K/D source',self.codmunity_kd_value),
+            ('Ladder Rank',self.codmunity_rank_value),
+            ('Community percentile',self.codmunity_percentile_value),
+            ('Progress to next rank',self.codmunity_progress_value),
+            ('Next-rank K/D',self.codmunity_next_kd_value),
+            ('Community median K/D',self.codmunity_median_value),
+            ('Last updated',self.codmunity_updated_value),
+        )):
+            comparison_grid.addWidget(QLabel(title),row//2,(row%2)*2)
+            comparison_grid.addWidget(value,row//2,(row%2)*2+1)
+        codmunity_layout.addLayout(comparison_grid)
+        self.codmunity_distribution_label=QLabel('No community distribution loaded.');self.codmunity_distribution_label.setObjectName('codmunityDistribution');self.codmunity_distribution_label.setWordWrap(True);self.codmunity_distribution_label.setStyleSheet('font-size:10px;color:#9da8b7;padding:6px 8px;background:#10131a;border:1px solid #2b303c;border-radius:5px;')
+        codmunity_layout.addWidget(self.codmunity_distribution_label);codmunity_layout.addStretch(1)
+        self._codmunity_live_key=None
+        self.codmunity_client=codmunity_player_stats.CodmunityPublicClient()
+        self.codmunity_player_service=codmunity_player_stats.ModularPlayerStatsService()
+        self._codmunity_tab_index=self.roster_tabs.addTab(codmunity_tab,'CODMUNITY')
+        self.codmunity_game.currentIndexChanged.connect(self.codmunity_game_changed)
+        self.codmunity_mode.currentIndexChanged.connect(self.refresh_codmunity_panel)
+        self.codmunity_scope.currentIndexChanged.connect(self.refresh_codmunity_panel)
+        self.codmunity_game_changed()
         photo_tab=QWidget();photo_layout=QVBoxLayout(photo_tab);photo_layout.setSpacing(10)
         self.photo_preview=QLabel('No headshot');self.photo_preview.setAlignment(Qt.AlignCenter);self.photo_preview.setMinimumHeight(220);self.photo_preview.setObjectName('rosterPhotoPreview')
         checker=QPixmap(16,16);checker.fill(QColor('#1c2029'))
@@ -858,12 +911,197 @@ class Window(QMainWindow):
         l.addWidget(self.name_match_result)
         self.photo_path=self.edit();self.photo_path.setVisible(False)
         self.current_player=None;self.roster_rows=[];self.roster_visible_ids=[];self.roster_dirty=False;self._roster_loading=False;self.roster_photo_removed=False
-        for widget in (self.roster_name,self.roster_display_name,self.roster_aliases):widget.textChanged.connect(lambda _:self.mark_roster_dirty())
+        for widget in (self.roster_name,self.roster_display_name,self.roster_aliases,self.codmunity_username):widget.textChanged.connect(lambda _:self.mark_roster_dirty())
         self.roster_profile_url.textChanged.connect(lambda _: (self.refresh_profile_tab(),self.mark_roster_dirty()))
         self.roster_enabled.toggled.connect(lambda _:self.mark_roster_dirty())
         self.photo_consent.toggled.connect(lambda _:self.mark_roster_dirty())
     def roster_switch(self,text):
         box=QCheckBox(text);box.setObjectName('rosterSwitch');return box
+    def _codmunity_value_label(self):
+        label=QLabel('—');label.setStyleSheet('font-size:11px;font-weight:800;color:#f2f4f7;');label.setWordWrap(True);return label
+    def codmunity_game_changed(self,*_):
+        if not hasattr(self,'codmunity_mode'):return
+        game=self.codmunity_game.currentData()
+        old=self.codmunity_mode.currentData()
+        modes=[('Resurgence','resurgence'),('Battle Royale','battle_royale'),('All modes','all')] if game=='warzone' else [('Multiplayer','multiplayer')]
+        self.codmunity_mode.blockSignals(True);self.codmunity_mode.clear()
+        for label,value in modes:self.codmunity_mode.addItem(label,value)
+        index=self.codmunity_mode.findData(old)
+        self.codmunity_mode.setCurrentIndex(index if index>=0 else 0);self.codmunity_mode.blockSignals(False)
+        self.refresh_codmunity_panel()
+    def _codmunity_player_record(self,pid=None):
+        pid=str(pid or getattr(self,'current_player',None) or '')
+        if not pid:return None
+        return next((row for row in self.store.roster() if str(row.get('id'))==pid),None)
+    def _save_codmunity_fields(self,pid,fields):
+        player=self._codmunity_player_record(pid)
+        if player is None:return False
+        player.update(fields);self.store.save_player(player)
+        self.roster_rows=self.store.roster()
+        return True
+    @staticmethod
+    def _codmunity_timestamp(value):
+        try:
+            parsed=datetime.fromisoformat(str(value).replace('Z','+00:00'))
+            if parsed.tzinfo is None:parsed=parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        except (TypeError,ValueError):return str(value or '—')
+    def resolve_codmunity_identity(self):
+        player=self._codmunity_player_record()
+        username=self.codmunity_username.text().strip()
+        if player is None:
+            self.codmunity_status.setText('Save this roster entry before resolving its CODMunity profile.');return
+        if not username:
+            self.codmunity_status.setText('Enter a CODMunity username in Player Info first.');return
+        pid=str(player['id']);self.codmunity_status.setText('Player statistics not connected · Resolving public profile metadata…')
+        self.async_task(lambda:self.codmunity_client.profile_identity(username),
+                        lambda identity,pid=pid,username=username:self.on_codmunity_identity(pid,username,identity),
+                        lambda message,pid=pid:self.on_codmunity_failure(pid,'profile',message))
+    def on_codmunity_identity(self,pid,requested_username,identity):
+        if str(self.current_player or '')!=str(pid) or self.codmunity_username.text().strip().casefold()!=requested_username.strip().casefold():return
+        profile_url='https://codmunity.gg/profile/'+quote(identity.username,safe='')
+        updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
+        self._save_codmunity_fields(pid,{'codmunity_username':identity.username,'codmunity_uid':identity.uid,
+            'codmunity_display_name':identity.display_name,'profile_url':profile_url,
+            'codmunity_identity_updated_at':updated_at})
+        self._roster_loading=True
+        self.roster_profile_url.setText(profile_url)
+        self._roster_loading=False
+        self.refresh_profile_tab();self.refresh_codmunity_panel()
+        self.codmunity_status.setText('Player statistics not connected · Public profile identity resolved and saved.')
+    def refresh_codmunity_distribution(self):
+        player=self._codmunity_player_record()
+        if player is None:
+            self.codmunity_status.setText('Save this roster entry before loading community data.');return
+        game=self.codmunity_game.currentData();mode=self.codmunity_mode.currentData();scope=self.codmunity_scope.currentData()
+        pid=str(player['id']);key='|'.join((str(game),str(mode),str(scope)))
+        self.codmunity_status.setText('Player statistics not connected · Loading public community distribution…')
+        self.async_task(lambda:self.codmunity_client.community_distribution(game,mode,scope),
+                        lambda distribution,pid=pid,key=key:self.on_codmunity_distribution(pid,key,distribution),
+                        lambda message,pid=pid,key=key:self.on_codmunity_failure(pid,'distribution',message,key))
+    def refresh_codmunity_player_stats(self):
+        player=self._codmunity_player_record()
+        if player is None:
+            self.codmunity_status.setText('Player statistics not connected');return
+        uid=str(player.get('codmunity_uid') or '').strip()
+        if not uid:
+            self.codmunity_status.setText('Player statistics not connected · Resolve the public profile first to save its UID.');return
+        if not self.codmunity_player_service.configured:
+            self.codmunity_status.setText('Player statistics not connected')
+            return
+        pid=str(player['id']);self.codmunity_status.setText('Player statistics not connected · Checking configured provider…')
+        # The default service has no endpoint or credentials. This only calls a
+        # fetcher explicitly injected after an approved access method exists.
+        self.async_task(lambda:self.codmunity_player_service.retrieve(uid),
+                        lambda payload,pid=pid:self.on_codmunity_player_stats(pid,payload),
+                        lambda message,pid=pid:self.on_codmunity_failure(pid,'player_stats',message))
+    def on_codmunity_player_stats(self,pid,payload):
+        if str(self.current_player or '')!=str(pid):return
+        updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
+        self._save_codmunity_fields(pid,{'codmunity_player_stats':payload,
+            'codmunity_player_stats_updated_at':updated_at,'codmunity_player_stats_source':'configured_provider'})
+        self.refresh_codmunity_panel()
+        self.codmunity_status.setText('Player statistics connected · configured provider response saved.')
+    def on_codmunity_distribution(self,pid,key,distribution):
+        if str(self.current_player or '')!=str(pid):return
+        updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
+        record={'game':distribution.game,'mode':distribution.mode,'scope':distribution.scope,
+            'kd':list(distribution.kd),'sampled':distribution.sampled,'users_total':distribution.users_total,
+            'updated_at':updated_at,'source':'public_global_endpoint'}
+        cached=dict(self.store.meta('codmunity_public_distributions',{}) or {});cached[key]=record
+        self.store.set_meta('codmunity_public_distributions',cached)
+        self._codmunity_live_key=(pid,key)
+        self.refresh_codmunity_panel()
+        self.codmunity_status.setText('Player statistics not connected · Community distribution verified from the public endpoint.')
+    def on_codmunity_failure(self,pid,kind,message,key=None):
+        if str(self.current_player or '')!=str(pid):return
+        self.refresh_codmunity_panel()
+        player=self._codmunity_player_record(pid) or {}
+        cached=(self.store.meta('codmunity_public_distributions',{}) or {}).get(key) if key else None
+        if kind=='distribution' and cached:
+            self.codmunity_status.setText('Player statistics not connected · Live refresh failed; showing saved community cache.')
+        elif kind=='player_stats' and player.get('codmunity_player_stats'):
+            self.codmunity_status.setText('Player statistics not connected · Refresh failed; showing previously saved player data.')
+        elif kind=='profile':
+            self.codmunity_status.setText('Player statistics not connected · Public profile metadata is unavailable.')
+        else:
+            self.codmunity_status.setText('Player statistics not connected · Community distribution is unavailable.')
+    def refresh_codmunity_panel(self,*_):
+        if not hasattr(self,'codmunity_identity_label'):return
+        player=self._codmunity_player_record()
+        game=self.codmunity_game.currentData() if hasattr(self,'codmunity_game') else 'warzone'
+        mode=self.codmunity_mode.currentData() if hasattr(self,'codmunity_mode') else 'resurgence'
+        scope=self.codmunity_scope.currentData() if hasattr(self,'codmunity_scope') else 'lifetime'
+        self.codmunity_game_mode_value.setText(str(game or '—')+' / '+str(mode or '—'))
+        if player is None:
+            self.codmunity_identity_label.setText('Username —  ·  Display name —  ·  UID —')
+            self.codmunity_profile_label.setText('Profile link —')
+            for label in (self.codmunity_kd_value,self.codmunity_rank_value,self.codmunity_percentile_value,self.codmunity_progress_value,self.codmunity_next_kd_value,self.codmunity_median_value,self.codmunity_updated_value):label.setText('—')
+            self.codmunity_distribution_label.setText('No community distribution loaded.')
+            self.codmunity_status.setText('Player statistics not connected')
+            return
+        username=str(player.get('codmunity_username') or self.codmunity_username.text().strip() or '—')
+        display=str(player.get('codmunity_display_name') or '—')
+        uid=str(player.get('codmunity_uid') or '—')
+        profile=str(player.get('profile_url') or '—')
+        self.codmunity_identity_label.setText(f'Username {username}  ·  Display name {display}  ·  UID {uid}')
+        self.codmunity_profile_label.setText('Profile link '+profile)
+        names=[username,str(player.get('name') or '')]+list(player.get('aliases') or [])
+        if display!='—':names.append(display)
+        sample=codmunity_player_stats.tracked_match_kd(self.store.history(),names,str(game or ''),str(mode or ''))
+        stored_stats=player.get('codmunity_player_stats')
+        player_kd=codmunity_player_stats.player_kd_for_mode(stored_stats,str(game or ''),str(mode or ''))
+        if player_kd.kd is not None:
+            kd_value=player_kd.kd
+            kd_source=player_kd.source
+            self.codmunity_kd_value.setText(f'{kd_value:.2f} · {kd_source}')
+        elif sample.kd is None:
+            kd_value=None
+            self.codmunity_kd_value.setText('Unavailable (no verified local match sample)')
+        else:
+            kd_value=sample.kd
+            kd_source=f'local tracked matches ({sample.matches}); not lifetime'
+            self.codmunity_kd_value.setText(f'{kd_value:.2f} · {kd_source}')
+        cache_key='|'.join((str(game),str(mode),str(scope)))
+        saved=(self.store.meta('codmunity_public_distributions',{}) or {}).get(cache_key)
+        if not isinstance(saved,dict):
+            saved=(player.get('codmunity_distributions') or {}).get(cache_key)
+        distribution=None
+        if isinstance(saved,dict):
+            try:
+                distribution=codmunity_player_stats.CommunityDistribution.from_payload({'data':{
+                    'game':saved.get('game'),'mode':saved.get('mode'),'scope':saved.get('scope'),
+                    'sampled':saved.get('sampled'),'usersTotal':saved.get('users_total'),
+                    'dist':{'kd':saved.get('kd')}}})
+            except (TypeError,ValueError):
+                distribution=None
+        self.codmunity_rank_value.setText('—');self.codmunity_percentile_value.setText('—')
+        self.codmunity_progress_value.setText('—');self.codmunity_next_kd_value.setText('—');self.codmunity_median_value.setText('—')
+        if distribution is None:
+            self.codmunity_distribution_label.setText('No saved distribution for this game/mode/scope. Use Refresh community data.')
+            self.codmunity_updated_value.setText('—')
+        else:
+            percentile_values='  ·  '.join(f'P{p} {value:g}' for p,value in zip(codmunity_player_stats.PERCENTILE_ANCHORS,distribution.kd))
+            self.codmunity_distribution_label.setText(
+                f"{'Live public endpoint' if self._codmunity_live_key==(str(player['id']),cache_key) else 'Saved community cache'} · "
+                f'{distribution.sampled if distribution.sampled is not None else "—"} sampled / '
+                f'{distribution.users_total if distribution.users_total is not None else "—"} users · {percentile_values}')
+            self.codmunity_median_value.setText(f'{distribution.kd[codmunity_player_stats.PERCENTILE_ANCHORS.index(50)]:.2f}')
+            self.codmunity_updated_value.setText(self._codmunity_timestamp(saved.get('updated_at')))
+            if kd_value is not None:
+                rank=codmunity_player_stats.ladder_rank(kd_value,distribution)
+                self.codmunity_rank_value.setText(f'{rank.tier} · {kd_source}')
+                self.codmunity_percentile_value.setText(f'{rank.percentile:.1f}%')
+                self.codmunity_progress_value.setText(f'{rank.progress_percent:.1f}% toward {rank.next_tier}' if rank.next_tier else 'Top tier')
+                self.codmunity_next_kd_value.setText(f'{rank.next_tier_kd:.2f}' if rank.next_tier_kd is not None else '—')
+        if player_kd.updated_at and player_kd.kd is not None:
+            self.codmunity_updated_value.setText(self._codmunity_timestamp(player_kd.updated_at))
+        if isinstance(stored_stats,dict):
+            self.codmunity_status.setText('Saved player statistics cache · '+self._codmunity_timestamp(player.get('codmunity_player_stats_updated_at')))
+        else:
+            self.codmunity_status.setText('Player statistics not connected')
+        if not self.codmunity_status.text():
+            self.codmunity_status.setText('Player statistics not connected')
     @staticmethod
     def default_avatar(size):
         pix=QPixmap(size,size);pix.fill(QColor('#181c24'))
@@ -2214,7 +2452,7 @@ class Window(QMainWindow):
         query=self.roster_search.text().strip().casefold() if hasattr(self,'roster_search') else ''
         def matches(player):
             if not query:return True
-            haystack=' '.join([str(player.get('name','')),str(player.get('display_name') or ''),' '.join(player.get('aliases',[]) or [])]).casefold()
+            haystack=' '.join([str(player.get('name','')),str(player.get('display_name') or ''),str(player.get('codmunity_username') or ''),' '.join(player.get('aliases',[]) or [])]).casefold()
             return query in haystack
         visible=[p for p in self.roster_rows if matches(p)]
         self.roster_visible_ids=[str(p.get('id')) for p in visible]
@@ -2256,6 +2494,7 @@ class Window(QMainWindow):
             self.roster_name.setText(player.get('name',''))
             self.roster_display_name.setText(player.get('display_name') or player.get('name',''))
             self.roster_aliases.setText('; '.join(player.get('aliases',[]) or []))
+            self.codmunity_username.setText(player.get('codmunity_username','') or '')
             self.roster_profile_url.setText(player.get('profile_url','') or '')
             self.roster_enabled.setChecked(bool(player.get('enabled',True)))
             self.photo_consent.setChecked(bool(player.get('consent_meta',False)))
@@ -2277,12 +2516,15 @@ class Window(QMainWindow):
             else:self.consent_status.setText('No consent — this player will be shown generically (NO REFERENCE IMAGE).');self.consent_status.setStyleSheet('font-size:11px;color:#e5a13d;')
         finally:self._roster_loading=False
         self.refresh_profile_tab();self.set_roster_dirty(False);self.roster_status.setText('')
+        self.refresh_codmunity_panel()
         if hasattr(self,'roster_tabs') and hasattr(self,'_profile_tab_index') and self.roster_tabs.currentIndex()==self._profile_tab_index:self.load_roster_profile_page()
     def show_roster_empty(self):
         self._roster_loading=True
         try:
-            self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('No player selected');self.roster_big_sub.setText('');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.roster_profile_url.clear();self.roster_enabled.setChecked(True)
+            self.current_player=None
+            self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('No player selected');self.roster_big_sub.setText('');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.roster_profile_url.clear();self.codmunity_username.clear();self.roster_enabled.setChecked(True)
         finally:self._roster_loading=False
+        self.refresh_codmunity_panel()
     def mark_roster_dirty(self):
         if getattr(self,'_roster_loading',False):return
         self.set_roster_dirty(True)
@@ -2300,10 +2542,10 @@ class Window(QMainWindow):
     def new_player(self):
         self._roster_loading=True
         try:
-            self.current_player=None;self.roster_name.clear();self.roster_display_name.clear();self.roster_aliases.clear();self.roster_profile_url.clear();self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.photo_consent.setChecked(False);self.roster_enabled.setChecked(True);self.roster_photo_removed=False
+            self.current_player=None;self.roster_name.clear();self.roster_display_name.clear();self.roster_aliases.clear();self.codmunity_username.clear();self.roster_profile_url.clear();self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.photo_consent.setChecked(False);self.roster_enabled.setChecked(True);self.roster_photo_removed=False
             self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('New player');self.roster_big_sub.setText('Fill in the details, then Save Player.');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.name_match_result.setText('')
         finally:self._roster_loading=False
-        self.set_roster_dirty(False);self.roster_status.setText('')
+        self.set_roster_dirty(False);self.roster_status.setText('');self.refresh_codmunity_panel()
     def pick_photo(self):
         path,_=QFileDialog.getOpenFileName(self,'Choose player headshot','','Images (*.png *.jpg *.jpeg *.webp)')
         if path:self.photo_path.setText(path);self.headshot_filename.setText(Path(path).name);self.show_image(self.photo_preview,path,420,220);self.roster_photo_removed=False;self.mark_roster_dirty()
@@ -2356,7 +2598,14 @@ class Window(QMainWindow):
             photo=str(target)
         elif not self.roster_photo_removed:photo=stored_photo
         display_name=self.roster_display_name.text().strip() or name
-        self.store.save_player(dict(id=pid,name=name,display_name=display_name,aliases=[v.strip() for v in self.roster_aliases.text().split(';') if v.strip()],profile_url=self.roster_profile_url.text().strip(),photo=photo,enabled=self.roster_enabled.isChecked(),consent_meta=self.photo_consent.isChecked()));self.current_player=pid;self.set_roster_dirty(False);self.refresh_roster();self.roster_status.setText('Saved '+name+'.');self.load_roster_player(pid);self.refresh_talent_friends();self.log('Player saved: '+name+' (poster name: '+display_name+')')
+        codmunity_username=self.codmunity_username.text().strip()
+        saved_player=self._codmunity_player_record(pid) or {'id':pid}
+        previous_username=str(saved_player.get('codmunity_username') or '')
+        if previous_username.casefold()!=codmunity_username.casefold():
+            for key in ('codmunity_uid','codmunity_display_name','codmunity_identity_updated_at'):
+                saved_player.pop(key,None)
+        saved_player.update(dict(id=pid,name=name,display_name=display_name,aliases=[v.strip() for v in self.roster_aliases.text().split(';') if v.strip()],profile_url=self.roster_profile_url.text().strip(),photo=photo,enabled=self.roster_enabled.isChecked(),consent_meta=self.photo_consent.isChecked(),codmunity_username=codmunity_username))
+        self.store.save_player(saved_player);self.current_player=pid;self.set_roster_dirty(False);self.refresh_roster();self.roster_status.setText('Saved '+name+'.');self.load_roster_player(pid);self.refresh_talent_friends();self.log('Player saved: '+name+' (poster name: '+display_name+')')
     def delete_player(self):
         if not self.current_player:return
         player=next((p for p in self.roster_rows if str(p.get('id'))==str(self.current_player)),None)

@@ -1,8 +1,8 @@
-"""In-app Meta AI video automation (Playwright). Replaces the Chrome extension.
+"""In-app Meta AI video and poster automation (Playwright). Replaces the Chrome extension.
 
-The driver owns one headed browser pointed at the tracker's TrackerChrome
-profile, so the Meta AI login is shared with the embedded Tracker Browser
-tab. Generation runs in a disposable page; the finished MP4 is captured
+The driver owns one headed browser pointed at the tracker's automation
+profile, so one Meta AI login covers both cinematics and end-game posters.
+Generation runs in a disposable page; the finished MP4 or image is captured
 through Playwright's download event and handed back as a file path.
 
 Meta changes their markup regularly. Every interaction lives in SELECTORS
@@ -28,6 +28,16 @@ SELECTORS = {
         'button:has-text("Video")',
         'button:has-text("Imagine")',
         '[data-testid*="video"]',
+    ],
+    'image_mode': [
+        'button:has-text("Imagine")',
+        'button:has-text("Image")',
+        '[data-testid*="image"]',
+    ],
+    'download': [
+        'button:has-text("Download")',
+        'a:has-text("Download")',
+        '[aria-label*="Download"]',
     ],
     'file_inputs': 'input[type="file"]',
     'prompt_box': [
@@ -60,6 +70,17 @@ def valid_mp4_bytes(data):
         return False
     head = bytes(data[:4096])
     return head[4:8] == b'ftyp' and b'moov' in head and b'mdat' in bytes(data[:1 << 20])
+
+
+def valid_image_bytes(data):
+    if not data or len(data) < 1024:
+        return False
+    head = bytes(data[:32])
+    if head[:8] == b'\x89PNG\r\n\x1a\n':
+        return True
+    if head[:3] == b'\xff\xd8\xff':
+        return True
+    return head[:4] == b'RIFF' and head[8:12] == b'WEBP'
 
 
 def ensure_context(playwright, user_data_dir, channel='chrome', viewport=(1440, 900)):
@@ -163,6 +184,131 @@ class MetaDriver:
             'create-surface',
             'Could not reach the Meta AI video composer. The site layout may '
             'have changed — a screenshot was saved next to the job output.')
+
+    def open_image_composer(self, page):
+        self.ensure_logged_in(page)
+        for url in (META_CREATE, META_HOME):
+            try:
+                page.goto(url, wait_until='domcontentloaded')
+                page.wait_for_timeout(2000)
+                entry = self._first_visible(page, SELECTORS['create_entry'], timeout=6000)
+                if entry is not None:
+                    try:
+                        entry.click(timeout=5000)
+                        page.wait_for_timeout(2000)
+                    except Exception:
+                        pass
+                mode = self._first_visible(page, SELECTORS['image_mode'], timeout=8000)
+                if mode is not None:
+                    try:
+                        mode.click(timeout=5000)
+                        page.wait_for_timeout(2000)
+                    except Exception:
+                        pass
+                prompt = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
+                if prompt is not None:
+                    return page
+            except MetaLoginRequired:
+                raise
+            except Exception:
+                pass
+        self._shot(page, 'no-create-surface')
+        raise MetaAutomationError(
+            'create-surface',
+            'Could not reach the Meta AI image composer. The site layout may '
+            'have changed — a screenshot was saved next to the job output.')
+
+    def submit_text_to_image(self, page, photos, prompt, download_dir, timeout_s=1200):
+        files = [str(p) for p in (photos or []) if Path(p).is_file()]
+        files = [p for p in files if Path(p).stat().st_size <= 20 * 1024 * 1024][:4]
+        if not files:
+            raise MetaAutomationError(
+                'photos', 'No staged reference photos exist for this poster job.')
+        page = self.open_image_composer(page)
+        inputs = page.locator(SELECTORS['file_inputs'])
+        try:
+            count = inputs.count()
+        except Exception:
+            count = 0
+        if count < 1:
+            self._shot(page, 'no-file-input')
+            raise MetaAutomationError(
+                'upload', 'No file upload on the composer. The site layout may '
+                           'have changed — a screenshot was saved next to the job output.')
+        try:
+            inputs.nth(0).set_input_files(files)
+            page.wait_for_timeout(2500)
+        except Exception:
+            attached = False
+            for index, photo in enumerate(files):
+                if index >= count:
+                    break
+                try:
+                    inputs.nth(index).set_input_files(photo)
+                    attached = True
+                except Exception:
+                    continue
+            page.wait_for_timeout(2500)
+            if not attached:
+                self._shot(page, 'upload-failed')
+                raise MetaAutomationError('upload', 'Could not attach the reference photos.')
+        prompt_box = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
+        if prompt_box is None:
+            self._shot(page, 'no-prompt-box')
+            raise MetaAutomationError('prompt', 'Prompt box not found on the composer.')
+        try:
+            prompt_box.click(timeout=5000)
+            prompt_box.fill(prompt or '')
+            page.wait_for_timeout(1000)
+        except Exception as exc:
+            self._shot(page, 'prompt-failed')
+            raise MetaAutomationError('prompt', f'Could not enter the prompt. ({exc})')
+        generate = self._first_visible(page, SELECTORS['generate'], timeout=10000)
+        if generate is None:
+            self._shot(page, 'no-generate')
+            raise MetaAutomationError('submit', 'Generate button not found on the composer.')
+        out_dir = Path(download_dir)
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        try:
+            with page.expect_download(timeout=timeout_s * 1000) as download_info:
+                generate.click(timeout=8000)
+                button = self._first_visible(page, SELECTORS['download'], timeout=120000)
+                if button is not None:
+                    try:
+                        button.click(timeout=8000)
+                    except Exception:
+                        pass
+            download = download_info.value
+        except MetaLoginRequired:
+            raise
+        except Exception as exc:
+            self._shot(page, 'no-download')
+            raise MetaAutomationError(
+                'generation',
+                'No finished image arrived in time. The job may still be '
+                f'rendering on Meta AI — check the tracker browser tab. ({exc})')
+        name = str(download.suggested_filename or 'poster.png')
+        target = out_dir / name
+        if target.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
+            target = target.with_suffix('.png')
+        try:
+            download.save_as(str(target))
+        except Exception as exc:
+            raise MetaAutomationError('download', f'Could not save the image. ({exc})')
+        try:
+            data = target.read_bytes()
+        except OSError as exc:
+            raise MetaAutomationError('download', f'Saved image is unreadable. ({exc})')
+        if not valid_image_bytes(data):
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise MetaAutomationError('download', 'The downloaded file is not a valid image.')
+        return target
 
     def submit_image_to_video(self, page, screenshot, faces, prompt,
                               download_dir, timeout_s=1500):

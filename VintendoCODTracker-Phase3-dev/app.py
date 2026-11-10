@@ -645,7 +645,7 @@ class Window(QMainWindow):
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
         self.app_tabs.currentChanged.connect(self.app_tab_changed)
         self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);self.app_tabs.setCornerWidget(self.exit_button,Qt.TopRightCorner)
-        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs()
+        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs();QTimer.singleShot(4000,self._boot_refresh_distributions)
         if self.tab_prototype:
             for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
@@ -1191,6 +1191,21 @@ class Window(QMainWindow):
         self._roster_loading=False
         self.refresh_profile_tab();self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Public profile identity resolved and saved.')
+    def _boot_refresh_distributions(self):
+        if getattr(self,'_boot_dist_done',False):return
+        self._boot_dist_done=True
+        try:
+            if self.store.meta('codmunity_public_distributions',{}):return
+            if self._codmunity_player_record() is None:
+                wanted=str(self.settings.values.get('player','')).casefold()
+                roster=self.store.roster()
+                pick=next((p for p in roster if wanted and (str(p.get('name','')).casefold()==wanted or wanted in [str(a).casefold() for a in (p.get('aliases') or []) if isinstance(a,str)])),None)
+                if pick is None:pick=next((p for p in roster if p.get('enabled',True)),None)
+                if pick is None:return
+                try:self.refresh_roster();self.load_roster_player(str(pick.get('id')))
+                except (AttributeError,RuntimeError):return
+            self.refresh_all_distributions()
+        except (AttributeError,RuntimeError):pass
     def refresh_all_distributions(self):
         player=self._codmunity_player_record()
         if player is None:
@@ -1395,7 +1410,7 @@ class Window(QMainWindow):
         info=rank or {}
         ladder=info.get('rank')
         rank_col=QVBoxLayout();rank_col.setSpacing(2)
-        if ladder is not None:
+        if ladder is not None and self._is_local_roster_player(player):
             color=self.LADDER_TIER_COLORS.get(ladder['tier'],'#e5e9ef')
             badge=QLabel('●  '+ladder['tier']);badge.setObjectName('rosterRankTier');badge.setStyleSheet('font-size:13px;font-weight:900;color:'+color+';')
             kd_line=QLabel(f"{info['kd']:.2f} K/D  ·  {ladder['percentile']:.1f}%");kd_line.setObjectName('rosterRankKd');kd_line.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
@@ -1408,11 +1423,25 @@ class Window(QMainWindow):
             else:next_label=QLabel('MAX RANK')
             next_label.setObjectName('rosterRankNext');next_label.setStyleSheet('font-size:10px;font-weight:700;color:#9da8b7;')
             bottom.addWidget(next_label);rank_col.addLayout(bottom)
-        else:
+        elif self._is_local_roster_player(player):
             if info.get('kd') is not None:na_text=f"{info['kd']:.2f} K/D · rank needs community data"
             else:na_text='RANK UNAVAILABLE'
             na=QLabel(na_text);na.setObjectName('rosterRankTier');na.setStyleSheet('font-size:11px;font-weight:700;color:#6b7280;')
             rank_col.addWidget(na)
+        else:
+            record=info.get('record') or {};played=int(record.get('matches') or 0);won=int(record.get('wins') or 0);best=record.get('best')
+            title=QLabel('TRACKED RECORD');title.setObjectName('rosterRankTier');title.setStyleSheet('font-size:11px;font-weight:900;color:#9da8b7;')
+            rank_col.addWidget(title)
+            if played>0:
+                line=QLabel(f"{won}W/{played-won}L · {played} tracked")
+                bottom_text=f"Best {best:g} kills" if isinstance(best,(int,float)) else 'No kills recorded'
+            else:
+                line=QLabel('No tracked matches yet')
+                bottom_text='Play, then review a scoreboard.'
+            line.setObjectName('rosterRankKd');line.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
+            rank_col.addWidget(line)
+            bottom=QLabel(bottom_text);bottom.setObjectName('rosterRankNext');bottom.setStyleSheet('font-size:10px;font-weight:700;color:#9da8b7;')
+            rank_col.addWidget(bottom)
         rank_wrap=QWidget();rank_wrap.setLayout(rank_col);rank_wrap.setMinimumWidth(132);layout.addWidget(rank_wrap,0)
         enabled=bool(player.get('enabled',True))
         status=QLabel(('● Enabled' if enabled else '○ Disabled'));status.setStyleSheet('font-size:11px;font-weight:700;color:#4ade80;background:transparent;' if enabled else 'font-size:11px;font-weight:700;color:#6b7280;background:transparent;')
@@ -3053,10 +3082,17 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         try:self.refresh_player_intel()
         except (AttributeError,RuntimeError):pass
+    def _is_local_roster_player(self,player):
+        wanted=str(self.settings.values.get('player','')).casefold()
+        if not wanted or not isinstance(player,dict):return False
+        names=[str(player.get('name') or '').casefold()]
+        names+=[str(a).casefold() for a in (player.get('aliases') or []) if isinstance(a,str)]
+        return wanted in names
     def _roster_rank_info(self,player,game,mode,scope):
         import player_stats_service as PSS
         snap=PSS.snapshot_for_player(self.store,player,game,mode,scope)
-        return {'kd':snap['kd'],'rank':snap['rank'],'source':snap['kd_source']}
+        totals=PSS.totals_for_player(self.store,player,game,mode)
+        return {'kd':snap['kd'],'rank':snap['rank'],'source':snap['kd_source'],'record':{'matches':totals['matches'],'wins':totals['wins'],'best':totals['best_kills']}}
     def refresh_roster(self):
         self.roster_rows=self.store.roster()
         query=self.roster_search.text().strip().casefold() if hasattr(self,'roster_search') else ''

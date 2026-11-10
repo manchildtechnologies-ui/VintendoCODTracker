@@ -1010,7 +1010,18 @@ class UITests(unittest.TestCase):
         self.assertIn('rank-a',texts);self.assertIn('rank-b',texts)
         self.assertIn('Solid',texts['rank-a']);self.assertIn('3.41',texts['rank-a'])
         self.assertNotIn('VintendoPower',texts['rank-b'])
-        self.assertIn('RANK UNAVAILABLE',texts['rank-b'])
+        self.assertNotIn('RANK UNAVAILABLE',texts['rank-b'])
+        self.assertIn('TRACKED RECORD',texts['rank-b'])
+        self.assertIn('No tracked matches yet',texts['rank-b'])
+        gmid,_=w.store.add({'matchId':'rank-goomy-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:05:00Z','result':'win'})
+        w.store.update(gmid,players=json.dumps([{'name':'Goomy11','verified':True,'stats':{'kills':10,'deaths':5}}]))
+        w.refresh_roster()
+        after={}
+        for index in range(w.roster_list.count()):
+            item=w.roster_list.item(index);card=w.roster_list.itemWidget(item)
+            after[str(item.data(Qt.UserRole))]=' | '.join(label.text() for label in card.findChildren(QLabel))
+        self.assertIn('1W/0L',after['rank-b']);self.assertIn('Best 10 kills',after['rank-b'])
+        self.assertNotIn('RANK UNAVAILABLE',after['rank-b'])
         w.load_roster_player('rank-a')
         self.assertIn('SOLID',w.roster_rank_tier.text())
         self.assertIn('3.41',w.roster_rank_kd.text())
@@ -1018,7 +1029,7 @@ class UITests(unittest.TestCase):
         self.assertIn('%',w.roster_rank_pct.text())
         self.assertIn('Sweat',w.roster_rank_next.text())
         w.load_roster_player('rank-b')
-        self.assertIn('RANK UNAVAILABLE',w.roster_rank_tier.text())
+        self.assertIn('CASUAL',w.roster_rank_tier.text());self.assertIn('2.00',w.roster_rank_kd.text())
     def test_codommunity_roster_identity_cache_rank_and_player_isolation(self):
         import tempfile,json
         tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
@@ -1450,4 +1461,34 @@ class UITests(unittest.TestCase):
             self.assertIn(str(app.E.DATA),seen[0][1])
         finally:
             subprocess_mod.Popen=real_popen
+    def test_boot_refresh_skips_when_distributions_cached(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'kd':[]}})
+        called=[];w.refresh_all_distributions=lambda:called.append(True)
+        w._boot_dist_done=False;w._boot_refresh_distributions()
+        self.assertEqual(called,[])
+    def test_boot_refresh_silent_without_roster(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        before=w.codmunity_status.text()
+        called=[];w.refresh_all_distributions=lambda:called.append(True)
+        w._boot_dist_done=False;w._boot_refresh_distributions()
+        self.assertEqual(called,[])
+        self.assertEqual(w.codmunity_status.text(),before)
+    def test_boot_refresh_selects_default_player_and_fetches(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.store.save_player({'id':'boot-a','name':'BootPlayer','display_name':'BootPlayer','aliases':[],'photo':'','enabled':True})
+        called=[];w.refresh_all_distributions=lambda:called.append(True)
+        w._boot_dist_done=False;w._boot_refresh_distributions()
+        self.assertEqual(w.current_player,'boot-a');self.assertEqual(called,[True])
+        w._boot_refresh_distributions()
+        self.assertEqual(called,[True])
 if __name__=='__main__':unittest.main()

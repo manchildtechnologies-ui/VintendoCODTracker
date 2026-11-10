@@ -1,0 +1,11 @@
+{
+  "kill_25": 25,
+  "kill_50": 50,
+  "win_3": 3,
+  "win_5": 5,
+  "kd_ratio": 3.0,
+  "kd_min_kills": 10,
+  "session_kills": 100,
+  "session_gap_minutes": 120,
+  "warzone_enabled": false
+}

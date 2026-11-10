@@ -1,0 +1,55 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: VintendoCODTracker-Phase3-dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: VintendoCODTracker-Phase3-dev/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Version tag must match version.py
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $ver = (Select-String -Pattern "APP_VERSION\s*=\s*'([^']+)'" -Path version.py).Matches[0].Groups[1].Value
+          if ($tag -ne $ver) { throw "Tag v$tag does not match version.py APP_VERSION $ver" }
+
+      - name: Build exe
+        run: python build.py
+
+      - name: Stage extension zip (no backups)
+        shell: pwsh
+        run: |
+          $stage = "$env:RUNNER_TEMP\ext-stage"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          Copy-Item -Path ..\Vintendo-COD-Automation-Phase3-dev -Destination $stage -Recurse `
+            -Exclude *.backup-*,*.bak
+          Get-ChildItem $stage -Recurse -Include *.backup-*,*.bak -File | Remove-Item -Force
+          Compress-Archive -Path "$stage\*" -DestinationPath "$env:RUNNER_TEMP\VintendoExtension.zip" -Force
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            VintendoCODTracker-Phase3-dev/VintendoCODTracker.exe
+            ${{ runner.temp }}\VintendoExtension.zip
+          generate_release_notes: true

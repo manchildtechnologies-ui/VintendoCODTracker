@@ -1,0 +1,23 @@
+{
+  "product": "Vintendo COD Tracker",
+  "candidate": "Squad pipeline",
+  "built_at_local": "2026-11-07",
+  "executable": "squad-pipeline-candidate\\VintendoCODTracker.exe",
+  "bytes": 190736074,
+  "sha256": "feceee7097f9ca2238ae93ea0fada9d342aa4510773e0414c451be859b81c30c",
+  "source_tests": {
+    "passed": 97,
+    "failed": 0
+  },
+  "source_checks": [
+    "py_compile",
+    "extension JavaScript syntax",
+    "source GUI smoke"
+  ],
+  "packaged_verification": "inconclusive: --verify-build did not produce a verifiable completion result in the managed run",
+  "chromium_mock_e2e": "not completed: Chrome endpoint timed out; subprocess exit code 4294930433",
+  "live_meta_generation": false,
+  "live_discord_post": false,
+  "root_exe_modified": false,
+  "notes": "Meta website submission/download remains manual. Candidate is separate from root EXE and recovery checkpoint."
+}

@@ -1,0 +1,56 @@
+# ---- build outputs (CI rebuilds these) ----
+*.exe
+dist/
+build/
+*.spec
+
+# ---- python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ---- live / private data: never ships ----
+*.sqlite3
+*.sqlite3-journal
+*.log
+**/TrackerChrome/
+**/headshots/
+browser-e2e-work/
+*-preview-data/
+test-run-data/
+verify-*-data/
+skipped_update.txt
+VintendoCODTracker.update.exe
+apply_update.bat
+
+# ---- test scaffolding and local harnesses ----
+.phase2-test-data/
+.phase2-test-data-final/
+.phase2-test-data-run/
+.phase3-test-data/
+.cinematic-ui-test-data/
+.vintendo-phase3-e2e-*/
+.codmunity-tab-preview-data/
+test-run-data/
+verify-*-data/
+*-preview-data/
+browser-e2e-work/
+
+# ---- snapshots and backups stay local ----
+backups/
+verify-data/
+build-work/
+bridge-smoke-result.json
+*.zip
+*.backup-*
+*.bak
+*.orig
+
+# ---- legacy projects (superseded by the Phase3 folders) ----
+Vintendo-COD-Automation/
+Vintendo-COD-Automation-dev/
+VintendoCODTracker-Phase2-dev/
+history.*.sqlite3

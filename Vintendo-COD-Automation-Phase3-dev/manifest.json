@@ -1,0 +1,76 @@
+{
+  "action": {
+    "default_icon": {
+      "128": "icon128.png",
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png"
+    },
+    "default_title": "Vintendo COD Automation"
+  },
+  "background": {
+    "service_worker": "tracker-background.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "all_frames": false,
+      "js": [
+        "assets/content-script.js",
+        "assets/tracker-content.js"
+      ],
+      "matches": [
+        "*://meta.ai/*",
+        "*://www.meta.ai/*"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "description": "Auto Meta your prompts at scale. Batch generate and auto-download videos and images on meta.ai.",
+  "host_permissions": [
+    "*://meta.ai/*",
+    "*://*.meta.ai/*",
+    "http://127.0.0.1:8765/*",
+    "*://*.fbcdn.net/*"
+  ],
+  "icons": {
+    "128": "icon128.png",
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png"
+  },
+  "manifest_version": 3,
+  "name": "Vintendo COD Automation",
+  "offline_enabled": true,
+  "permissions": [
+    "storage",
+    "tabs",
+    "background",
+    "sidePanel",
+    "activeTab",
+    "downloads",
+    "alarms"
+  ],
+  "side_panel": {
+    "default_path": "src/ui/side-panel/index.html"
+  },
+  "update_url": "https://clients2.google.com/service/update2/crx",
+  "version": "3.0.1",
+  "version_name": "3.0.1",
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "*://meta.ai/*",
+        "*://www.meta.ai/*"
+      ],
+      "resources": [
+        "assets/content-script.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

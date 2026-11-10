@@ -1,0 +1,13 @@
+{
+  "pages": 10,
+  "startup": "passed",
+  "job_id": "synthetic fixture",
+  "discord_called": false,
+  "app_received_artwork": true,
+  "environment": "Python source app with disposable data directory",
+  "queue_count": 1,
+  "bridge_status": 200,
+  "artwork_bound": true,
+  "upload_status": 201,
+  "loopback": true
+}

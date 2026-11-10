@@ -1,0 +1,14 @@
+{
+  "bytes": 190714031,
+  "packaged_verification_completed": false,
+  "executable": "origin-fix-candidate/VintendoCODTracker.exe",
+  "source_tests_passed": true,
+  "chromium_pairing_e2e_passed": true,
+  "source_bridge_smoke_passed": true,
+  "packaged_verification_note": "Windowed --verify-build produced no result file within 40 seconds in this managed Windows environment; stopped. Candidate archive inspected and contains extension identity header handling.",
+  "source_tests": 86,
+  "recovery_checkpoint": "checkpoints/20261107-pre-origin-fix/VintendoCODTracker.exe",
+  "build_completed": true,
+  "sha256": "27f0dbdab80037326388ce52540e84baf05d87becce766523da55add61c2f6a4",
+  "recovery_checkpoint_sha256": "14d55e34ef07086e20d3299429f0b973a77cee81b14edda4cade1d448ce7bb32"
+}

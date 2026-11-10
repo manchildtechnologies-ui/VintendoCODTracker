@@ -193,7 +193,7 @@ class MissionCore(QWidget):
     INDEX={'queued':0,'submitting':1,'generating':2,'collecting':3,'collected':3,'posted':4}
     COLORS={'queued':'#8a93a3','submitting':'#f97316','generating':'#fdba74','collecting':'#fdba74','collected':'#56e99a','posted':'#56e99a','failed':'#ef6b77','ready':'#5b6572'}
     def __init__(self,parent=None):
-        super().__init__(parent);self.setMinimumSize(200,200)
+        super().__init__(parent);self.setMinimumSize(300,300)
         self.stage='ready';self.elapsed_text=''
         self._angle=0
         self._timer=QTimer(self);self._timer.setInterval(60);self._timer.timeout.connect(self._advance)
@@ -1503,6 +1503,7 @@ class Window(QMainWindow):
             if layout is None:layout=QVBoxLayout(surface);layout.setContentsMargins(14,12,14,12);layout.setSpacing(10)
         except (AttributeError,RuntimeError):return
         try:
+            layout.addStretch(1)
             core_row=QHBoxLayout();core_row.setSpacing(8)
             core_row.addStretch(1)
             self.auto_core=MissionCore(surface)

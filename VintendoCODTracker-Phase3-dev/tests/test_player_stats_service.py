@@ -158,5 +158,24 @@ class ServiceTests(unittest.TestCase):
         ])
 
 
+    def test_legacy_codmunity_row_backfills_into_ranked_snapshot(self):
+        player = next(p for p in self.store.roster() if p['id'] == 'rank-a')
+        legacy = {'matchId': 'legacy-intel-1', 'modeKey': 'resurgence',
+                  'playedAt': '2026-11-10T12:00:00Z', 'result': 'loss',
+                  'stats': {'kills': 341, 'deaths': 100},
+                  'integration_source': 'CODMunity'}
+        mid, added = self.store.add(legacy)
+        self.assertTrue(added)
+        existing = self.store.get(mid)
+        enriched, _ = E.enrich_codmunity_match(legacy, 'VintendoPower', ['VintendoPower'])
+        updates = E.codmunity_row_updates(existing, enriched, 'VintendoPower', ['VintendoPower'])
+        self.assertTrue(updates)
+        self.store.update(mid, **updates)
+        snap = S.snapshot_for_player(self.store, player, 'warzone', 'resurgence', 'lifetime')
+        self.assertEqual(snap['kd'], 3.41)
+        self.assertEqual(snap['kd_source'], '1 tracked match')
+        self.assertEqual(snap['rank']['tier'], 'Solid')
+
+
 if __name__ == '__main__':
     unittest.main()

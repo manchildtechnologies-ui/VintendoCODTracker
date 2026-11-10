@@ -972,6 +972,9 @@ class UITests(unittest.TestCase):
         self.assertEqual(cleared['photo'],'')
     def test_ai_prompt_stat_block_is_opt_in(self):
         w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
         w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
         w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
         mid,_=w.store.add({'matchId':'ai-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win','ocr':'VICTORY'})
@@ -990,6 +993,9 @@ class UITests(unittest.TestCase):
     def test_roster_cards_show_ladder_rank_or_placeholder(self):
         from PySide6.QtWidgets import QLabel
         w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
         w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
         w.store.save_player({'id':'rank-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False})
         mid,_=w.store.add({'matchId':'rank-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
@@ -1035,7 +1041,8 @@ class UITests(unittest.TestCase):
         self.assertIn('vintendopower',w.codmunity_identity_label.text())
         self.assertIn('uid-primary',w.codmunity_identity_label.text())
         self.assertIn('https://codmunity.gg/profile/vintendopower',w.codmunity_profile_label.text())
-        self.assertEqual(w.codmunity_status.text(),'Player statistics not connected')
+        self.assertIn('Profile linked',w.codmunity_status.text())
+        self.assertIn('Community data ready',w.codmunity_status.text())
         self.assertIn('3.41',w.codmunity_kd_value.text())
         self.assertIn('not lifetime',w.codmunity_kd_value.text())
         self.assertIn('Solid',w.codmunity_rank_value.text())
@@ -1043,7 +1050,7 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.codmunity_next_kd_value.text(),'4.94')
         self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
         w.codmunity_stats_button.click()
-        self.assertEqual(w.codmunity_status.text(),'Player statistics not connected')
+        self.assertEqual(w.codmunity_status.text(),'Live player stats need an approved provider.')
         w.load_roster_player('codm-b')
         self.assertIn('uid-secondary',w.codmunity_identity_label.text())
         self.assertIn('2.00',w.codmunity_kd_value.text())

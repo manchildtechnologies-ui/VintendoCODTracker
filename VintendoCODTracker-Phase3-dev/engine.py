@@ -731,6 +731,60 @@ def merge_personal_row(players, match, player_name, aliases=()):
     return rows + [personal], True
 
 
+WARZONE_MODE_KEYS = {'resurgence', 'battle_royale', 'br', 'plunder', 'warzone'}
+MULTIPLAYER_MODE_KEYS = {'multiplayer', 'kill_confirmed', 'killconfirmed', 'team_deathmatch', 'tdm',
+                         'free_for_all', 'ffa', 'hardpoint', 'domination', 'search_destroy',
+                         'search_and_destroy', 'control', 'ranked_play'}
+
+
+def codmunity_game_for_mode(mode_key):
+    """Classify one CODMunity feed mode into our game buckets, or '' when unknown."""
+    key = re.sub(r'[^a-z0-9]+', '_', str(mode_key or '').casefold()).strip('_')
+    if key in WARZONE_MODE_KEYS:
+        return 'warzone'
+    if key in MULTIPLAYER_MODE_KEYS:
+        return 'mw4'
+    return ''
+
+
+def enrich_codmunity_match(match, player_name, aliases=()):
+    """Stamp game + verified local-player row onto one CODMunity feed record."""
+    enriched = dict(match or {})
+    mode = enriched.get('modeKey') or enriched.get('mode') or enriched.get('modeName')
+    game = codmunity_game_for_mode(mode)
+    if game:
+        enriched['game'] = game
+    players, _ = merge_personal_row([], enriched, str(player_name or ''), aliases or ())
+    return enriched, players
+
+
+def codmunity_row_updates(existing, enriched, player_name, aliases=()):
+    """Update kwargs backfilling game + verified local row onto an older stored row."""
+    updates = {}
+    try:
+        payload = json.loads(existing.get('payload') or '{}')
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get('integration_source') != 'CODMunity':
+        payload = {**payload, 'integration_source': 'CODMunity'}
+        updates['payload'] = payload
+    if enriched.get('game') and payload.get('game') != enriched['game']:
+        payload = {**payload, 'game': enriched['game']}
+        updates['payload'] = payload
+    try:
+        have = json.loads(existing.get('players') or '[]')
+    except (ValueError, TypeError):
+        have = []
+    merged, personal_added = merge_personal_row(have if isinstance(have, list) else [],
+                                                enriched, player_name, aliases)
+    if personal_added:
+        updates['players'] = json.dumps(merged, ensure_ascii=False)
+    return updates
+
+
+
 def refresh_codmunity_stats(settings, store):
     """Best-effort CODMunity cache import; never breaks match tracking."""
     try:

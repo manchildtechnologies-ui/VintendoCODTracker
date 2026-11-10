@@ -200,6 +200,42 @@ class CoreTests(unittest.TestCase):
     def test_discord_rejects_lookalike_host(self):
         with self.assertRaises(ValueError):E.send_discord('https://discord.com.evil.invalid/api/webhooks/123/fixture',None,'test')
 
+    def test_codmunity_game_for_mode_buckets(self):
+        self.assertEqual(E.codmunity_game_for_mode('resurgence'),'warzone')
+        self.assertEqual(E.codmunity_game_for_mode('battle_royale'),'warzone')
+        self.assertEqual(E.codmunity_game_for_mode('plunder'),'warzone')
+        self.assertEqual(E.codmunity_game_for_mode('kill_confirmed'),'mw4')
+        self.assertEqual(E.codmunity_game_for_mode('multiplayer'),'mw4')
+        self.assertEqual(E.codmunity_game_for_mode('mystery_mode'),'')
+        self.assertEqual(E.codmunity_game_for_mode(''),'')
+        self.assertEqual(E.codmunity_game_for_mode(None),'')
+    def test_enrich_codmunity_match_stamps_game_and_personal_row(self):
+        match={'matchId':'legacy-1','modeKey':'resurgence','playedAt':'2026-11-07T10:30:00Z','result':'loss','stats':{'kills':9,'deaths':3}}
+        enriched,players=E.enrich_codmunity_match(match,'Vintendo',[])
+        self.assertEqual(enriched['game'],'warzone')
+        self.assertNotIn('game',match)
+        self.assertEqual(players,[{'name':'Vintendo','stats':{'kills':9,'deaths':3},'verified':True,'source':'codmunity_local'}])
+    def test_enrich_leaves_unknown_modes_unstamped(self):
+        match={'matchId':'legacy-2','modeKey':'mystery_mode','stats':{'kills':9,'deaths':3}}
+        enriched,players=E.enrich_codmunity_match(match,'Vintendo',[])
+        self.assertNotIn('game',enriched)
+        self.assertEqual(len(players),1)
+    def test_codmunity_game_stamp_keeps_matchid_dedup(self):
+        match={'matchId':'legacy-3','modeKey':'resurgence','stats':{'kills':9,'deaths':3}}
+        enriched,_=E.enrich_codmunity_match(match,'Vintendo',[])
+        self.assertEqual(E.key_for(enriched),E.key_for(match))
+    def test_codmunity_row_updates_backfills_legacy_row(self):
+        existing={'payload':json.dumps({'integration_source':'CODMunity','modeKey':'resurgence','stats':{'kills':9,'deaths':3}}),'players':'[]'}
+        enriched,_=E.enrich_codmunity_match({'matchId':'legacy-4','modeKey':'resurgence','stats':{'kills':9,'deaths':3}},'Vintendo',[])
+        updates=E.codmunity_row_updates(existing,enriched,'Vintendo',[])
+        self.assertEqual(updates['payload']['game'],'warzone')
+        rows=json.loads(updates['players'])
+        self.assertEqual(len(rows),1);self.assertTrue(rows[0]['verified'])
+    def test_codmunity_row_updates_never_rewrites_complete_rows(self):
+        payload={'integration_source':'CODMunity','game':'warzone','modeKey':'resurgence','stats':{'kills':9,'deaths':3}}
+        players=json.dumps([{'name':'Vintendo','stats':{'kills':9,'deaths':3},'verified':True,'source':'codmunity_local'}])
+        enriched,_=E.enrich_codmunity_match({**payload,'matchId':'legacy-5'},'Vintendo',[])
+        self.assertEqual(E.codmunity_row_updates({'payload':json.dumps(payload),'players':players},enriched,'Vintendo',[]),{})
 class CaptureTests(unittest.TestCase):
     def test_game_monitor_selection_uses_game_window_monitor_handle(self):
         from capture_engine import select_game_output

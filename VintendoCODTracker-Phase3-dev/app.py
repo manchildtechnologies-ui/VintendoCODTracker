@@ -794,6 +794,37 @@ class Window(QMainWindow):
         self.roster_big_sub=QLabel('');self.roster_big_sub.setStyleSheet('font-size:12px;color:#9da8b7;');self.roster_big_sub.setWordWrap(True)
         header_text.addWidget(self.roster_big_sub);header_text.addStretch(1)
         header_layout.addLayout(header_text,1)
+        rank_card=QFrame();rank_card.setObjectName('dashboardPanel');rank_card.setMinimumWidth(300)
+        rank_layout=QVBoxLayout(rank_card);rank_layout.setContentsMargins(14,10,14,10);rank_layout.setSpacing(3)
+        rank_top=QHBoxLayout();rank_top.setSpacing(8)
+        rank_caption=QLabel('LADDER RANK');rank_caption.setStyleSheet('font-size:10px;font-weight:700;color:#9da8b7;letter-spacing:1px;')
+        rank_top.addWidget(rank_caption);rank_top.addStretch(1)
+        self.roster_rank_pct=QLabel('—');self.roster_rank_pct.setStyleSheet('font-size:18px;font-weight:900;color:#ffffff;')
+        rank_top.addWidget(self.roster_rank_pct)
+        rank_layout.addLayout(rank_top)
+        rank_mid=QHBoxLayout();rank_mid.setSpacing(8)
+        self.roster_rank_tier=QLabel('Select a player');self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;color:#6b7280;')
+        rank_mid.addWidget(self.roster_rank_tier,1)
+        self.roster_rank_kd=QLabel('');self.roster_rank_kd.setStyleSheet('font-size:13px;font-weight:700;color:#e5e9ef;')
+        rank_mid.addWidget(self.roster_rank_kd,0,Qt.AlignVCenter)
+        rank_layout.addLayout(rank_mid)
+        self.roster_rank_kdbar=QProgressBar();self.roster_rank_kdbar.setRange(0,1200);self.roster_rank_kdbar.setValue(0);self.roster_rank_kdbar.setTextVisible(False);self.roster_rank_kdbar.setFixedHeight(7)
+        self.roster_rank_kdbar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:#4ade80;border-radius:3px;}')
+        rank_layout.addWidget(self.roster_rank_kdbar)
+        seg_row=QHBoxLayout();seg_row.setSpacing(3)
+        self.roster_rank_segs=[]
+        for _seg_name in [tier_name for _,tier_name in codmunity_player_stats.LADDER_TIERS]:
+            seg_box=QVBoxLayout();seg_box.setSpacing(2)
+            seg_block=QLabel();seg_block.setFixedHeight(8);seg_block.setStyleSheet('background:#232833;border-radius:2px;')
+            seg_box.addWidget(seg_block)
+            seg_label=QLabel(_seg_name);seg_label.setAlignment(Qt.AlignCenter);seg_label.setStyleSheet('font-size:8px;color:#6b7280;')
+            seg_box.addWidget(seg_label)
+            seg_wrap=QWidget();seg_wrap.setLayout(seg_box);seg_row.addWidget(seg_wrap,1)
+            self.roster_rank_segs.append((seg_block,seg_label))
+        rank_layout.addLayout(seg_row)
+        self.roster_rank_next=QLabel('');self.roster_rank_next.setStyleSheet('font-size:11px;font-weight:700;color:#9da8b7;')
+        rank_layout.addWidget(self.roster_rank_next)
+        header_layout.addWidget(rank_card,1)
         right_layout.addWidget(header)
         self.roster_tabs=QTabWidget()
         info_tab=QWidget();info_form=QFormLayout(info_tab);info_form.setSpacing(10)
@@ -968,7 +999,7 @@ class Window(QMainWindow):
         self._roster_loading=True
         self.roster_profile_url.setText(profile_url)
         self._roster_loading=False
-        self.refresh_profile_tab();self.refresh_codmunity_panel()
+        self.refresh_profile_tab();self.refresh_codmunity_panel();self.refresh_roster_rank_card()
         self.codmunity_status.setText('Player statistics not connected · Public profile identity resolved and saved.')
     def refresh_codmunity_distribution(self):
         player=self._codmunity_player_record()
@@ -1001,7 +1032,7 @@ class Window(QMainWindow):
         updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
         self._save_codmunity_fields(pid,{'codmunity_player_stats':payload,
             'codmunity_player_stats_updated_at':updated_at,'codmunity_player_stats_source':'configured_provider'})
-        self.refresh_codmunity_panel();self.refresh_roster()
+        self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card()
         self.codmunity_status.setText('Player statistics connected · configured provider response saved.')
     def on_codmunity_distribution(self,pid,key,distribution):
         if str(self.current_player or '')!=str(pid):return
@@ -1012,11 +1043,11 @@ class Window(QMainWindow):
         cached=dict(self.store.meta('codmunity_public_distributions',{}) or {});cached[key]=record
         self.store.set_meta('codmunity_public_distributions',cached)
         self._codmunity_live_key=(pid,key)
-        self.refresh_codmunity_panel();self.refresh_roster()
+        self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card()
         self.codmunity_status.setText('Player statistics not connected · Community distribution verified from the public endpoint.')
     def on_codmunity_failure(self,pid,kind,message,key=None):
         if str(self.current_player or '')!=str(pid):return
-        self.refresh_codmunity_panel()
+        self.refresh_codmunity_panel();self.refresh_roster_rank_card()
         player=self._codmunity_player_record(pid) or {}
         cached=(self.store.meta('codmunity_public_distributions',{}) or {}).get(key) if key else None
         if kind=='distribution' and cached:
@@ -2474,10 +2505,61 @@ class Window(QMainWindow):
         self.post_active()
     # CODMunity Ladder Rank tier colors (matches the seven-tier scale).
     LADDER_TIER_COLORS={'Bot':'#aeb8c2','Casual':'#62cdff','Solid':'#9fdc3a','Sweat':'#ffffff','Demon':'#ff6f5c','Cracked':'#d394ff','Goat':'#ffc62a'}
+    def refresh_roster_rank_card(self):
+        if not hasattr(self,'roster_rank_tier'):return
+        gray='color:#6b7280;'
+        player=self._codmunity_player_record()
+        if player is None:
+            self.roster_rank_tier.setText('Select a player');self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;'+gray)
+            self.roster_rank_kd.setText('');self.roster_rank_pct.setText('—')
+            self.roster_rank_kdbar.setValue(0)
+            for block,label in self.roster_rank_segs:
+                block.setStyleSheet('background:#232833;border-radius:2px;');label.setStyleSheet('font-size:8px;color:#6b7280;')
+            self.roster_rank_next.setText('');return
+        game=self.codmunity_game.currentData() or 'warzone' if hasattr(self,'codmunity_game') else 'warzone'
+        mode=self.codmunity_mode.currentData() or 'resurgence' if hasattr(self,'codmunity_mode') else 'resurgence'
+        scope=self.codmunity_scope.currentData() or 'lifetime' if hasattr(self,'codmunity_scope') else 'lifetime'
+        info=self._roster_rank_info(player,self.store.history(),game,mode,self._cached_community_distribution(player,game,mode,scope))
+        kd_value=info.get('kd');rank=info.get('rank')
+        if kd_value is None:
+            self.roster_rank_tier.setText('RANK UNAVAILABLE');self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;'+gray)
+            self.roster_rank_kd.setText('K/D —');self.roster_rank_pct.setText('—')
+            self.roster_rank_kdbar.setValue(0)
+            for block,label in self.roster_rank_segs:
+                block.setStyleSheet('background:#232833;border-radius:2px;');label.setStyleSheet('font-size:8px;color:#6b7280;')
+            self.roster_rank_next.setText('Play verified matches to earn a rank.');return
+        if rank is None:
+            color='#e5e9ef'
+            self.roster_rank_tier.setText('RANK UNAVAILABLE');self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;'+gray)
+            self.roster_rank_kd.setText(f'{kd_value:.2f} K/D');self.roster_rank_pct.setText('—')
+            self.roster_rank_kdbar.setRange(0,1200);self.roster_rank_kdbar.setValue(min(1200,int(round(kd_value*100))))
+            self.roster_rank_kdbar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:'+color+';border-radius:3px;}')
+            for block,label in self.roster_rank_segs:
+                block.setStyleSheet('background:#232833;border-radius:2px;');label.setStyleSheet('font-size:8px;color:#6b7280;')
+            self.roster_rank_next.setText('Refresh community data to rank this K/D.');return
+        color=self.LADDER_TIER_COLORS.get(rank.tier,'#e5e9ef')
+        self.roster_rank_tier.setText('●  '+rank.tier.upper());self.roster_rank_tier.setStyleSheet('font-size:16px;font-weight:900;color:'+color+';')
+        self.roster_rank_kd.setText(f'{kd_value:.2f} K/D');self.roster_rank_pct.setText(f'{rank.percentile:.1f}%')
+        self.roster_rank_kdbar.setRange(0,1200);self.roster_rank_kdbar.setValue(min(1200,int(round(kd_value*100))))
+        self.roster_rank_kdbar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:'+color+';border-radius:3px;}')
+        tier_index=max(0,len(codmunity_player_stats.LADDER_TIERS)-1)
+        for index,(_,tier_name) in enumerate(codmunity_player_stats.LADDER_TIERS):
+            if tier_name==rank.tier:tier_index=index;break
+        for index,(block,label) in enumerate(self.roster_rank_segs):
+            if index<=tier_index:
+                seg_color=self.LADDER_TIER_COLORS.get(codmunity_player_stats.LADDER_TIERS[index][1],'#e5e9ef')
+                block.setStyleSheet('background:'+seg_color+';border-radius:2px;')
+                label.setStyleSheet('font-size:8px;font-weight:700;color:'+seg_color+';')
+            else:
+                block.setStyleSheet('background:#232833;border-radius:2px;');label.setStyleSheet('font-size:8px;color:#6b7280;')
+        if rank.next_tier is not None:self.roster_rank_next.setText(f'Next: {rank.next_tier} @ {rank.next_tier_kd:.2f} K/D')
+        else:self.roster_rank_next.setText('MAX RANK')
     def _codmunity_comparison_changed(self,*_):
         try:self.refresh_codmunity_panel()
         except (AttributeError,RuntimeError):pass
         try:self.refresh_roster()
+        except (AttributeError,RuntimeError):pass
+        try:self.refresh_roster_rank_card()
         except (AttributeError,RuntimeError):pass
     def _cached_community_distribution(self,player,game,mode,scope):
         key='|'.join((str(game),str(mode),str(scope)))
@@ -2586,7 +2668,7 @@ class Window(QMainWindow):
             else:self.consent_status.setText('No consent — this player will be shown generically (NO REFERENCE IMAGE).');self.consent_status.setStyleSheet('font-size:11px;color:#e5a13d;')
         finally:self._roster_loading=False
         self.refresh_profile_tab();self.set_roster_dirty(False);self.roster_status.setText('')
-        self.refresh_codmunity_panel()
+        self.refresh_codmunity_panel();self.refresh_roster_rank_card()
         if hasattr(self,'roster_tabs') and hasattr(self,'_profile_tab_index') and self.roster_tabs.currentIndex()==self._profile_tab_index:self.load_roster_profile_page()
     def show_roster_empty(self):
         self._roster_loading=True
@@ -2594,7 +2676,7 @@ class Window(QMainWindow):
             self.current_player=None
             self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('No player selected');self.roster_big_sub.setText('');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.roster_profile_url.clear();self.codmunity_username.clear();self.roster_enabled.setChecked(True)
         finally:self._roster_loading=False
-        self.refresh_codmunity_panel()
+        self.refresh_codmunity_panel();self.refresh_roster_rank_card()
     def mark_roster_dirty(self):
         if getattr(self,'_roster_loading',False):return
         self.set_roster_dirty(True)
@@ -2615,7 +2697,7 @@ class Window(QMainWindow):
             self.current_player=None;self.roster_name.clear();self.roster_display_name.clear();self.roster_aliases.clear();self.codmunity_username.clear();self.roster_profile_url.clear();self.photo_path.clear();self.headshot_filename.setText('No headshot selected');self.photo_preview.clear();self.photo_preview.setText('No headshot');self.photo_consent.setChecked(False);self.roster_enabled.setChecked(True);self.roster_photo_removed=False
             self.roster_big_photo.setPixmap(self.default_avatar(120));self.roster_big_name.setText('New player');self.roster_big_sub.setText('Fill in the details, then Save Player.');self.roster_enabled_pill.setText('');self.consent_status.setText('');self.name_match_result.setText('')
         finally:self._roster_loading=False
-        self.set_roster_dirty(False);self.roster_status.setText('');self.refresh_codmunity_panel()
+        self.set_roster_dirty(False);self.roster_status.setText('');self.refresh_codmunity_panel();self.refresh_roster_rank_card()
     def pick_photo(self):
         path,_=QFileDialog.getOpenFileName(self,'Choose player headshot','','Images (*.png *.jpg *.jpeg *.webp)')
         if path:self.photo_path.setText(path);self.headshot_filename.setText(Path(path).name);self.show_image(self.photo_preview,path,420,220);self.roster_photo_removed=False;self.mark_roster_dirty()

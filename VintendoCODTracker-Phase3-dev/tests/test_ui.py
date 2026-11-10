@@ -796,6 +796,13 @@ class UITests(unittest.TestCase):
         self.assertIn('Solid',texts['rank-a']);self.assertIn('3.41',texts['rank-a'])
         self.assertNotIn('VintendoPower',texts['rank-b'])
         self.assertIn('RANK UNAVAILABLE',texts['rank-b'])
+        w.load_roster_player('rank-a')
+        self.assertIn('SOLID',w.roster_rank_tier.text())
+        self.assertIn('3.41',w.roster_rank_kd.text())
+        self.assertIn('%',w.roster_rank_pct.text())
+        self.assertIn('Sweat',w.roster_rank_next.text())
+        w.load_roster_player('rank-b')
+        self.assertIn('RANK UNAVAILABLE',w.roster_rank_tier.text())
     def test_codommunity_roster_identity_cache_rank_and_player_isolation(self):
         import tempfile,json
         tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)

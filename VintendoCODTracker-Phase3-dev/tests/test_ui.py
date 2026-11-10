@@ -661,6 +661,57 @@ class UITests(unittest.TestCase):
             w._fail_inapp_poster(mid,'generation','boom')
         self.assertEqual(pumped,[True]);self.assertFalse(opened.called)
         row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle')
+    def test_refresh_all_distributions_covers_catalog_combos(self):
+        import codmunity_player_stats as C
+        import player_stats_service as PSS
+        w=self.window
+        pid='catalog-'+uuid.uuid4().hex
+        w.store.save_player({'id':pid,'name':'Catalog','photo':'','consent_meta':True,'enabled':True,'aliases':[]})
+        w.current_player=pid
+        calls=[]
+        kd=tuple(0.5+i*0.5 for i in range(12))
+        def fake_fetch(game,mode,scope):
+            calls.append((game,mode,scope))
+            return C.CommunityDistribution(game=game,mode=mode,scope=scope,kd=kd,sampled=10,users_total=12)
+        w.codmunity_client.community_distribution=fake_fetch
+        w.async_task=lambda fn,done,failed=None:done(fn())
+        w.refresh_all_distributions()
+        self.assertEqual(calls,list(PSS.VERIFIED_GLOBAL_COMBOS))
+        cached=w.store.meta('codmunity_public_distributions',{})
+        for game,mode,scope in PSS.VERIFIED_GLOBAL_COMBOS:
+            self.assertIn('|'.join((game,mode,scope)),cached)
+        self.assertIn('4/4',w.codmunity_status.text())
+    def test_refresh_all_distributions_reports_partial_failure(self):
+        import codmunity_player_stats as C
+        w=self.window
+        pid='catalog-fail-'+uuid.uuid4().hex
+        w.store.save_player({'id':pid,'name':'CatalogFail','photo':'','consent_meta':True,'enabled':True,'aliases':[]})
+        w.current_player=pid
+        calls=[]
+        kd=tuple(0.5+i*0.5 for i in range(12))
+        def fake_fetch(game,mode,scope):
+            calls.append((game,mode,scope))
+            if mode=='battle_royale':raise RuntimeError('offline')
+            return C.CommunityDistribution(game=game,mode=mode,scope=scope,kd=kd,sampled=10,users_total=12)
+        w.codmunity_client.community_distribution=fake_fetch
+        errors=[]
+        def run(fn,done,failed=None):
+            try:done(fn())
+            except Exception as exc:
+                if failed:failed(exc)
+                else:errors.append(exc)
+        w.async_task=run
+        w.refresh_all_distributions()
+        self.assertEqual(len(calls),4)
+        self.assertIn('3/4',w.codmunity_status.text())
+    def test_all_catalog_combos_selectable_in_ui(self):
+        import player_stats_service as PSS
+        w=self.window
+        for game,mode,scope in PSS.VERIFIED_GLOBAL_COMBOS:
+            w.codmunity_game.setCurrentIndex(w.codmunity_game.findData(game))
+            w.codmunity_mode.setCurrentIndex(w.codmunity_mode.findData(mode))
+            w.codmunity_scope.setCurrentIndex(w.codmunity_scope.findData(scope))
+            self.assertEqual((w.codmunity_game.currentData(),w.codmunity_mode.currentData(),w.codmunity_scope.currentData()),(game,mode,scope))
     def test_one_click_prepare_picks_newest_codmunity_match_without_scoreboard(self):
         from PIL import Image
         from unittest.mock import patch

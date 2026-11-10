@@ -22,6 +22,17 @@ from datetime import datetime, timezone
 SNAPSHOT_LIMIT = 90
 SNAPSHOT_MIN_INTERVAL_SECONDS = 24 * 60 * 60
 
+# Concrete public global-stats routes verified in the CODMunity site assets
+# (CODMunity_Public_API_Clickable_Catalog). Each tuple is (game, mode, scope)
+# for https://codmunity.gg/api/public/stats/global. The lifetime rows back
+# Ladder Rank and community comparisons beyond the recent-mode sample.
+VERIFIED_GLOBAL_COMBOS = (
+    ("warzone", "all", "recent"),
+    ("warzone", "resurgence", "lifetime"),
+    ("warzone", "battle_royale", "lifetime"),
+    ("mw4", "multiplayer", "lifetime"),
+)
+
 
 def _utcnow_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")

@@ -1038,7 +1038,8 @@ class Window(QMainWindow):
         self.codmunity_resolve_button=self.button('Resolve profile',self.resolve_codmunity_identity)
         self.codmunity_stats_button=self.button('Refresh player stats',self.refresh_codmunity_player_stats)
         self.codmunity_refresh_button=self.button('Refresh community data',self.refresh_codmunity_distribution)
-        codmunity_controls.addWidget(self.codmunity_resolve_button);codmunity_controls.addWidget(self.codmunity_stats_button);codmunity_controls.addWidget(self.codmunity_refresh_button);codmunity_layout.addLayout(codmunity_controls)
+        self.codmunity_refresh_all_button=self.button('Refresh all verified data',self.refresh_all_distributions)
+        codmunity_controls.addWidget(self.codmunity_resolve_button);codmunity_controls.addWidget(self.codmunity_stats_button);codmunity_controls.addWidget(self.codmunity_refresh_button);codmunity_controls.addWidget(self.codmunity_refresh_all_button);codmunity_layout.addLayout(codmunity_controls)
         self.codmunity_status=QLabel('Player statistics not connected');self.codmunity_status.setObjectName('codmunityPlayerStatus');self.codmunity_status.setWordWrap(True);self.codmunity_status.setStyleSheet('font-size:12px;font-weight:800;color:#f0ad4e;padding:6px 8px;background:#171a20;border:1px solid #343a46;border-radius:5px;')
         codmunity_layout.addWidget(self.codmunity_status)
         self.codmunity_identity_label=QLabel('Username —  ·  Display name —  ·  UID —');self.codmunity_identity_label.setObjectName('codmunityIdentity');self.codmunity_identity_label.setWordWrap(True);self.codmunity_identity_label.setStyleSheet('font-size:11px;color:#d4dae4;')
@@ -1190,6 +1191,32 @@ class Window(QMainWindow):
         self._roster_loading=False
         self.refresh_profile_tab();self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Player statistics not connected · Public profile identity resolved and saved.')
+    def refresh_all_distributions(self):
+        player=self._codmunity_player_record()
+        if player is None:
+            self.codmunity_status.setText('Save this roster entry before loading community data.');return
+        import player_stats_service as PSS
+        self._refresh_queue=[tuple(combo) for combo in PSS.VERIFIED_GLOBAL_COMBOS]
+        self._refresh_total=len(self._refresh_queue);self._refresh_failed=0
+        self._pump_refresh_queue()
+    def _pump_refresh_queue(self):
+        queue=getattr(self,'_refresh_queue',None)
+        if not queue:return
+        player=self._codmunity_player_record()
+        if player is None:self._refresh_queue=[];return
+        game,mode,scope=queue[0]
+        try:self.codmunity_status.setText(f'Player statistics not connected · Loading verified community data {self._refresh_total-len(queue)+1}/{self._refresh_total} ({game}/{mode}/{scope})…')
+        except (AttributeError,RuntimeError):pass
+        pid=str(player['id']);key='|'.join((str(game),str(mode),str(scope)))
+        self.async_task(lambda:self.codmunity_client.community_distribution(game,mode,scope),
+                        lambda distribution,pid=pid,key=key:self.on_codmunity_distribution(pid,key,distribution),
+                        lambda message,pid=pid,key=key:self.on_codmunity_failure(pid,'distribution',message,key))
+    def _advance_refresh_queue(self):
+        queue=getattr(self,'_refresh_queue',None)
+        if not queue:return False
+        queue.pop(0)
+        if queue:self._pump_refresh_queue()
+        return not queue
     def refresh_codmunity_distribution(self):
         player=self._codmunity_player_record()
         if player is None:
@@ -1224,6 +1251,7 @@ class Window(QMainWindow):
         self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Player statistics connected · configured provider response saved.')
     def on_codmunity_distribution(self,pid,key,distribution):
+        finished=self._advance_refresh_queue()
         if str(self.current_player or '')!=str(pid):return
         updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
         record={'game':distribution.game,'mode':distribution.mode,'scope':distribution.scope,
@@ -1234,7 +1262,13 @@ class Window(QMainWindow):
         self._codmunity_live_key=(pid,key)
         self.refresh_codmunity_panel();self.refresh_roster();self.refresh_roster_rank_card();self.refresh_player_intel()
         self.codmunity_status.setText('Player statistics not connected · Community distribution verified from the public endpoint.')
+        if finished:
+            try:ok=self._refresh_total-self._refresh_failed
+            except Exception:ok=0
+            self.codmunity_status.setText(f'Player statistics not connected · Verified community data refreshed: {ok}/{self._refresh_total}.')
     def on_codmunity_failure(self,pid,kind,message,key=None):
+        finished=self._advance_refresh_queue() if kind=='distribution' else False
+        if kind=='distribution' and (finished or getattr(self,'_refresh_queue',None)):self._refresh_failed=getattr(self,'_refresh_failed',0)+1
         if str(self.current_player or '')!=str(pid):return
         self.refresh_codmunity_panel();self.refresh_roster_rank_card();self.refresh_player_intel()
         player=self._codmunity_player_record(pid) or {}
@@ -1247,6 +1281,10 @@ class Window(QMainWindow):
             self.codmunity_status.setText('Player statistics not connected · Public profile metadata is unavailable.')
         else:
             self.codmunity_status.setText('Player statistics not connected · Community distribution is unavailable.')
+        if finished:
+            try:ok=self._refresh_total-self._refresh_failed
+            except Exception:ok=0
+            self.codmunity_status.setText(f'Player statistics not connected · Verified community data refreshed: {ok}/{self._refresh_total} (some combos failed; see log).')
     def refresh_codmunity_panel(self,*_):
         if not hasattr(self,'codmunity_identity_label'):return
         player=self._codmunity_player_record()

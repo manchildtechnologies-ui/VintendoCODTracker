@@ -1,7 +1,9 @@
 import unittest
 
 from codmunity_player_stats import (
+    CodmunityPublicClient,
     CommunityDistribution,
+    GLOBAL_STATS_API,
     ModularPlayerStatsService,
     PlayerStatsUnavailable,
     ladder_rank,
@@ -83,6 +85,82 @@ class PlayerDataTests(unittest.TestCase):
         self.assertAlmostEqual(result.kd, 3.41)
         self.assertEqual(result.source, "CODMunity Warzone resurgence lifetime")
         self.assertIsNone(player_kd_for_mode(payload, "warzone", "all").kd)
+
+
+class GlobalComboTests(unittest.TestCase):
+    """The four concrete catalog routes fetch and parse; mismatches are rejected."""
+
+    COMBOS = [
+        ("warzone", "all", "recent"),
+        ("warzone", "resurgence", "lifetime"),
+        ("warzone", "battle_royale", "lifetime"),
+        ("mw4", "multiplayer", "lifetime"),
+    ]
+    KD = [0.5, 0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.8, 4.5, 5.5, 7.0, 9.0]
+
+    def _client(self, seen, flat=False):
+        import json as _json
+        from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
+
+        class FakeResponse:
+            def __init__(self, body):
+                self._body = body
+
+            def read(self):
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def opener(request, timeout=0):
+            seen.append(request.full_url)
+            query = _parse_qs(_urlparse(request.full_url).query)
+            data = {"game": query["game"][0], "mode": query["mode"][0], "scope": query["scope"][0],
+                    "sampled": 100, "usersTotal": 120, "dist": {"kd": list(self.KD)}}
+            return FakeResponse(_json.dumps(data if flat else {"data": data}).encode("utf-8"))
+
+        return CodmunityPublicClient(opener=opener)
+
+    def test_catalog_combos_fetch_and_parse(self):
+        seen = []
+        client = self._client(seen)
+        for game, mode, scope in self.COMBOS:
+            distribution = client.community_distribution(game, mode, scope)
+            self.assertEqual((distribution.game, distribution.mode, distribution.scope), (game, mode, scope))
+            self.assertEqual(len(distribution.kd), 12)
+        self.assertEqual(len(seen), 4)
+        for url, (game, mode, scope) in zip(seen, self.COMBOS):
+            self.assertTrue(url.startswith(GLOBAL_STATS_API + "?"))
+            self.assertIn("game=" + game, url)
+            self.assertIn("mode=" + mode, url)
+            self.assertIn("scope=" + scope, url)
+
+    def test_flat_live_envelope_and_mismatch_guard(self):
+        seen = []
+        distribution = self._client(seen, flat=True).community_distribution("mw4", "multiplayer", "lifetime")
+        self.assertEqual((distribution.game, distribution.mode, distribution.scope), ("mw4", "multiplayer", "lifetime"))
+
+        def bad_opener(request, timeout=0):
+            import json as _json
+
+            class FakeResponse:
+                def read(self):
+                    return _json.dumps({"data": {"game": "warzone", "mode": "all", "scope": "recent",
+                                                  "dist": {"kd": list(GlobalComboTests.KD)}}}).encode("utf-8")
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            return FakeResponse()
+
+        with self.assertRaises(ValueError):
+            CodmunityPublicClient(opener=bad_opener).community_distribution("mw4", "multiplayer", "lifetime")
 
 
 if __name__ == "__main__":

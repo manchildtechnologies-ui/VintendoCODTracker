@@ -149,6 +149,14 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('Victory', block)
         self.assertEqual(S.prompt_stat_block({'rank': None}), '')
 
+    def test_verified_global_combos_match_catalog(self):
+        self.assertEqual(list(S.VERIFIED_GLOBAL_COMBOS), [
+            ('warzone', 'all', 'recent'),
+            ('warzone', 'resurgence', 'lifetime'),
+            ('warzone', 'battle_royale', 'lifetime'),
+            ('mw4', 'multiplayer', 'lifetime'),
+        ])
+
 
 if __name__ == '__main__':
     unittest.main()

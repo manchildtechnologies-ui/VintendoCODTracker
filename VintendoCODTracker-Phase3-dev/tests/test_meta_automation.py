@@ -130,15 +130,17 @@ class PosterAutomationTests(unittest.TestCase):
 
     def test_submit_attaches_photos_fills_prompt_and_collects_image(self):
         page = FakePage()
+        stages = []
         photos = self.photos(2)
         with tempfile.TemporaryDirectory() as out:
             result = make_driver(self.root).submit_text_to_image(
-                page, photos, 'Victory poster prompt', out)
+                page, photos, 'Victory poster prompt', out, on_stage=lambda stage, detail=None: stages.append(stage))
             saved = Path(result)
             self.assertTrue(saved.is_file())
             self.assertEqual(saved.suffix.lower(), '.png')
             self.assertEqual(saved.read_bytes(), PNG_BYTES)
         self.assertEqual(page.attached, photos)
+        self.assertEqual(stages, ['composing', 'uploading', 'generating', 'collecting'])
         self.assertIn('Victory poster prompt', ' '.join(page.filled.values()))
         self.assertTrue(page.navigated)
         self.assertTrue(any('meta.ai' in url for url in page.navigated))

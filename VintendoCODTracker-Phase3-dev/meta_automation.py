@@ -83,7 +83,7 @@ def valid_image_bytes(data):
     return head[:4] == b'RIFF' and head[8:12] == b'WEBP'
 
 
-def ensure_context(playwright, user_data_dir, channel='chrome', viewport=(1440, 900)):
+def ensure_context(playwright, user_data_dir, channel='chrome', viewport=(1440, 900), minimized=True):
     """Launch (or reuse the caller's) headed browser on the tracker profile."""
     folder = Path(user_data_dir)
     try:
@@ -91,11 +91,14 @@ def ensure_context(playwright, user_data_dir, channel='chrome', viewport=(1440, 
     except OSError:
         pass
     try:
+        args = ['--disable-blink-features=AutomationControlled']
+        if minimized:
+            args.append('--start-minimized')
         context = playwright.chromium.launch_persistent_context(
             str(folder), channel=channel, headless=False,
             viewport={'width': viewport[0], 'height': viewport[1]},
             accept_downloads=True,
-            args=['--disable-blink-features=AutomationControlled','--start-minimized'])
+            args=args)
     except Exception as exc:
         raise MetaAutomationError(
             'browser',
@@ -130,6 +133,53 @@ class MetaDriver:
             except Exception as exc:
                 last = exc
         return None
+
+    def _stage(self, on_stage, stage, detail=''):
+        try:
+            if callable(on_stage):
+                on_stage(stage, detail)
+        except Exception:
+            pass
+
+    def _submit_composer(self, page, prompt, on_stage, timeout_s, expect_button):
+        """Shared prompt fill, generate click, and download capture for image and video composers."""
+        prompt_box = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
+        if prompt_box is None:
+            self._shot(page, 'no-prompt-box')
+            raise MetaAutomationError('prompt', 'Prompt box not found on the composer.')
+        try:
+            prompt_box.click(timeout=5000)
+            prompt_box.fill(prompt or '')
+            page.wait_for_timeout(1000)
+        except Exception as exc:
+            self._shot(page, 'prompt-failed')
+            raise MetaAutomationError('prompt', f'Could not enter the prompt. ({exc})')
+        generate = self._first_visible(page, SELECTORS['generate'], timeout=10000)
+        if generate is None:
+            self._shot(page, 'no-generate')
+            raise MetaAutomationError('submit', 'Generate button not found on the composer.')
+        self._stage(on_stage, 'generating')
+        try:
+            with page.expect_download(timeout=timeout_s * 1000) as download_info:
+                generate.click(timeout=8000)
+                if expect_button:
+                    button = self._first_visible(page, SELECTORS['download'], timeout=120000)
+                    if button is not None:
+                        try:
+                            button.click(timeout=8000)
+                        except Exception:
+                            pass
+            download = download_info.value
+        except MetaLoginRequired:
+            raise
+        except Exception as exc:
+            self._shot(page, 'no-download')
+            raise MetaAutomationError(
+                'generation',
+                'No finished file arrived in time. The job may still be '
+                f'rendering on Meta AI. ({exc})')
+        self._stage(on_stage, 'collecting')
+        return download
 
     def new_job_page(self):
         page = self.context.new_page()
@@ -218,12 +268,13 @@ class MetaDriver:
             'Could not reach the Meta AI image composer. The site layout may '
             'have changed — a screenshot was saved next to the job output.')
 
-    def submit_text_to_image(self, page, photos, prompt, download_dir, timeout_s=1200):
+    def submit_text_to_image(self, page, photos, prompt, download_dir, timeout_s=1200, on_stage=None):
         files = [str(p) for p in (photos or []) if Path(p).is_file()]
         files = [p for p in files if Path(p).stat().st_size <= 20 * 1024 * 1024][:4]
         if not files:
             raise MetaAutomationError(
                 'photos', 'No staged reference photos exist for this poster job.')
+        self._stage(on_stage, 'composing')
         page = self.open_image_composer(page)
         inputs = page.locator(SELECTORS['file_inputs'])
         try:
@@ -236,6 +287,7 @@ class MetaDriver:
                 'upload', 'No file upload on the composer. The site layout may '
                            'have changed — a screenshot was saved next to the job output.')
         try:
+            self._stage(on_stage, 'uploading')
             inputs.nth(0).set_input_files(files)
             page.wait_for_timeout(2500)
         except Exception:
@@ -252,44 +304,12 @@ class MetaDriver:
             if not attached:
                 self._shot(page, 'upload-failed')
                 raise MetaAutomationError('upload', 'Could not attach the reference photos.')
-        prompt_box = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
-        if prompt_box is None:
-            self._shot(page, 'no-prompt-box')
-            raise MetaAutomationError('prompt', 'Prompt box not found on the composer.')
-        try:
-            prompt_box.click(timeout=5000)
-            prompt_box.fill(prompt or '')
-            page.wait_for_timeout(1000)
-        except Exception as exc:
-            self._shot(page, 'prompt-failed')
-            raise MetaAutomationError('prompt', f'Could not enter the prompt. ({exc})')
-        generate = self._first_visible(page, SELECTORS['generate'], timeout=10000)
-        if generate is None:
-            self._shot(page, 'no-generate')
-            raise MetaAutomationError('submit', 'Generate button not found on the composer.')
         out_dir = Path(download_dir)
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-        try:
-            with page.expect_download(timeout=timeout_s * 1000) as download_info:
-                generate.click(timeout=8000)
-                button = self._first_visible(page, SELECTORS['download'], timeout=120000)
-                if button is not None:
-                    try:
-                        button.click(timeout=8000)
-                    except Exception:
-                        pass
-            download = download_info.value
-        except MetaLoginRequired:
-            raise
-        except Exception as exc:
-            self._shot(page, 'no-download')
-            raise MetaAutomationError(
-                'generation',
-                'No finished image arrived in time. The job may still be '
-                f'rendering on Meta AI — check the tracker browser tab. ({exc})')
+        download = self._submit_composer(page, prompt, on_stage, timeout_s, expect_button=True)
         name = str(download.suggested_filename or 'poster.png')
         target = out_dir / name
         if target.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
@@ -311,10 +331,11 @@ class MetaDriver:
         return target
 
     def submit_image_to_video(self, page, screenshot, faces, prompt,
-                              download_dir, timeout_s=1500):
+                              download_dir, timeout_s=1500, on_stage=None):
         shot = Path(screenshot)
         if not shot.is_file():
             raise MetaAutomationError('screenshot', f'Missing source image: {shot}')
+        self._stage(on_stage, 'composing')
         page = self.open_image_to_video(page)
         inputs = page.locator(SELECTORS['file_inputs'])
         try:
@@ -327,6 +348,7 @@ class MetaDriver:
                 'upload', 'No file upload on the composer. The site layout may '
                            'have changed — a screenshot was saved next to the job output.')
         try:
+            self._stage(on_stage, 'uploading')
             inputs.nth(0).set_input_files(str(shot))
             page.wait_for_timeout(2500)
         except Exception as exc:
@@ -341,38 +363,12 @@ class MetaDriver:
             except Exception as exc:
                 self._shot(page, 'faces-failed')
                 raise MetaAutomationError('faces', f'Could not attach reference faces. ({exc})')
-        prompt_box = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
-        if prompt_box is None:
-            self._shot(page, 'no-prompt-box')
-            raise MetaAutomationError('prompt', 'Prompt box not found on the composer.')
-        try:
-            prompt_box.click(timeout=5000)
-            prompt_box.fill(prompt or '')
-            page.wait_for_timeout(1000)
-        except Exception as exc:
-            self._shot(page, 'prompt-failed')
-            raise MetaAutomationError('prompt', f'Could not enter the prompt. ({exc})')
-        generate = self._first_visible(page, SELECTORS['generate'], timeout=10000)
-        if generate is None:
-            self._shot(page, 'no-generate')
-            raise MetaAutomationError('submit', 'Generate button not found on the composer.')
         out_dir = Path(download_dir)
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-        try:
-            with page.expect_download(timeout=timeout_s * 1000) as download_info:
-                generate.click(timeout=8000)
-            download = download_info.value
-        except MetaLoginRequired:
-            raise
-        except Exception as exc:
-            self._shot(page, 'no-download')
-            raise MetaAutomationError(
-                'generation',
-                'No video download started in time. The job may still be '
-                f'rendering on Meta AI — check the tracker browser tab. ({exc})')
+        download = self._submit_composer(page, prompt, on_stage, timeout_s, expect_button=False)
         target = out_dir / (download.suggested_filename or 'cinematic.mp4')
         if target.suffix.lower() != '.mp4':
             target = target.with_suffix('.mp4')

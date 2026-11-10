@@ -778,6 +778,24 @@ class UITests(unittest.TestCase):
         self.window.save_player()
         cleared=next(p for p in self.window.store.roster() if p['id']==pid)
         self.assertEqual(cleared['photo'],'')
+    def test_roster_cards_show_ladder_rank_or_placeholder(self):
+        from PySide6.QtWidgets import QLabel
+        w=self.window
+        w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
+        w.store.save_player({'id':'rank-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False})
+        mid,_=w.store.add({'matchId':'rank-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
+        w.store.update(mid,players=json.dumps([{'name':'VintendoPower','verified':True,'stats':{'kills':341,'deaths':100}}]))
+        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
+        w.codmunity_game.setCurrentIndex(max(0,w.codmunity_game.findData('warzone')));w.codmunity_mode.setCurrentIndex(max(0,w.codmunity_mode.findData('resurgence')));w.codmunity_scope.setCurrentIndex(max(0,w.codmunity_scope.findData('lifetime')))
+        w.refresh_roster()
+        texts={}
+        for index in range(w.roster_list.count()):
+            item=w.roster_list.item(index);card=w.roster_list.itemWidget(item)
+            texts[str(item.data(Qt.UserRole))]=' | '.join(label.text() for label in card.findChildren(QLabel))
+        self.assertIn('rank-a',texts);self.assertIn('rank-b',texts)
+        self.assertIn('Solid',texts['rank-a']);self.assertIn('3.41',texts['rank-a'])
+        self.assertNotIn('VintendoPower',texts['rank-b'])
+        self.assertIn('RANK UNAVAILABLE',texts['rank-b'])
     def test_codommunity_roster_identity_cache_rank_and_player_isolation(self):
         import tempfile,json
         tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)

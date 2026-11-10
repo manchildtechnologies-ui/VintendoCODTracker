@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt,QUrl,QTimer,QObject,QEvent,Signal,QRunnable,QThrea
 from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor,QBrush,QPalette,QAction,QFontDatabase,QLinearGradient,QDesktopServices
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QListWidget,QListWidgetItem,QStackedWidget,QLineEdit,QComboBox,QCheckBox,QPlainTextEdit,QTableWidget,QTableWidgetItem,QHeaderView,QFileDialog,QMessageBox,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QSystemTrayIcon,QMenu,QSplitter,QGroupBox,QScrollArea,QTabWidget,QFrame,QButtonGroup,QInputDialog,QSlider,QDoubleSpinBox)
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QListWidget,QListWidgetItem,QStackedWidget,QLineEdit,QComboBox,QCheckBox,QPlainTextEdit,QTableWidget,QTableWidgetItem,QHeaderView,QFileDialog,QMessageBox,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QSystemTrayIcon,QMenu,QSplitter,QGroupBox,QScrollArea,QTabWidget,QFrame,QButtonGroup,QInputDialog,QSlider,QDoubleSpinBox,QProgressBar)
 import engine as E
 import updater
 import meta_automation
@@ -777,7 +777,7 @@ class Window(QMainWindow):
         self.roster_list.currentItemChanged.connect(lambda cur,prev:self.on_roster_item_changed(cur))
         left_layout.addWidget(self.roster_list,1)
         left_layout.addWidget(self.button('+  New Player',self.roster_new_player))
-        left.setMinimumWidth(280);split.addWidget(left)
+        left.setMinimumWidth(400);split.addWidget(left)
         right_scroll=QScrollArea();right_scroll.setWidgetResizable(True)
         right=QWidget();right_layout=QVBoxLayout(right);right_layout.setContentsMargins(4,2,10,2);right_layout.setSpacing(12)
         header=QFrame();header.setObjectName('dashboardPanel')
@@ -854,8 +854,8 @@ class Window(QMainWindow):
         self.codmunity_player_service=codmunity_player_stats.ModularPlayerStatsService()
         self._codmunity_tab_index=self.roster_tabs.addTab(codmunity_tab,'CODMUNITY')
         self.codmunity_game.currentIndexChanged.connect(self.codmunity_game_changed)
-        self.codmunity_mode.currentIndexChanged.connect(self.refresh_codmunity_panel)
-        self.codmunity_scope.currentIndexChanged.connect(self.refresh_codmunity_panel)
+        self.codmunity_mode.currentIndexChanged.connect(self._codmunity_comparison_changed)
+        self.codmunity_scope.currentIndexChanged.connect(self._codmunity_comparison_changed)
         self.codmunity_game_changed()
         photo_tab=QWidget();photo_layout=QVBoxLayout(photo_tab);photo_layout.setSpacing(10)
         self.photo_preview=QLabel('No headshot');self.photo_preview.setAlignment(Qt.AlignCenter);self.photo_preview.setMinimumHeight(220);self.photo_preview.setObjectName('rosterPhotoPreview')
@@ -904,7 +904,7 @@ class Window(QMainWindow):
         right_layout.addLayout(action_row)
         right_scroll.setWidget(right)
         split.addWidget(right_scroll)
-        split.setStretchFactor(0,3);split.setStretchFactor(1,7)
+        split.setStretchFactor(0,4);split.setStretchFactor(1,6)
         l.addWidget(split,1)
 
         self.name_match_result=QLabel('');self.name_match_result.setStyleSheet('font-size:11px;color:#9da8b7;');self.name_match_result.setWordWrap(True)
@@ -929,6 +929,7 @@ class Window(QMainWindow):
         index=self.codmunity_mode.findData(old)
         self.codmunity_mode.setCurrentIndex(index if index>=0 else 0);self.codmunity_mode.blockSignals(False)
         self.refresh_codmunity_panel()
+        if hasattr(self,'consent_status'):self.refresh_roster()
     def _codmunity_player_record(self,pid=None):
         pid=str(pid or getattr(self,'current_player',None) or '')
         if not pid:return None
@@ -1000,7 +1001,7 @@ class Window(QMainWindow):
         updated_at=datetime.now(timezone.utc).isoformat(timespec='seconds')
         self._save_codmunity_fields(pid,{'codmunity_player_stats':payload,
             'codmunity_player_stats_updated_at':updated_at,'codmunity_player_stats_source':'configured_provider'})
-        self.refresh_codmunity_panel()
+        self.refresh_codmunity_panel();self.refresh_roster()
         self.codmunity_status.setText('Player statistics connected · configured provider response saved.')
     def on_codmunity_distribution(self,pid,key,distribution):
         if str(self.current_player or '')!=str(pid):return
@@ -1011,7 +1012,7 @@ class Window(QMainWindow):
         cached=dict(self.store.meta('codmunity_public_distributions',{}) or {});cached[key]=record
         self.store.set_meta('codmunity_public_distributions',cached)
         self._codmunity_live_key=(pid,key)
-        self.refresh_codmunity_panel()
+        self.refresh_codmunity_panel();self.refresh_roster()
         self.codmunity_status.setText('Player statistics not connected · Community distribution verified from the public endpoint.')
     def on_codmunity_failure(self,pid,kind,message,key=None):
         if str(self.current_player or '')!=str(pid):return
@@ -1115,7 +1116,7 @@ class Window(QMainWindow):
         out=QPixmap(size,size);out.fill(Qt.transparent)
         painter=QPainter(out);painter.setRenderHint(QPainter.Antialiasing);clip=QPainterPath();clip.addRoundedRect(0,0,size,size,10,10);painter.setClipPath(clip);painter.drawPixmap(0,0,cropped);painter.end()
         return out
-    def roster_card_widget(self,player):
+    def roster_card_widget(self,player,rank=None):
         card=QWidget()
         layout=QHBoxLayout(card);layout.setContentsMargins(10,8,10,8);layout.setSpacing(10)
         thumb=QLabel();thumb.setFixedSize(48,48)
@@ -1128,6 +1129,28 @@ class Window(QMainWindow):
         sub=QLabel('COD: '+str(player.get('name','')));sub.setObjectName('rosterCardSub')
         text.addWidget(name_label);text.addWidget(sub)
         layout.addLayout(text,1)
+        info=rank or {}
+        ladder=info.get('rank')
+        rank_col=QVBoxLayout();rank_col.setSpacing(2)
+        if ladder is not None:
+            color=self.LADDER_TIER_COLORS.get(ladder.tier,'#e5e9ef')
+            badge=QLabel('●  '+ladder.tier);badge.setObjectName('rosterRankTier');badge.setStyleSheet('font-size:13px;font-weight:900;color:'+color+';')
+            kd_line=QLabel(f"{info['kd']:.2f} K/D  ·  {ladder.percentile:.1f}%");kd_line.setObjectName('rosterRankKd');kd_line.setStyleSheet('font-size:11px;font-weight:700;color:#c4ccd8;')
+            rank_col.addWidget(badge);rank_col.addWidget(kd_line)
+            bottom=QHBoxLayout();bottom.setSpacing(6)
+            bar=QProgressBar();bar.setRange(0,100);bar.setValue(int(round(ladder.progress_percent)));bar.setTextVisible(False);bar.setFixedHeight(6)
+            bar.setStyleSheet('QProgressBar{background:#1a1f2a;border:none;border-radius:3px;}QProgressBar::chunk{background:'+color+';border-radius:3px;}')
+            bottom.addWidget(bar,1)
+            if ladder.next_tier is not None:next_label=QLabel(f"{ladder.next_tier} @ {ladder.next_tier_kd:.2f}")
+            else:next_label=QLabel('MAX RANK')
+            next_label.setObjectName('rosterRankNext');next_label.setStyleSheet('font-size:10px;font-weight:700;color:#9da8b7;')
+            bottom.addWidget(next_label);rank_col.addLayout(bottom)
+        else:
+            if info.get('kd') is not None:na_text=f"{info['kd']:.2f} K/D · rank needs community data"
+            else:na_text='RANK UNAVAILABLE'
+            na=QLabel(na_text);na.setObjectName('rosterRankTier');na.setStyleSheet('font-size:11px;font-weight:700;color:#6b7280;')
+            rank_col.addWidget(na)
+        rank_wrap=QWidget();rank_wrap.setLayout(rank_col);rank_wrap.setMinimumWidth(132);layout.addWidget(rank_wrap,0)
         enabled=bool(player.get('enabled',True))
         status=QLabel(('● Enabled' if enabled else '○ Disabled'));status.setStyleSheet('font-size:11px;font-weight:700;color:#4ade80;background:transparent;' if enabled else 'font-size:11px;font-weight:700;color:#6b7280;background:transparent;')
         layout.addWidget(status,0,Qt.AlignVCenter)
@@ -2449,6 +2472,43 @@ class Window(QMainWindow):
         if not self.last_capture:return
         self.store.update(self.active_id,image=self.last_capture)
         self.post_active()
+    # CODMunity Ladder Rank tier colors (matches the seven-tier scale).
+    LADDER_TIER_COLORS={'Bot':'#aeb8c2','Casual':'#62cdff','Solid':'#9fdc3a','Sweat':'#ffffff','Demon':'#ff6f5c','Cracked':'#d394ff','Goat':'#ffc62a'}
+    def _codmunity_comparison_changed(self,*_):
+        try:self.refresh_codmunity_panel()
+        except (AttributeError,RuntimeError):pass
+        try:self.refresh_roster()
+        except (AttributeError,RuntimeError):pass
+    def _cached_community_distribution(self,player,game,mode,scope):
+        key='|'.join((str(game),str(mode),str(scope)))
+        saved=(self.store.meta('codmunity_public_distributions',{}) or {}).get(key)
+        if not isinstance(saved,dict):
+            saved=(player.get('codmunity_distributions') or {}).get(key)
+        distribution=None
+        if isinstance(saved,dict):
+            try:
+                distribution=codmunity_player_stats.CommunityDistribution.from_payload({'data':{
+                    'game':saved.get('game'),'mode':saved.get('mode'),'scope':saved.get('scope'),
+                    'sampled':saved.get('sampled'),'usersTotal':saved.get('users_total'),
+                    'dist':{'kd':saved.get('kd')}}})
+            except (TypeError,ValueError):
+                distribution=None
+        return distribution
+    def _roster_rank_info(self,player,history_rows,game,mode,distribution):
+        username=str(player.get('codmunity_username') or '')
+        display=str(player.get('codmunity_display_name') or '')
+        names=[username,str(player.get('name') or '')]+list(player.get('aliases') or [])
+        if display and display!='—':names.append(display)
+        stored_stats=player.get('codmunity_player_stats')
+        player_kd=codmunity_player_stats.player_kd_for_mode(stored_stats,str(game or ''),str(mode or ''))
+        kd_value=player_kd.kd if player_kd.kd is not None else None
+        if kd_value is None:
+            sample=codmunity_player_stats.tracked_match_kd(history_rows,names,str(game or ''),str(mode or ''))
+            if sample.kd is not None:kd_value=sample.kd
+        if kd_value is None or distribution is None:return {'kd':kd_value,'rank':None}
+        try:rank=codmunity_player_stats.ladder_rank(kd_value,distribution)
+        except ValueError:return {'kd':kd_value,'rank':None}
+        return {'kd':kd_value,'rank':rank}
     def refresh_roster(self):
         self.roster_rows=self.store.roster()
         query=self.roster_search.text().strip().casefold() if hasattr(self,'roster_search') else ''
@@ -2459,12 +2519,20 @@ class Window(QMainWindow):
         visible=[p for p in self.roster_rows if matches(p)]
         self.roster_visible_ids=[str(p.get('id')) for p in visible]
         self.roster_count.setText('PLAYERS (%d)'%len(self.roster_rows))
+        game=self.codmunity_game.currentData() or 'warzone' if hasattr(self,'codmunity_game') else 'warzone'
+        mode=self.codmunity_mode.currentData() or 'resurgence' if hasattr(self,'codmunity_mode') else 'resurgence'
+        scope=self.codmunity_scope.currentData() or 'lifetime' if hasattr(self,'codmunity_scope') else 'lifetime'
+        history_rows=self.store.history()
+        rank_by_id={}
+        for player in visible:
+            distribution=self._cached_community_distribution(player,game,mode,scope)
+            rank_by_id[str(player.get('id'))]=self._roster_rank_info(player,history_rows,game,mode,distribution)
         self.roster_list.blockSignals(True);self.roster_list.clear()
         for player in visible:
-            item=QListWidgetItem();item.setData(Qt.UserRole,str(player.get('id')));item.setSizeHint(QSize(0,66))
-            self.roster_list.addItem(item);self.roster_list.setItemWidget(item,self.roster_card_widget(player))
+            item=QListWidgetItem();item.setData(Qt.UserRole,str(player.get('id')));item.setSizeHint(QSize(0,78))
+            self.roster_list.addItem(item);self.roster_list.setItemWidget(item,self.roster_card_widget(player,rank_by_id.get(str(player.get('id')))))
         self.roster_list.blockSignals(False)
-        if self.current_player in self.roster_visible_ids:
+        if getattr(self,'current_player',None) in self.roster_visible_ids:
             for index in range(self.roster_list.count()):
                 if str(self.roster_list.item(index).data(Qt.UserRole))==self.current_player:self.roster_list.setCurrentRow(index);break
         elif visible:self.roster_list.setCurrentRow(0)

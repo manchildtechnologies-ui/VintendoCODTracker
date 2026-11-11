@@ -1940,4 +1940,126 @@ class UITests(unittest.TestCase):
             w._prepare_and_launch(mid,manual=True)
         self.assertIs(w.stack.currentWidget(),w.pages['Tracker Browser'][0])
         self.addCleanup(w.store.update,mid,gen_state='idle',error='')
+    def test_sweep_clears_silent_active_flag_and_requeues(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        mid,_=w.store.add({'matchId':'silent-flag-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,gen_state='submitting')
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
+        w._inapp_poster_active=mid
+        w._inapp_poster_started=time.time()-2500
+        try:n=w._sweep_stale_poster_jobs()
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+        self.assertEqual(n,1)
+        self.assertIsNone(w._inapp_poster_active)
+        row=w.store.get(mid)
+        self.assertEqual(row['gen_state'],'queued')
+        self.assertEqual(row['gen_attempts'],1)
+        w._inapp_poster_active='other-active'
+        w._inapp_poster_started=time.time()
+        try:w._sweep_stale_poster_jobs()
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+        self.assertEqual(w.store.get(mid)['gen_attempts'],1)
+    def test_sweep_holds_job_after_repeated_resets(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        mid,_=w.store.add({'matchId':'poison-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,gen_state='submitting',gen_attempts=3)
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
+        w._inapp_poster_active=mid
+        w._inapp_poster_started=time.time()-2500
+        try:n=w._sweep_stale_poster_jobs()
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+        self.assertEqual(n,1)
+        row=w.store.get(mid)
+        self.assertEqual(row['gen_state'],'idle')
+        self.assertTrue(row['error'])
+    def test_finish_ignores_result_for_reset_job(self):
+        import tempfile as _tf
+        from PIL import Image
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        mid,_=w.store.add({'matchId':'stale-result-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([]),gen_state='submitting')
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
+        w._inapp_poster_active=mid
+        w._inapp_poster_started=time.time()-2500
+        try:n=w._sweep_stale_poster_jobs()
+        finally:pass
+        self.assertEqual(n,1)
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+        saved=_tmpdir/'stale.png';Image.new('RGB',(640,360),'red').save(saved)
+        drained=[]
+        w._drain_poster_queue=lambda:drained.append(1)
+        delivered=[]
+        w.deliver=lambda m:delivered.append(m)
+        w._poster_attempts={mid:0}
+        try:w._finish_inapp_poster(mid,str(saved))
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+        self.assertFalse(w.store.get(mid)['artwork'])
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+        self.assertEqual(delivered,[])
+        self.assertEqual(drained,[1])
+    def test_poster_worker_does_not_touch_browser_chrome(self):
+        import tempfile as _tf
+        from unittest.mock import patch
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+        class FakeCtx:
+            def new_page(self):return object()
+            def close(self):pass
+        class FakeMgr:
+            def __enter__(self):return None
+            def __exit__(self,*args):return False
+        class FakeDriver:
+            def __init__(self,*args):pass
+            def new_job_page(self):return object()
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
+        touched=[];w._record_auto_browser=lambda *args:touched.append(args)
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
+            try:result=w._run_poster_job('job-quiet',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
+            finally:del w._record_auto_browser
+        self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
+        self.assertEqual(touched,[])
+    def test_embed_poll_docks_fresh_window(self):
+        from unittest.mock import patch
+        w=self.window
+        attached=[]
+        class FakeHost:
+            hwnd=None
+            def attach(self,hwnd,parent):attached.append((hwnd,parent));self.hwnd=hwnd
+            def detach(self):self.hwnd=None
+            def resize(self,a,b):pass
+        w.auto_browser_host=FakeHost()
+        hwnd=int(w.winId())
+        orig_find=w.find_tracker_chrome_windows
+        w.find_tracker_chrome_windows=lambda:[hwnd]
+        w._browser_known_before_launch=set()
+        w._browser_embed_ticks=0
+        with patch.object(app.ctypes.windll.user32,'IsWindow',return_value=True):
+            try:embedded=w._poll_auto_browser_embed()
+            finally:
+                w.find_tracker_chrome_windows=orig_find
+                w._browser_known_before_launch=None
+        self.assertTrue(embedded)
+        self.assertEqual(w.auto_browser_hwnd,hwnd)
+        self.assertTrue(attached)
+    def test_stage_queue_drains_to_automation_stage(self):
+        w=self.window
+        try:w._stage_queue.get_nowait()
+        except Exception:pass
+        w._driver_stage('generating','overdrive')
+        seen=[]
+        w.set_automation_stage=lambda stage,detail='':seen.append((stage,detail))
+        try:w._drain_stage_queue()
+        finally:del w.set_automation_stage
+        self.assertEqual(seen,[('generating','overdrive')])
 if __name__=='__main__':unittest.main()

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os,sys,json,time,threading,subprocess,shutil,logging,re,uuid,ctypes,sqlite3
+import os,sys,json,time,threading,subprocess,shutil,logging,re,uuid,ctypes,sqlite3,queue
 from datetime import datetime,timezone
 from urllib.parse import quote
 from ctypes import wintypes
@@ -1734,9 +1734,8 @@ class Window(QMainWindow):
             return
         try:self.browser_status.setText('Opening the automation browser for Meta AI login…')
         except (AttributeError,RuntimeError):pass
+        self._start_embed_poll()
         def work():
-            try:known=set(self.find_tracker_chrome_windows())
-            except Exception:known=set()
             try:
                 playwright=sync_playwright().start()
                 context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
@@ -1746,7 +1745,6 @@ class Window(QMainWindow):
                 try:page.close()
                 except Exception:pass
                 self._login_context=context;self._login_playwright=playwright
-                self._record_auto_browser(known)
             except Exception as exc:
                 QTimer.singleShot(0,lambda:self.browser_status.setText('Could not open the login window: '+str(exc)[:200]));return
             QTimer.singleShot(0,self._login_opened)
@@ -1852,6 +1850,30 @@ class Window(QMainWindow):
         try:host.hwnd=None
         except (AttributeError,RuntimeError):pass
         return False
+    def _start_embed_poll(self):
+        try:self._browser_known_before_launch=set(self.find_tracker_chrome_windows())
+        except Exception:self._browser_known_before_launch=set()
+        self._browser_embed_ticks=0
+        try:QTimer.singleShot(1200,self._poll_auto_browser_embed)
+        except (AttributeError,RuntimeError):pass
+    def _poll_auto_browser_embed(self):
+        if getattr(self,'closing',False):return False
+        try:self._drain_stage_queue()
+        except Exception:pass
+        try:
+            known=getattr(self,'_browser_known_before_launch',None)
+            if known is None:return False
+            if self._validate_auto_browser_attach():return True
+            self._record_auto_browser(set(known))
+            if self._validate_auto_browser_attach():return True
+        except Exception:pass
+        try:ticks=int(getattr(self,'_browser_embed_ticks',0) or 0)+1
+        except (TypeError,ValueError):ticks=41
+        self._browser_embed_ticks=ticks
+        if ticks<=40:
+            try:QTimer.singleShot(1200,self._poll_auto_browser_embed)
+            except (AttributeError,RuntimeError):pass
+        return False
     def _show_tracker_browser_tab(self):
         try:
             for row in range(self.nav.count()):
@@ -1865,8 +1887,22 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         self.set_automation_stage('failed',message)
     def _driver_stage(self,stage,detail=''):
+        try:stage_queue=self._stage_queue
+        except AttributeError:stage_queue=self._stage_queue=queue.Queue()
+        try:stage_queue.put_nowait((stage,detail))
+        except Exception:pass
+    def _apply_driver_stage(self,stage,detail=''):
         mapping={'composing':'submitting','uploading':'submitting','generating':'generating','collecting':'collecting'}
-        QTimer.singleShot(0,lambda:self.set_automation_stage(mapping.get(stage,stage),detail))
+        try:self.set_automation_stage(mapping.get(stage,stage),detail)
+        except (AttributeError,RuntimeError):pass
+    def _drain_stage_queue(self):
+        try:stage_queue=getattr(self,'_stage_queue',None)
+        except Exception:stage_queue=None
+        if stage_queue is None:return
+        while True:
+            try:stage,detail=stage_queue.get_nowait()
+            except Exception:break
+            self._apply_driver_stage(stage,detail)
     def chrome_executable(self):
         candidates=[Path(os.environ.get('ProgramFiles',r'C:\Program Files'))/'Google'/'Chrome'/'Application'/'chrome.exe',
                     Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Google'/'Chrome'/'Application'/'chrome.exe']
@@ -2491,6 +2527,7 @@ class Window(QMainWindow):
         self._inapp_active=job_id
         try:self.store.update_cinematic(job_id,status='awaiting_generation')
         except Exception:pass
+        self._start_embed_poll()
         thread=threading.Thread(target=self._run_inapp_cinematic,args=(job_id,),daemon=True);thread.start()
     def _run_inapp_cinematic(self,job_id):
         try:row=self.store.get_cinematic(job_id)
@@ -2513,14 +2550,17 @@ class Window(QMainWindow):
         try:self.store.update_cinematic(job_id,status='awaiting_download')
         except Exception:pass
         try:
-            known_windows=set()
-            try:known_windows=set(self.find_tracker_chrome_windows())
-            except Exception:pass
             with sync_playwright() as playwright:
                 context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
-                try:self._record_auto_browser(known_windows);video=driver.submit_image_to_video(page,screenshot,faces,prompt,str(self.videos_dir()),on_stage=self._driver_stage)
+                try:
+                    for other in list(getattr(context,'pages',None) or []):
+                        if other is not page:
+                            try:other.close()
+                            except Exception:pass
+                except Exception:pass
+                try:video=driver.submit_image_to_video(page,screenshot,faces,prompt,str(self.videos_dir()),on_stage=self._driver_stage)
                 finally:
                     try:page.close()
                     except Exception:pass
@@ -3714,6 +3754,7 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
         self._poster_manual=manual
+        self._start_embed_poll()
         launched=bool(self._start_poster_automation(mid,prepared['folder'],photo_names,final_prompt))
         if launched:
             try:stage=str((self.store.get(mid) or {}).get('gen_state') or 'submitting')
@@ -3770,16 +3811,30 @@ class Window(QMainWindow):
         except Exception:return 0
         try:active=getattr(self,'_inapp_poster_active',None)
         except Exception:active=None
-        import time as _time
-        now=_time.time();reset=0
+        try:started=getattr(self,'_inapp_poster_started',None)
+        except Exception:started=None
+        now=time.time();reset=0
         for row in rows or []:
             try:
                 if str(row.get('gen_state') or '')!='submitting':continue
-                if active and row.get('id')==active:continue
                 try:age=now-float(row.get('updated') or 0)
                 except (TypeError,ValueError):age=max_age_s+1
                 if age<max_age_s:continue
-                self.store.update(row['id'],gen_state='idle',error='Poster job was stuck submitting with no worker; reset so it can run again.')
+                try:attempts=int(row.get('gen_attempts') or 0)
+                except (TypeError,ValueError):attempts=0
+                if active and row.get('id')==active:
+                    try:flag_age=now-float(started) if started is not None else -1
+                    except (TypeError,ValueError):flag_age=-1
+                    if flag_age<max_age_s:continue
+                    self._inapp_poster_active=None
+                    try:self._inapp_poster_started=None
+                    except Exception:pass
+                    if attempts>=3:
+                        self.store.update(row['id'],gen_state='idle',error='Poster job timed out 3 times with no worker result; press Generate AI End Game Picture to retry it by hand.')
+                    else:
+                        self.store.update(row['id'],gen_state='queued',gen_attempts=attempts+1,error='Poster worker died with no result; requeued automatically (try '+str(attempts+1)+').')
+                else:
+                    self.store.update(row['id'],gen_state='idle',gen_attempts=attempts+1,error='Poster job was stuck submitting with no worker; reset so it can run again.')
             except Exception:continue
             reset+=1
             try:self.log('Reset orphaned poster job '+str(row.get('id'))+'; submit it again to retry.')
@@ -3831,26 +3886,34 @@ class Window(QMainWindow):
         except Exception:
             return False
         self._inapp_poster_active=job_id
+        self._inapp_poster_started=time.time()
         try:self.store.update(job_id,gen_state='submitting')
+        except Exception:pass
+        try:attempt=int((self.store.get(job_id) or {}).get('gen_attempts') or 0)
+        except Exception:attempt=0
+        try:table=self._poster_attempts
+        except AttributeError:table=self._poster_attempts={}
+        try:table[job_id]=attempt
         except Exception:pass
         try:self.generate_poster_button.setEnabled(False)
         except (AttributeError,RuntimeError):pass
-        self.async_task(lambda:self._run_poster_job(job_id,sync_playwright,folder,list(filenames or []),prompt_text),lambda result:self._deliver_poster_result(job_id,result))
+        self.async_task(lambda:self._run_poster_job(job_id,sync_playwright,folder,list(filenames or []),prompt_text,attempt),lambda result:self._deliver_poster_result(job_id,result))
         return True
     def _run_poster_job(self,job_id,playwright_factory,folder,filenames,prompt_text):
         try:
-            known_windows=set()
-            try:known_windows=set(self.find_tracker_chrome_windows())
-            except Exception:pass
             with playwright_factory() as playwright:
                 context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
                 try:
+                    for other in list(getattr(context,'pages',None) or []):
+                        if other is not page:
+                            try:other.close()
+                            except Exception:pass
+                except Exception:pass
+                try:
                     base=Path(folder)
                     photos=[str(base/name) for name in filenames]
-                    try:self._record_auto_browser(known_windows)
-                    except Exception:pass
                     saved, via=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'),on_stage=self._driver_stage)
                 finally:
                     try:page.close()
@@ -3860,6 +3923,13 @@ class Window(QMainWindow):
                 return {'ok':True,'path':str(saved),'via':via}
         except Exception as exc:
             return {'ok':False,'step':str(getattr(exc,'step','error')),'detail':str(getattr(exc,'detail',None) or exc)}
+    def _poster_attempt_current(self,job_id,attempt):
+        if attempt is None:return True
+        try:row=self.store.get(job_id)
+        except Exception:return False
+        if row is None:return False
+        try:return int(row.get('gen_attempts') or 0)==int(attempt)
+        except (TypeError,ValueError):return False
     def _deliver_poster_result(self,job_id,result):
         try:
             if isinstance(result,dict) and result.get('ok') is True and result.get('path'):
@@ -3876,6 +3946,14 @@ class Window(QMainWindow):
         self._inapp_poster_active=None
         try:self.generate_poster_button.setEnabled(True)
         except (AttributeError,RuntimeError):pass
+        try:table=getattr(self,'_poster_attempts',None) or {}
+        except Exception:table={}
+        if job_id in table:
+            launch_attempt=table.pop(job_id,None)
+            if not self._poster_attempt_current(job_id,launch_attempt):
+                try:self.log('Ignoring late poster result for '+str(job_id)+': the job was reset and retried after this worker started.')
+                except Exception:pass
+                self._drain_poster_queue();return
         try:
             from PIL import Image
             folder=E.DATA/'artwork';folder.mkdir(parents=True,exist_ok=True);target=folder/(uuid.uuid4().hex+'.png')
@@ -3913,6 +3991,14 @@ class Window(QMainWindow):
         self._inapp_poster_active=None
         try:self.generate_poster_button.setEnabled(True)
         except (AttributeError,RuntimeError):pass
+        try:table=getattr(self,'_poster_attempts',None) or {}
+        except Exception:table={}
+        if job_id in table:
+            launch_attempt=table.pop(job_id,None)
+            if not self._poster_attempt_current(job_id,launch_attempt):
+                try:self.log('Ignoring late poster failure for '+str(job_id)+': the job was already reset and retried.')
+                except Exception:pass
+                self._drain_poster_queue();return
         try:self.store.update(job_id,gen_state='idle',error=(str(step)+': '+str(detail))[:300])
         except Exception:pass
         if 'login' in str(step).lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then press Generate AI End Game Picture again.'

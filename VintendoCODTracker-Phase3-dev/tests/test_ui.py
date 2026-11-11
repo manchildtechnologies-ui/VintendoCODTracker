@@ -1565,6 +1565,7 @@ class UITests(unittest.TestCase):
         from PySide6.QtGui import QMovie
         self.assertTrue(w.codmunity_movie.isValid())
         self.assertEqual(w.codmunity_movie.state(),QMovie.Running)
+        self.assertEqual((w.codmunity_loading.width(),w.codmunity_loading.height()),(560,187))
         self.assertFalse(w.codmunity_loading.isHidden())
         w.codmunity_hwnd=None
         w.start_or_attach_codmunity=lambda:None

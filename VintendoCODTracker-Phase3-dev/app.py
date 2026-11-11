@@ -635,7 +635,7 @@ class Window(QMainWindow):
         self.codmunity_surface=QFrame();self.codmunity_surface.setObjectName('dashboardPanel');self.codmunity_surface.setMinimumSize(800,550);codmunity_layout.addWidget(self.codmunity_surface,1);self.app_tabs.addTab(self.codmunity_page,'CODMunity')
         self.codmunity_loading=QLabel(self.codmunity_surface);self.codmunity_movie=QMovie(str(E.ROOT/'assets'/'loading_animated_transparent.webp'))
         if self.codmunity_movie.isValid():
-            self.codmunity_movie.setScaledSize(QSize(560,187));self.codmunity_loading.setMovie(self.codmunity_movie);self.codmunity_movie.start()
+            self.codmunity_movie.setScaledSize(QSize(560,187));self.codmunity_loading.setMovie(self.codmunity_movie);self.codmunity_movie.start();self.codmunity_loading.setFixedSize(560,187)
         else:
             _load_pix=QPixmap(str(E.ROOT/'assets'/'loading.png'))
             if not _load_pix.isNull():self.codmunity_loading.setPixmap(_load_pix.scaled(560,200,Qt.KeepAspectRatio,Qt.SmoothTransformation))

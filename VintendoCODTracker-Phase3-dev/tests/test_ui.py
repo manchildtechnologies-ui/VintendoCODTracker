@@ -176,15 +176,12 @@ class UITests(unittest.TestCase):
             self.wait_until(lambda:not w.poll_busy)
             self.assertTrue(loader.called)
             self.assertEqual(w.codmunity_status.text(),'CODMunity matches are in the tracker.')
-    def test_studio_match_picker_loads_selected_match(self):
-        w=self.window
-        payload={'matchId':'studio-pick','game':'warzone','mode':'battle_royale','modeKey':'resurgence','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':7}}
+    def test_studio_autoloads_newest_undelivered_match(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'studio.sqlite3')
+        payload={'matchId':'studio-auto','game':'warzone','mode':'battle_royale','modeKey':'resurgence','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':7}}
         mid,_=w.store.add(payload,'needs_review')
         w.store.update(mid,players=json.dumps([{'name':'Vintendo','stats':{'kills':7},'verified':True}]),prompt=app.E.MATCH_POSTER_PROMPT_MARKER+'\nfixture')
         w.refresh_history()
-        ix=w.studio_match_picker.findData(mid)
-        self.assertGreaterEqual(ix,0)
-        w.studio_match_picker.setCurrentIndex(ix)
         self.assertEqual(w.active_id,mid)
         self.assertIn(mid,w.studio_match.text())
         self.assertTrue(w.generate_poster_button.isEnabled())
@@ -385,46 +382,43 @@ class UITests(unittest.TestCase):
         row=next(i for i in range(w.history.rowCount()) if w.history.item(i,0).toolTip()==mid)
         self.assertEqual(w.history.item(row,headers.index('DAMAGE')).text(),'6878')
         self.assertEqual(w.history.item(row,headers.index('ELIMS')).text(),'19')
-        self.assertEqual(w.center_tables['records'].columnCount(),12)
-        rec_headers=[w.center_tables['records'].horizontalHeaderItem(i).text() for i in range(w.center_tables['records'].columnCount())]
-        rec_row=next(i for i in range(w.center_tables['records'].rowCount()) if w.center_tables['records'].item(i,0).toolTip()==mid)
-        self.assertEqual(w.center_tables['records'].item(rec_row,rec_headers.index('DAMAGE')).text(),'6878')
-        self.assertEqual(w.center_tables['records'].item(rec_row,rec_headers.index('ELIMS')).text(),'19')
-        self.assertEqual(w.dashboard_metrics['games'].text(),str(len(w.center_rows['records'])))
-        self.assertRegex(w.history_summary['kills_per_game'][1].text(),r'Best \d+ kills')
-    def test_match_center_tabs_share_tables_and_count(self):
-        w=self.window
-        tag=uuid.uuid4().hex
-        mid_post,_=w.store.add({'matchId':'post-'+tag,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-02T08:00:00Z','result':'win','stats':{'kills':5,'eliminations':5,'damage':2500,'deaths':1,'assists':0}},'delivered')
-        mid_rev,_=w.store.add({'matchId':'rev-'+tag,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-03T08:00:00Z','result':'loss','stats':{'kills':2,'eliminations':2,'damage':900,'deaths':4,'assists':1}},'needs_review')
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'card.sqlite3')
+        mid2,_=w.store.add({'matchId':'card-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-05T08:00:00Z','result':'win','stats':{'kills':17,'eliminations':19,'damage':6878,'deaths':2,'assists':3,'placement':1}})
         w.refresh_history()
-        self.assertNotIn('posts',w.center_rows)
-        self.assertEqual(w.center_tabs.tabText(1),'NEEDS ATTENTION')
-        review=w.center_rows['review']
-        self.assertTrue(any(j['id']==mid_post for j in w.center_rows['records']))
-        self.assertTrue(any(j['id']==mid_rev for j in review))
-        self.assertEqual(w.center_tables['review'].rowCount(),len(review))
-        w.center_tabs.setCurrentIndex(1)
-        self.assertEqual(w.center_count.text(),f"{len(review)} of {len(w.center_rows['records'])} records")
-        w.center_tabs.setCurrentIndex(0)
-        self.assertEqual(w.center_count.text(),f"{len(w.center_rows['records'])} of {len(w.center_rows['records'])} records")
+        self.assertEqual(w.latest_job_id,mid2)
+        self.assertIn('WIN',w.latest_result.text())
+        self.assertIn('6878',w.latest_stats.text())
+        self.assertIn('19',w.latest_stats.text())
+        self.assertEqual(w.dashboard_metrics['games'].text(),str(len(w.store.history())))
+        self.assertRegex(w.history_summary['kills_per_game'][1].text(),r'Best \d+ kills')
+    def test_latest_match_card_shows_newest_and_failed_hint(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        old,_=w.store.add({'matchId':'old-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-02T08:00:00Z','result':'win','stats':{'kills':5,'eliminations':5,'damage':2500,'deaths':1,'assists':0}},'delivered')
+        new,_=w.store.add({'matchId':'new-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-03T08:00:00Z','result':'loss','stats':{'kills':2,'eliminations':2,'damage':900,'deaths':4,'assists':1}},'failed')
+        w.refresh_history()
+        self.assertEqual(w.latest_job_id,new)
+        self.assertIn('LOSS',w.latest_result.text())
+        self.assertIn('failed',w.latest_status.text().lower());self.assertIn('retry',w.latest_status.text().lower())
+        self.assertTrue(w.latest_review.isEnabled())
+        self.assertIn('2 matches tracked',w.center_count.text())
+        w.store=app.E.Store(_tmpdir/'empty.sqlite3');w.refresh_history()
+        self.assertIsNone(w.latest_job_id);self.assertFalse(w.latest_review.isEnabled());self.assertIn('No matches',w.latest_detail.text())
     def test_dashboard_games_cards_mirror_history_summary(self):
         w=self.window
-        w.center_tabs.setCurrentIndex(0)
-        rows=w.center_rows['records']
+        rows=w.store.history()
         summary=w._match_summary(rows)
         self.assertEqual(w.dashboard_metrics['games'].text(),str(summary['games']))
         self.assertEqual(w.dashboard_metrics['win_rate'].text(),str(summary['win_rate']))
         self.assertEqual(w.dashboard_metrics['kd'].text(),str(summary['kd']))
         self.assertEqual(w.dashboard_metrics['kills_per_game'].text(),str(summary['kills_per_game']))
-    def test_match_center_double_click_opens_studio(self):
-        w=self.window
+    def test_latest_match_review_opens_studio(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
         mid,_=w.store.add({'matchId':'open-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':9,'eliminations':9,'damage':4100,'deaths':0,'assists':2}})
         w.refresh_history()
-        row=next(i for i,r in enumerate(w.center_rows['records']) if r['id']==mid)
+        self.assertEqual(w.latest_job_id,mid)
         calls=[];real=w.load_studio;w.load_studio=lambda job_id:calls.append(job_id)
         try:
-            w.open_center_match('records',row)
+            w.open_latest_match()
             self.assertEqual(calls,[mid]);self.assertEqual(w.nav.currentRow(),5)
         finally:
             w.load_studio=real;w.nav.setCurrentRow(0)
@@ -1568,7 +1562,9 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.ocr_table.item(0,0).text(),'Vintendopower')
     def test_codmunity_loading_graphic_shows_until_attached(self):
         w=self.window
-        self.assertFalse(w.codmunity_loading.pixmap().isNull())
+        from PySide6.QtGui import QMovie
+        self.assertTrue(w.codmunity_movie.isValid())
+        self.assertEqual(w.codmunity_movie.state(),QMovie.Running)
         self.assertFalse(w.codmunity_loading.isHidden())
         w.codmunity_hwnd=None
         w.start_or_attach_codmunity=lambda:None

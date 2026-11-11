@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt,QUrl,QTimer,QObject,QEvent,Signal,QRunnable,QThreadPool,QRect,QAbstractNativeEventFilter,QSize,QPoint,QPointF,QPropertyAnimation,QEasingCurve
 from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor,QBrush,QPalette,QAction,QFontDatabase,QLinearGradient,QDesktopServices
+from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor,QBrush,QPalette,QAction,QFontDatabase,QLinearGradient,QDesktopServices,QMovie
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QListWidget,QListWidgetItem,QStackedWidget,QLineEdit,QComboBox,QCheckBox,QPlainTextEdit,QTableWidget,QTableWidgetItem,QHeaderView,QFileDialog,QMessageBox,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QSystemTrayIcon,QMenu,QSplitter,QGroupBox,QScrollArea,QTabWidget,QFrame,QButtonGroup,QInputDialog,QSlider,QDoubleSpinBox,QProgressBar)
 import engine as E
 import updater
@@ -633,8 +633,12 @@ class Window(QMainWindow):
             preview_note=QLabel('Preview uses a copy of your settings, match history, and roster photos. It will not change live tracker data. Tracking and Discord posting are disabled in this window.')
             preview_note.setWordWrap(True);preview_note.setStyleSheet('padding:9px 12px;background:#1b2330;border-left:3px solid #ed2938;color:#cbd3df;');codmunity_layout.addWidget(preview_note)
         self.codmunity_surface=QFrame();self.codmunity_surface.setObjectName('dashboardPanel');self.codmunity_surface.setMinimumSize(800,550);codmunity_layout.addWidget(self.codmunity_surface,1);self.app_tabs.addTab(self.codmunity_page,'CODMunity')
-        self.codmunity_loading=QLabel(self.codmunity_surface);_load_pix=QPixmap(str(E.ROOT/'assets'/'loading.png'))
-        if not _load_pix.isNull():self.codmunity_loading.setPixmap(_load_pix.scaled(560,200,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        self.codmunity_loading=QLabel(self.codmunity_surface);self.codmunity_movie=QMovie(str(E.ROOT/'assets'/'loading_animated_transparent.webp'))
+        if self.codmunity_movie.isValid():
+            self.codmunity_movie.setScaledSize(QSize(560,187));self.codmunity_loading.setMovie(self.codmunity_movie);self.codmunity_movie.start()
+        else:
+            _load_pix=QPixmap(str(E.ROOT/'assets'/'loading.png'))
+            if not _load_pix.isNull():self.codmunity_loading.setPixmap(_load_pix.scaled(560,200,Qt.KeepAspectRatio,Qt.SmoothTransformation))
         _load_layout=QVBoxLayout(self.codmunity_surface);_load_layout.addStretch(1);_load_layout.addWidget(self.codmunity_loading,0,Qt.AlignHCenter);_load_layout.addStretch(1)
         self.codmunity_poll=QTimer(self);self.codmunity_poll.setInterval(500);self.codmunity_poll.timeout.connect(self.try_attach_codmunity)
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
@@ -676,8 +680,8 @@ class Window(QMainWindow):
             try:
                 current=getattr(self,'active_id',None)
                 if self.store.get(current) if current else None:return
-                mid=self.studio_match_picker.currentData() if hasattr(self,'studio_match_picker') else None
-                if mid:self.load_studio(mid)
+                rows=self.store.history()
+                if rows:self.load_studio(next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id']))
             except (AttributeError,RuntimeError):pass
     def app_tab_changed(self,index):
         if self.app_tabs.widget(index) is self.codmunity_page:
@@ -817,15 +821,16 @@ class Window(QMainWindow):
 
         body=QGridLayout();body.setHorizontalSpacing(14);body.setVerticalSpacing(12)
         center=QFrame();center.setObjectName('dashboardPanel');center_layout=QVBoxLayout(center);center_layout.setContentsMargins(13,12,13,13);center_layout.setSpacing(9)
-        center_header=QHBoxLayout();center_title=QLabel('\u25b0  MATCH CENTER');center_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');center_header.addWidget(center_title);center_header.addStretch();self.center_count=QLabel('0 records');self.center_count.setStyleSheet('color:#aab4c3');center_header.addWidget(self.center_count);center_layout.addLayout(center_header)
-        self.center_tabs=QTabWidget()
-        self.center_tables={};self.center_rows={'records':[],'review':[]}
-        for view,label,headers in (('records','RECORDS',['MATCH ID','RESULT','PLACE','MODE','KILLS','ELIMS','DAMAGE','DEATHS','ASSISTS','DATE / TIME','STATUS','ATTEMPTS']),('review','NEEDS ATTENTION',['MATCH ID','RESULT','MODE','STATUS','ATTEMPTS','DATE / TIME'])):
-            table=QTableWidget(0,len(headers));table.setHorizontalHeaderLabels(headers);table.setEditTriggers(QTableWidget.NoEditTriggers);table.setSelectionBehavior(QTableWidget.SelectRows);table.setSelectionMode(QTableWidget.SingleSelection);table.setAlternatingRowColors(True);table.verticalHeader().hide();table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);table.setMinimumHeight(260)
-            table.cellDoubleClicked.connect(lambda _row,_col,view=view:self.open_center_match(view,_row,_col))
-            self.center_tabs.addTab(table,label);self.center_tables[view]=table
-        self.center_tabs.currentChanged.connect(lambda _index:self.refresh_center_count())
-        center_layout.addWidget(self.center_tabs,1);body.addWidget(center,0,0,2,2)
+        center_header=QHBoxLayout();center_title=QLabel('\u25b0  MATCH CENTER');center_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');center_header.addWidget(center_title);center_header.addStretch();self.center_count=QLabel('0 matches tracked');self.center_count.setStyleSheet('color:#aab4c3');center_header.addWidget(self.center_count);center_layout.addLayout(center_header)
+        self.latest_job_id=None
+        self.latest_card=QFrame();self.latest_card.setObjectName('latestMatch');latest_layout=QVBoxLayout(self.latest_card);latest_layout.setContentsMargins(13,12,13,13);latest_layout.setSpacing(6)
+        self.latest_result=QLabel('-');self.latest_result.setStyleSheet('font-size:22px;font-weight:900;color:#f2f4f7;');latest_layout.addWidget(self.latest_result)
+        self.latest_detail=QLabel('No matches tracked yet.');self.latest_detail.setWordWrap(True);self.latest_detail.setStyleSheet('color:#99a8bc;');latest_layout.addWidget(self.latest_detail)
+        self.latest_stats=QLabel('');self.latest_stats.setWordWrap(True);self.latest_stats.setStyleSheet('color:#cbd3df;');latest_layout.addWidget(self.latest_stats)
+        self.latest_status=QLabel('');self.latest_status.setWordWrap(True);self.latest_status.setStyleSheet('font-size:11px;color:#aab4c3;');latest_layout.addWidget(self.latest_status)
+        latest_layout.addStretch(1)
+        self.latest_review=self.button('REVIEW IN AI STUDIO',self.open_latest_match,True);self.latest_review.setEnabled(False);latest_layout.addWidget(self.latest_review)
+        center_layout.addWidget(self.latest_card,1);body.addWidget(center,0,0,2,2)
 
         health=QFrame();health.setObjectName('dashboardPanel');health_layout=QVBoxLayout(health);health_layout.setContentsMargins(13,12,13,13);health_layout.setSpacing(10)
         health_title=QLabel('▮  SYSTEM STATUS');health_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');health_layout.addWidget(health_title)
@@ -1458,7 +1463,6 @@ class Window(QMainWindow):
         return card
     def build_studio(self):
         l=self.page('AI Studio','CODMunity + verified scoreboard → prepared Meta AI inputs → Meta AI artwork with in-scene match results → Discord.')
-        self.studio_match_picker=QComboBox();self.studio_match_picker.setMaximumWidth(460);self.studio_match_picker.setToolTip('Pick a recent match to load it into AI Studio.');self.studio_match_picker.currentIndexChanged.connect(self.on_studio_match_changed);self.studio_match_row=self.row(l,QLabel('Pick a match'),self.studio_match_picker);self.studio_match_row.addStretch(1)
         self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
         self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
         self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');l.addWidget(self.include_stats_checkbox)
@@ -3279,17 +3283,9 @@ class Window(QMainWindow):
     def refresh_history(self):
         if not hasattr(self,'history'):return
         rows=self.store.history()
-        self.studio_match_picker.blockSignals(True)
-        active_studio=self.studio_match_picker.currentData()
-        self.studio_match_picker.clear()
-        for job in rows:
-            if job['status'] not in ('delivered','solo_delivered'):
-                match=json.loads(job['payload'])
-                self.studio_match_picker.addItem(str(match.get('modeKey',match.get('mode','match')))+' · '+str(match.get('playedAt',''))+' · '+job['id'][-12:],job['id'])
-        six=self.studio_match_picker.findData(active_studio)
-        if six>=0:self.studio_match_picker.setCurrentIndex(six)
-        self.studio_match_picker.blockSignals(False)
-        picked=self.studio_match_picker.currentData()
+        active_id=getattr(self,'active_id',None)
+        if active_id and self.store.get(active_id):picked=active_id
+        else:picked=next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id'] if rows else None)
         if picked and picked!=getattr(self,'active_id',None):self.load_studio(picked)
         self.dashboard_metrics['matches'].setText(f'{len(rows):,}')
         self.dashboard_metrics['squad_posts'].setText(f"{sum(j['status']=='delivered' for j in rows):,}")
@@ -3303,7 +3299,6 @@ class Window(QMainWindow):
         self.dashboard_metrics['win_rate'].setText(str(summary.get('win_rate','—')))
         self.dashboard_metrics['kd'].setText(str(summary.get('kd','—')))
         self.dashboard_metrics['kills_per_game'].setText(str(summary.get('kills_per_game','—')))
-        self.center_count.setText(f'{len(rows)} records')
         self.refresh_match_center(rows)
         self.refresh_dashboard_status();self.refresh_match_history_view(rows)
 
@@ -3385,52 +3380,43 @@ class Window(QMainWindow):
             return parsed.strftime('%b %d, %Y  %I:%M %p')
         except (TypeError,ValueError):return str(value)
 
-    def open_center_match(self,view,row,column=0):
-        rows=self.center_rows.get(view,[])
-        if 0<=row<len(rows):self.load_studio(rows[row]['id']);self.nav.setCurrentRow(5)
+    def open_latest_match(self):
+        if getattr(self,'latest_job_id',None):self.load_studio(self.latest_job_id);self.nav.setCurrentRow(5)
+    def _latest_job(self,rows):
+        if not rows:return None
+        def _key(job):
+            try:payload=json.loads(job['payload'])
+            except (TypeError,ValueError):payload={}
+            epoch=self._match_epoch(payload,job.get('created',0))
+            return epoch if epoch is not None else 0
+        return max(rows,key=_key)
+    def refresh_match_center(self,rows):
+        if not hasattr(self,'latest_card'):return
+        total=len(rows)
+        self.center_count.setText(f"{total} match{'es' if total!=1 else ''} tracked")
+        job=self._latest_job(rows)
+        if job is None:
+            self.latest_job_id=None;self.latest_result.setText('-');self.latest_result.setStyleSheet('font-size:22px;font-weight:900;color:#f2f4f7;');self.latest_detail.setText('No matches tracked yet.');self.latest_stats.setText('');self.latest_status.setText('');self.latest_review.setEnabled(False);return
+        match=json.loads(job['payload']);stats=match.get('stats') if isinstance(match.get('stats'),dict) else {}
+        raw_result=str(match.get('result') or '').lower();result={'win':'WIN','victory':'WIN','loss':'LOSS','defeat':'LOSS'}.get(raw_result,'-')
+        color='#56e99a' if result=='WIN' else '#ff626d' if result=='LOSS' else '#bbc4d0'
+        place=match.get('placement')
+        if place is None:place=stats.get('placement')
+        mode=str(match.get('modeKey',match.get('mode','-')) or '-').replace('_',' ').title()
+        played=self._display_time(match.get('playedAt') or match.get('date') or match.get('timestamp'))
+        self.latest_job_id=job['id']
+        self.latest_result.setText(result);self.latest_result.setStyleSheet('font-size:22px;font-weight:900;color:'+color+';')
+        self.latest_detail.setText(f"{self._display_value(place)} · {mode} · {played}")
+        self.latest_stats.setText(f"Kills {self._display_value(stats.get('kills'))} · Elims {self._display_value(stats.get('eliminations'))} · Damage {self._display_value(stats.get('damage'))} · Deaths {self._display_value(stats.get('deaths'))} · Assists {self._display_value(stats.get('assists'))}")
+        status=str(job.get('status','-')).replace('_',' ').upper();attempts=job.get('attempts',0)
+        hint=' · last post failed, review to retry' if job.get('status')=='failed' else ''
+        self.latest_status.setText(f"Status: {status} · {attempts} attempt(s){hint}")
+        self.latest_review.setEnabled(True)
     def _set_dashboard_health(self,key,value,good=None):
         indicator,label=self.dashboard_health[key];label.setText(value)
         color='#56e99a' if good else '#ff626d' if good is False else '#bbc4d0'
         label.setStyleSheet('color:'+color+';font-size:11px;font-weight:800;')
         indicator.setStyleSheet('color:'+color+';')
-
-    CENTER_REVIEW_STATUSES={'needs_review','art_ready','ready','failed','uncertain','awaiting_artwork'}
-
-    def refresh_match_center(self,rows):
-        if not hasattr(self,'center_tables'):return
-        self.center_rows={'records':list(rows),'review':[job for job in rows if job['status'] in self.CENTER_REVIEW_STATUSES]}
-        for view,table in self.center_tables.items():
-            view_rows=self.center_rows[view];table.setRowCount(len(view_rows))
-            for row,job in enumerate(view_rows):
-                match=json.loads(job['payload']);stats=match.get('stats') if isinstance(match.get('stats'),dict) else {}
-                raw_result=str(match.get('result') or '').lower();result={'win':'WIN','victory':'WIN','loss':'LOSS','defeat':'LOSS'}.get(raw_result,'\u2014')
-                color='#56e99a' if result=='WIN' else '#ff626d' if result=='LOSS' else '#bbc4d0'
-                played=self._display_time(match.get('playedAt') or match.get('date') or match.get('timestamp'))
-                mode=str(match.get('modeKey',match.get('mode','\u2014')) or '\u2014').replace('_',' ').title()
-                if view=='records':
-                    place=match.get('placement')
-                    if place is None:place=stats.get('placement')
-                    values=[job['id'][-12:],result,self._display_value(place),mode,self._display_value(stats.get('kills')),self._display_value(stats.get('eliminations')),self._display_value(stats.get('damage')),self._display_value(stats.get('deaths')),self._display_value(stats.get('assists')),played,str(job.get('status','\u2014')).replace('_',' ').upper(),str(job.get('attempts',0))]
-                else:
-                    values=[job['id'][-12:],result,mode,str(job.get('status','\u2014')).replace('_',' ').upper(),str(job.get('attempts',0)),played]
-                for col,value in enumerate(values):
-                    item=QTableWidgetItem(value)
-                    if col==0:item.setToolTip(job['id'])
-                    if col==1:item.setForeground(QColor(color))
-                    table.setItem(row,col,item)
-        self.refresh_center_stats()
-    def refresh_center_stats(self):
-        self.refresh_center_count()
-    def refresh_center_count(self):
-        if not hasattr(self,'center_tabs') or not hasattr(self,'center_count'):return
-        views=('records','review')
-        try:index=self.center_tabs.currentIndex()
-        except (AttributeError,RuntimeError):index=0
-        view=views[index] if 0<=index<2 else 'records'
-        rows=self.center_rows.get(view,[]) if hasattr(self,'center_rows') else []
-        total=len(self.center_rows.get('records',[])) if hasattr(self,'center_rows') else 0
-        self.center_count.setText(f"{len(rows)} of {total} records")
-
     def refresh_dashboard_status(self):
         if not hasattr(self,'dashboard_health'):return
         folder=Path(self.stats_dir.text().strip()) if hasattr(self,'stats_dir') and self.stats_dir.text().strip() else None
@@ -3469,10 +3455,6 @@ class Window(QMainWindow):
     def open_latest(self):
         rows=self.store.history()
         if rows:self.load_studio(next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id']));self.nav.setCurrentRow(5)
-    def on_studio_match_changed(self,index):
-        try:mid=self.studio_match_picker.itemData(index)
-        except (AttributeError,RuntimeError):return
-        if mid:self.load_studio(mid)
     def load_studio(self,mid):
         job=self.store.get(mid)
         if not job:return
@@ -3490,8 +3472,6 @@ class Window(QMainWindow):
                     for player in saved_players:self.add_ocr_row(row=player)
                     self.verified.setChecked(True)
                 except (OSError,ValueError):self.last_frame=None
-        six=self.studio_match_picker.findData(mid)
-        if six>=0:self.studio_match_picker.setCurrentIndex(six)
         self.job_status.setText(job['error'] or 'Ready for review')
     def view_source(self):
         job=self.selected_job()

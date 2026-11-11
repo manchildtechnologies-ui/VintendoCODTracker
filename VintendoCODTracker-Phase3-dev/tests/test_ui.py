@@ -422,6 +422,16 @@ class UITests(unittest.TestCase):
             self.assertEqual(calls,[mid]);self.assertEqual(w.nav.currentRow(),5)
         finally:
             w.load_studio=real;w.nav.setCurrentRow(0)
+    def test_stale_codmunity_attach_recovers_loading(self):
+        w=self.window
+        w.codmunity_hwnd=12345;w.codmunity_loading.hide()
+        try:
+            self.assertFalse(w._validate_codmunity_attach())
+            self.assertIsNone(w.codmunity_hwnd)
+            self.assertFalse(w.codmunity_loading.isHidden())
+            self.assertIn('Restarting',w.codmunity_status.text())
+        finally:
+            w.codmunity_poll.stop();w.codmunity_hwnd=None
     def test_section_banners_centered(self):
         w=self.window
         for name in app.PAGE_BANNERS:

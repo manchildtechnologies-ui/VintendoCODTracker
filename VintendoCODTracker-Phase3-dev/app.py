@@ -683,9 +683,21 @@ class Window(QMainWindow):
                 rows=self.store.history()
                 if rows:self.load_studio(next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id']))
             except (AttributeError,RuntimeError):pass
+    def _validate_codmunity_attach(self):
+        hwnd=getattr(self,'codmunity_hwnd',None)
+        if not hwnd:return False
+        try:alive=bool(ctypes.windll.user32.IsWindow(hwnd))
+        except Exception:alive=False
+        if alive:return True
+        self.codmunity_hwnd=None;self.codmunity_host.hwnd=None
+        if hasattr(self,'codmunity_loading'):self.codmunity_loading.show();self.codmunity_loading.raise_()
+        try:self.codmunity_poll.start()
+        except (AttributeError,RuntimeError):pass
+        self.codmunity_status.setText('CODMunity window closed. Restarting…')
+        return False
     def app_tab_changed(self,index):
         if self.app_tabs.widget(index) is self.codmunity_page:
-            self.start_or_attach_codmunity()
+            if not self._validate_codmunity_attach():self.start_or_attach_codmunity()
             self.codmunity_host.focus_embedded()
             if not self.tab_prototype and not getattr(self,'poll_busy',False):
                 self.codmunity_status.setText('Pulling CODMunity matches into the tracker…')

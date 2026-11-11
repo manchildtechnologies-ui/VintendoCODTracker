@@ -1518,4 +1518,8 @@ class UITests(unittest.TestCase):
         cached=w.store.meta('codmunity_public_distributions',{}) or {}
         self.assertIn('warzone|resurgence|lifetime',cached)
         self.assertIn('1/1',w.codmunity_status.text())
+    def test_fullscreen_capture_has_no_region_picker(self):
+        self.assertIsNone(self._button_by_text('Select Area To Capture Score'))
+        self.assertFalse(hasattr(self.window,'pick_region'))
+        self.assertFalse(hasattr(self.window,'roi_label'))
 if __name__=='__main__':unittest.main()

@@ -333,6 +333,7 @@ def parse_scoreboard(text):
         if any(n is not None for n in nums):
             stats=dict(zip(headings,nums)) if headings and len(headings)==len(nums) else {}
             rows.append(dict(name=name,stats=stats,verified=False,source='ocr',confidence='review_required'))
+    rows.sort(key=lambda row:sum(value is not None for value in row.get('stats',{}).values()),reverse=True)
     return rows[:16]
 
 def extract_match_context(match=None, ocr_text=''):

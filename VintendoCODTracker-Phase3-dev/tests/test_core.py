@@ -236,6 +236,9 @@ class CoreTests(unittest.TestCase):
         players=json.dumps([{'name':'Vintendo','stats':{'kills':9,'deaths':3},'verified':True,'source':'codmunity_local'}])
         enriched,_=E.enrich_codmunity_match({**payload,'matchId':'legacy-5'},'Vintendo',[])
         self.assertEqual(E.codmunity_row_updates({'payload':json.dumps(payload),'players':players},enriched,'Vintendo',[]),{})
+    def test_fullscreen_ocr_prefers_dense_stat_rows(self):
+        rows=E.parse_scoreboard('SCOREBOARD\nPLAYER  KILLS  DAMAGE\nJunk  5\nVintendo  12  3400\nConcha  8  2000')
+        self.assertEqual([row['name'] for row in rows],['Vintendo','Concha','Junk'])
 class CaptureTests(unittest.TestCase):
     def test_game_monitor_selection_uses_game_window_monitor_handle(self):
         from capture_engine import select_game_output

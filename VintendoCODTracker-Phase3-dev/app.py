@@ -357,29 +357,6 @@ class FullscreenExitFilter(QObject):
         except RuntimeError:return False
         return False
 
-class RegionDialog(QDialog):
-    def __init__(self,frame,parent=None):
-        super().__init__(parent);self.setWindowTitle('Select the complete scoreboard');self.frame=frame
-        self.original=(frame.shape[1],frame.shape[0]);self.start=None;self.end=None;self.roi=None
-        pix=frame_pixmap(frame).scaled(1100,660,Qt.KeepAspectRatio,Qt.SmoothTransformation)
-        self.label=QLabel();self.label.setPixmap(pix);self.label.setFixedSize(pix.size());self.label.mousePressEvent=self.press;self.label.mouseMoveEvent=self.move;self.label.mouseReleaseEvent=self.release
-        layout=QVBoxLayout(self);layout.addWidget(QLabel('Drag around every player row and the column headings.'));layout.addWidget(self.label)
-        buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel);buttons.accepted.connect(self.accept_region);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
-        self.resize(pix.width()+30,pix.height()+95)
-    def press(self,event):self.start=event.position().toPoint();self.end=self.start
-    def move(self,event):
-        if self.start:
-            self.end=event.position().toPoint();pix=frame_pixmap(self.frame).scaled(self.label.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation)
-            painter=QPainter(pix);painter.setPen(QPen(QColor('#ff9638'),3));painter.drawRect(QRect(self.start,self.end).normalized());painter.end();self.label.setPixmap(pix)
-    def release(self,event):self.move(event)
-    def accept_region(self):
-        if not self.start or not self.end:return
-        rect=QRect(self.start,self.end).normalized().intersected(self.label.rect())
-        sx=self.original[0]/self.label.width();sy=self.original[1]/self.label.height()
-        self.roi=[int(rect.left()*sx),int(rect.top()*sy),min(self.original[0],int((rect.right()+1)*sx)),min(self.original[1],int((rect.bottom()+1)*sy))]
-        if self.roi[2]-self.roi[0]<80 or self.roi[3]-self.roi[1]<60:return
-        self.accept()
-
 def frame_pixmap(frame):
     h,w,c=frame.shape;return QPixmap.fromImage(QImage(frame.data,w,h,w*c,QImage.Format_RGB888).copy())
 
@@ -945,10 +922,10 @@ class Window(QMainWindow):
         else:self.log('Squad Night is already active. Press Start to begin.')
         self.nav.setCurrentRow(0)
     def build_capture(self):
-        l=self.page('Scoreboard Capture','Set the scoreboard region once. At match end, press Ctrl + Shift + F8 while the final scoreboard is visible.');self.capture_subtitle=l.itemAt(1).widget()
-        self.monitor=QComboBox();self.roi_label=QLabel('Region: '+str(self.settings.values.get('roi') or 'not selected'))
-        self.row(l,self.monitor,self.button('Refresh monitors',self.refresh_monitors),self.button('Select Area To Capture Score',self.pick_region),self.button('Capture Screen Shot',self.capture_once,True))
-        l.addWidget(self.roi_label);self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');l.addWidget(self.hotkey_status)
+        l=self.page('Scoreboard Capture','At match end, press Ctrl + Shift + F8 while the final scoreboard is visible. A full screenshot is captured automatically.');self.capture_subtitle=l.itemAt(1).widget()
+        self.monitor=QComboBox()
+        self.row(l,self.monitor,self.button('Refresh monitors',self.refresh_monitors),self.button('Capture Screen Shot',self.capture_once,True))
+        self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');l.addWidget(self.hotkey_status)
         self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
         self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460);self.choose_result_row=self.row(l,QLabel('Choose Match Result'),self.result_override);self.choose_result_row.addStretch(1)
         split=QSplitter();self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(400,180);self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');split.addWidget(self.capture_preview);split.addWidget(self.ocr_text);l.addWidget(split,1)
@@ -2722,16 +2699,14 @@ class Window(QMainWindow):
 
         except Exception as exc:self.notice('Settings could not be saved: '+str(exc))
     def import_previous_settings(self):
-        if self.settings.values.get('roi'):return
         old=E.read_json(Path(os.environ.get('LOCALAPPDATA',''))/'Vintendo Scoreboard Capture'/'settings.json',{}) or {}
-        for key in ('roi','game'):
-            if key in old:self.settings.values[key]=old[key]
+        if 'game' in old:self.settings.values['game']=old['game']
         if old.get('protected_webhook') and not self.settings.values.get('protected_webhook'):
             # Same-account DPAPI blob can be imported without logging its plaintext.
             self.settings.values['protected_webhook']=old['protected_webhook']
             try:self.webhook.setText(self.settings.webhook())
             except Exception:pass
-        self.settings.save();self.roi_label.setText('Region: '+str(self.settings.values.get('roi') or 'not selected'))
+        self.settings.save()
     def import_config(self):
         path,_=QFileDialog.getOpenFileName(self,'Choose existing tracker config.json','','JSON (*.json)')
         if not path:return
@@ -2881,20 +2856,12 @@ class Window(QMainWindow):
         if not self.outputs:self.refresh_monitors()
         if not self.outputs:raise RuntimeError('No screen outputs found.')
         return self.outputs[max(0,self.monitor.currentIndex())]
-    def pick_region(self):
-        if self.capture_busy:return
-        try:frame=self.ensure_capture().grab(self.selected_output())
-        except Exception as exc:self.notice('Capture unavailable: '+str(exc));return
-        dialog=RegionDialog(frame,self)
-        if dialog.exec()==QDialog.Accepted:
-            self.settings.values.update(roi=dialog.roi,monitor=self.monitor.currentIndex());self.settings.save();self.roi_label.setText('Region: '+str(dialog.roi))
     def capture_once(self,checked=False,automatic=False,hotkey=False):
         if self.capture_busy:
             if hotkey:self.log('Scoreboard capture is already running; wait for the current OCR draft.')
             return
         try:
-            service=self.ensure_capture();output=self.selected_output();roi=self.settings.values.get('roi')
-            if not roi:raise RuntimeError('Select the scoreboard region first.')
+            service=self.ensure_capture();output=self.selected_output()
         except Exception as exc:
             if automatic:self.auto_detect.setChecked(False)
             self.log(str(exc))
@@ -2902,7 +2869,7 @@ class Window(QMainWindow):
             return
         self.capture_busy=True
         def work():
-            frame=service.grab(output,roi);text,lines,boxes=service.recognize(frame);return frame,text,lines
+            frame=service.grab(output,None);text,lines,boxes=service.recognize(frame);return frame,text,lines
         def done(result):
             self.capture_busy=False;frame,text,lines=result
             if automatic:
@@ -3423,10 +3390,9 @@ class Window(QMainWindow):
         folder=Path(self.stats_dir.text().strip()) if hasattr(self,'stats_dir') and self.stats_dir.text().strip() else None
         folder_ready=bool(folder and folder.is_dir())
         self._set_dashboard_health('codmunity','FOLDER READY' if folder_ready else 'FOLDER NOT FOUND',folder_ready)
-        roi=self.settings.values.get('roi')
-        roi_ready=bool(isinstance(roi,(list,tuple)) and len(roi)==4 and roi[2]>roi[0] and roi[3]>roi[1])
-        ocr_state='AUTO SCAN' if roi_ready and self.tracking and self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked() else 'REGION READY' if roi_ready else 'SET UP REGION'
-        self._set_dashboard_health('ocr',ocr_state,roi_ready)
+        auto=self.tracking and self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked()
+        ocr_state='AUTO SCAN' if auto else 'FULL-SCREEN READY'
+        self._set_dashboard_health('ocr',ocr_state,True)
         discord_ready=bool(hasattr(self,'webhook') and self.webhook.text().strip())
         self._set_dashboard_health('discord','WEBHOOK SAVED' if discord_ready else 'NOT CONFIGURED',discord_ready)
         if self.tracking and self.paused:tracking='PAUSED';color='#e3b95e'

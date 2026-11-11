@@ -686,7 +686,7 @@ class Window(QMainWindow):
     def _validate_codmunity_attach(self):
         hwnd=getattr(self,'codmunity_hwnd',None)
         if not hwnd:return False
-        try:alive=bool(ctypes.windll.user32.IsWindow(hwnd))
+        try:alive=bool(ctypes.windll.user32.IsWindowVisible(hwnd))
         except Exception:alive=False
         if alive:return True
         self.codmunity_hwnd=None;self.codmunity_host.hwnd=None
@@ -721,8 +721,9 @@ class Window(QMainWindow):
         candidates.append(Path.home()/'AppData'/'Local'/'CODMunity Desktop'/'codmunity-desktop.exe')
         return next((path for path in candidates if path.is_file()),None)
     def start_or_attach_codmunity(self):
-        if self.codmunity_host.hwnd and ctypes.windll.user32.IsWindow(self.codmunity_host.hwnd):
+        if self.codmunity_host.hwnd and ctypes.windll.user32.IsWindowVisible(self.codmunity_host.hwnd):
             self.codmunity_host.resize(self.codmunity_surface.width(),self.codmunity_surface.height());return
+        if self.codmunity_host.hwnd:self.codmunity_host.detach();self.codmunity_hwnd=None
         hwnd=self.find_codmunity_window()
         if hwnd:
             self.attach_codmunity(hwnd);return
@@ -734,22 +735,31 @@ class Window(QMainWindow):
             self.codmunity_status.setText('Starting CODMunity Desktop…');self.codmunity_poll.start()
         except OSError as exc:self.codmunity_status.setText('Could not start CODMunity Desktop: '+str(exc))
     def find_codmunity_window(self):
-        user32=ctypes.windll.user32;handles=[]
+        user32=ctypes.windll.user32;candidates=[]
         callback_type=ctypes.WINFUNCTYPE(ctypes.c_bool,wintypes.HWND,wintypes.LPARAM)
         user32.EnumWindows.argtypes=[callback_type,wintypes.LPARAM];user32.EnumWindows.restype=wintypes.BOOL
+        user32.GetWindowRect.argtypes=(wintypes.HWND,ctypes.POINTER(wintypes.RECT));user32.GetWindowRect.restype=wintypes.BOOL
         @callback_type
         def enum_callback(hwnd,lparam):
             if not user32.IsWindowVisible(hwnd):return True
             pid=wintypes.DWORD();user32.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
-            if self.codmunity_process and pid.value==self.codmunity_process.pid:handles.append(hwnd)
+            match=False
+            if self.codmunity_process and pid.value==self.codmunity_process.pid:match=True
             else:
                 try:
                     import psutil
-                    if psutil.Process(pid.value).name().lower()=='codmunity-desktop.exe':handles.append(hwnd)
+                    if psutil.Process(pid.value).name().lower()=='codmunity-desktop.exe':match=True
                 except Exception:pass
+            if match:
+                rect=wintypes.RECT()
+                if user32.GetWindowRect(hwnd,ctypes.byref(rect)):candidates.append((int(hwnd),rect.right-rect.left,rect.bottom-rect.top))
             return True
         user32.EnumWindows(enum_callback,0)
-        return handles[0] if handles else None
+        return self._pick_codmunity_window(candidates)
+    @staticmethod
+    def _pick_codmunity_window(candidates):
+        ranked=sorted(((w*h,hwnd) for hwnd,w,h in candidates if w>=200 and h>=200),reverse=True)
+        return ranked[0][1] if ranked else None
     def try_attach_codmunity(self):
         hwnd=self.find_codmunity_window()
         if hwnd:self.codmunity_poll.stop();self.attach_codmunity(hwnd)
@@ -758,6 +768,9 @@ class Window(QMainWindow):
             if hasattr(self,'codmunity_loading'):self.codmunity_loading.show();self.codmunity_loading.raise_()
     def attach_codmunity(self,hwnd):
         try:
+            rect=wintypes.RECT();ctypes.windll.user32.GetWindowRect(hwnd,ctypes.byref(rect))
+            if rect.right-rect.left<200 or rect.bottom-rect.top<200:
+                self.codmunity_status.setText('CODMunity window is not ready yet. Waiting…');return
             self.codmunity_surface.winId();self.codmunity_host.attach(hwnd,int(self.codmunity_surface.winId()));self.codmunity_hwnd=hwnd
             self.codmunity_host.resize(self.codmunity_surface.width(),self.codmunity_surface.height());self.codmunity_status.setText('CODMunity Desktop is running in this tab.')
             if hasattr(self,'codmunity_loading'):self.codmunity_loading.hide()

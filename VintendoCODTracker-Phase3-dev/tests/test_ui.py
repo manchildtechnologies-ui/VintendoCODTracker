@@ -422,6 +422,12 @@ class UITests(unittest.TestCase):
             self.assertEqual(calls,[mid]);self.assertEqual(w.nav.currentRow(),5)
         finally:
             w.load_studio=real;w.nav.setCurrentRow(0)
+    def test_codmunity_window_picker_skips_helpers(self):
+        w=self.window
+        self.assertEqual(w._pick_codmunity_window([(2,16,16),(3,16,16),(1,1920,1023)]),1)
+        self.assertEqual(w._pick_codmunity_window([(2,16,16),(5,800,600)]),5)
+        self.assertIsNone(w._pick_codmunity_window([(2,16,16)]))
+        self.assertIsNone(w._pick_codmunity_window([]))
     def test_stale_codmunity_attach_recovers_loading(self):
         w=self.window
         w.codmunity_hwnd=12345;w.codmunity_loading.hide()

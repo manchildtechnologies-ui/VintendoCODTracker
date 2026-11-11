@@ -124,15 +124,21 @@ class MetaDriver:
             pass
 
     def _first_visible(self, page, candidates, timeout=8000):
-        last = None
-        for candidate in candidates:
+        deadline = time.time() + max(timeout, 0) / 1000.0
+        while True:
+            for candidate in candidates:
+                try:
+                    locator = page.locator(candidate).first
+                    if locator.is_visible():
+                        return locator
+                except Exception:
+                    return None
+            if time.time() >= deadline:
+                return None
             try:
-                locator = page.locator(candidate).first
-                locator.wait_for(state='visible', timeout=timeout)
-                return locator
-            except Exception as exc:
-                last = exc
-        return None
+                page.wait_for_timeout(250)
+            except Exception:
+                return None
 
     def _stage(self, on_stage, stage, detail=''):
         try:
@@ -141,7 +147,7 @@ class MetaDriver:
         except Exception:
             pass
 
-    def _submit_composer(self, page, prompt, on_stage, timeout_s, expect_button):
+    def _submit_composer(self, page, prompt, on_stage, timeout_s, expect_button, shot_dir=None):
         """Shared prompt fill, generate click, and download capture for image and video composers."""
         prompt_box = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
         if prompt_box is None:
@@ -160,26 +166,145 @@ class MetaDriver:
             raise MetaAutomationError('submit', 'Generate button not found on the composer.')
         self._stage(on_stage, 'generating')
         try:
+            if expect_button:
+                result = self._image_flow(page, generate, on_stage, timeout_s, shot_dir)
+                if result is None:
+                    raise MetaAutomationError('generation', 'No finished file arrived in time. The job may still be rendering on Meta AI.')
+                return result
             with page.expect_download(timeout=timeout_s * 1000) as download_info:
                 generate.click(timeout=8000)
-                if expect_button:
-                    button = self._first_visible(page, SELECTORS['download'], timeout=120000)
-                    if button is not None:
-                        try:
-                            button.click(timeout=8000)
-                        except Exception:
-                            pass
             download = download_info.value
         except MetaLoginRequired:
             raise
         except Exception as exc:
             self._shot(page, 'no-download')
-            raise MetaAutomationError(
-                'generation',
-                'No finished file arrived in time. The job may still be '
-                f'rendering on Meta AI. ({exc})')
+            raise MetaAutomationError('generation', 'No finished file arrived in time. The job may still be rendering on Meta AI. (%s)' % exc)
         self._stage(on_stage, 'collecting')
         return download
+
+    def _image_flow(self, page, generate, on_stage, timeout_s, shot_dir):
+        try:
+            generate.click(timeout=8000)
+        except Exception as exc:
+            raise MetaAutomationError('submit', f'Could not start generation. ({exc})')
+        known_srcs = self._known_image_srcs(page)
+        tried = set()
+        deadline = time.time() + min(timeout_s, 600)
+        while time.time() < deadline:
+            button = self._first_visible(page, SELECTORS['download'], timeout=60000)
+            if button is not None:
+                self._stage(on_stage, 'collecting')
+                try:
+                    with page.expect_download(timeout=timeout_s * 1000) as download_info:
+                        button.click(timeout=8000)
+                    return download_info.value
+                except Exception:
+                    pass
+            got = self._acquire_viewer_shot(page, on_stage, known_srcs, tried, shot_dir)
+            if got is not None:
+                return got
+        return None
+
+    @staticmethod
+    def _known_image_srcs(page):
+        try:
+            srcs = set()
+            for image in page.locator('img').all():
+                try:
+                    src = image.get_attribute('src')
+                except Exception:
+                    continue
+                if src:
+                    srcs.add(src)
+            return srcs
+        except Exception:
+            return set()
+
+    @staticmethod
+    def _largest_image(page, exclude=None, tried=None):
+        exclude = exclude or set()
+        tried = tried or set()
+        try:
+            images = page.locator('img').all()
+        except Exception:
+            return None, None
+        best = None
+        best_area = 0
+        best_key = None
+        for image in images:
+            try:
+                if not image.is_visible():
+                    continue
+                try:
+                    if image.locator('xpath=ancestor::nav | ancestor::aside').count() > 0:
+                        continue
+                except Exception:
+                    pass
+                try:
+                    src = image.get_attribute('src')
+                except Exception:
+                    src = None
+                if src and src in exclude:
+                    continue
+                key = src or id(image)
+                if key in tried:
+                    continue
+                box = image.bounding_box()
+                if not box:
+                    continue
+                area = box['width'] * box['height']
+                if area > best_area:
+                    best_area = area
+                    best = image
+                    best_key = key
+            except Exception:
+                continue
+        if best is None or best_area < 200 * 200:
+            return None, None
+        return best, best_key
+
+    def _acquire_viewer_shot(self, page, on_stage, exclude, tried, shot_dir):
+        self._stage(on_stage, 'collecting')
+        img, key = self._largest_image(page, exclude, tried)
+        if img is None:
+            return None
+        tried.add(key)
+        try:
+            img.click(timeout=8000)
+        except Exception:
+            return None
+        try:
+            page.wait_for_timeout(1500)
+        except Exception:
+            pass
+        button = self._first_visible(page, SELECTORS['download'], timeout=20000)
+        if button is not None:
+            try:
+                with page.expect_download(timeout=120000) as download_info:
+                    button.click(timeout=8000)
+                return download_info.value
+            except Exception:
+                pass
+        return self._screenshot_largest(page, shot_dir)
+
+    def _screenshot_largest(self, page, shot_dir):
+        img, _key = self._largest_image(page)
+        if img is None:
+            return None
+        try:
+            data = bytes(img.screenshot(timeout=8000))
+        except Exception:
+            return None
+        if not valid_image_bytes(data):
+            return None
+        try:
+            folder = Path(shot_dir or '.')
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / ('meta-viewer-%d.png' % int(time.time() * 1000))
+            target.write_bytes(data)
+            return target
+        except OSError:
+            return None
 
     def new_job_page(self):
         page = self.context.new_page()
@@ -237,36 +362,15 @@ class MetaDriver:
 
     def open_image_composer(self, page):
         self.ensure_logged_in(page)
-        for url in (META_CREATE, META_HOME):
-            try:
-                page.goto(url, wait_until='domcontentloaded')
-                page.wait_for_timeout(2000)
-                entry = self._first_visible(page, SELECTORS['create_entry'], timeout=6000)
-                if entry is not None:
-                    try:
-                        entry.click(timeout=5000)
-                        page.wait_for_timeout(2000)
-                    except Exception:
-                        pass
-                mode = self._first_visible(page, SELECTORS['image_mode'], timeout=8000)
-                if mode is not None:
-                    try:
-                        mode.click(timeout=5000)
-                        page.wait_for_timeout(2000)
-                    except Exception:
-                        pass
-                prompt = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
-                if prompt is not None:
-                    return page
-            except MetaLoginRequired:
-                raise
-            except Exception:
-                pass
-        self._shot(page, 'no-create-surface')
-        raise MetaAutomationError(
-            'create-surface',
-            'Could not reach the Meta AI image composer. The site layout may '
-            'have changed — a screenshot was saved next to the job output.')
+        page.goto(META_HOME, wait_until='domcontentloaded')
+        page.wait_for_timeout(2000)
+        prompt = self._first_visible(page, SELECTORS['prompt_box'], timeout=10000)
+        if prompt is None:
+            self._shot(page, 'no-create-surface')
+            raise MetaAutomationError(
+                'create-surface',
+                'Prompt box not found on Meta AI. Open meta.ai in Tracker Chrome once, then retry.')
+        return page
 
     def submit_text_to_image(self, page, photos, prompt, download_dir, timeout_s=1200, on_stage=None):
         files = [str(p) for p in (photos or []) if Path(p).is_file()]
@@ -309,15 +413,19 @@ class MetaDriver:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError:
             pass
-        download = self._submit_composer(page, prompt, on_stage, timeout_s, expect_button=True)
-        name = str(download.suggested_filename or 'poster.png')
-        target = out_dir / name
-        if target.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
-            target = target.with_suffix('.png')
-        try:
-            download.save_as(str(target))
-        except Exception as exc:
-            raise MetaAutomationError('download', f'Could not save the image. ({exc})')
+        result = self._submit_composer(page, prompt, on_stage, timeout_s, expect_button=True, shot_dir=str(out_dir))
+        if isinstance(result, Path):
+            target = result
+        else:
+            download = result
+            name = str(download.suggested_filename or 'poster.png')
+            target = out_dir / name
+            if target.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
+                target = target.with_suffix('.png')
+            try:
+                download.save_as(str(target))
+            except Exception as exc:
+                raise MetaAutomationError('download', f'Could not save the image. ({exc})')
         try:
             data = target.read_bytes()
         except OSError as exc:

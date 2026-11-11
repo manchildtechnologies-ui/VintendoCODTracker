@@ -187,62 +187,6 @@ class FriendTile(QWidget):
         super().mousePressEvent(event)
         if event.button()==Qt.LeftButton and callable(self._on_toggle):self._on_toggle(self.pid)
 
-class MissionCore(QWidget):
-    """Animated automation dial. The sweep is indeterminate motion only; the ring ticks and center label always show the real automation stage."""
-    STAGES=('queued','submitting','generating','collected','posted')
-    INDEX={'queued':0,'submitting':1,'generating':2,'collecting':3,'collected':3,'posted':4}
-    COLORS={'queued':'#8a93a3','submitting':'#f97316','generating':'#fdba74','collecting':'#fdba74','collected':'#56e99a','posted':'#56e99a','failed':'#ef6b77','ready':'#5b6572'}
-    def __init__(self,parent=None):
-        super().__init__(parent);self.setMinimumSize(300,300)
-        self.stage='ready';self.elapsed_text=''
-        self._angle=0
-        self._timer=QTimer(self);self._timer.setInterval(60);self._timer.timeout.connect(self._advance)
-    def set_stage(self,stage):
-        self.stage=str(stage or 'ready')
-        if self.stage in ('submitting','generating','collecting'):
-            if not self._timer.isActive():self._timer.start()
-        else:
-            try:self._timer.stop()
-            except Exception:pass
-        self.update()
-    def set_elapsed(self,text):
-        self.elapsed_text=str(text or '');self.update()
-    def _advance(self):
-        self._angle=(self._angle+(9 if self.stage=='generating' else 5))%360;self.update()
-    def paintEvent(self,event):
-        side=min(self.width(),self.height())
-        cx,cy=self.width()/2,self.height()/2;radius=side/2-14
-        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
-        color=QColor(self.COLORS.get(self.stage,'#5b6572'))
-        painter.setPen(QPen(QColor('#343a46'),2));painter.setBrush(QColor('#0b0e13'))
-        painter.drawEllipse(QPointF(cx,cy),radius,radius)
-        if self.stage=='failed':
-            painter.setPen(QPen(QColor('#ef6b77'),3));painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(QPointF(cx,cy),radius-5,radius-5)
-        current=self.INDEX.get(self.stage,-1)
-        for index in range(5):
-            import math as _math
-            theta=_math.radians(-90+index*72)
-            inner=radius-4;outer=radius-12
-            x1=cx+inner*_math.cos(theta);y1=cy+inner*_math.sin(theta)
-            x2=cx+outer*_math.cos(theta);y2=cy+outer*_math.sin(theta)
-            tick=QColor('#2ea36b') if 0<=current and index<current else (color if index==current and current>=0 else QColor('#343a46'))
-            painter.setPen(QPen(tick,4));painter.drawLine(int(x1),int(y1),int(x2),int(y2))
-        if self.stage in ('submitting','generating','collecting'):
-            pen=QPen(color,6);pen.setCapStyle(Qt.RoundCap);painter.setPen(pen);painter.setBrush(Qt.NoBrush)
-            span=70 if self.stage=='generating' else 45
-            box=QRect(int(cx-radius+9),int(cy-radius+9),int((radius-9)*2),int((radius-9)*2))
-            painter.drawArc(box,int(self._angle*16),int(span*16))
-        if self.stage=='posted':
-            pen=QPen(QColor('#56e99a'),5);pen.setCapStyle(Qt.RoundCap);pen.setJoinStyle(Qt.RoundJoin);painter.setPen(pen)
-            painter.drawLine(int(cx-22),int(cy+2),int(cx-8),int(cy+16));painter.drawLine(int(cx-8),int(cy+16),int(cx+24),int(cy-14))
-        label=self.stage.upper() if self.stage!='ready' else 'IDLE'
-        font=self.font();font.setBold(True);font.setPointSize(15);painter.setFont(font)
-        painter.setPen(QColor('#ef6b77') if self.stage=='failed' else QColor('#f2f4f7'))
-        painter.drawText(QRect(0,int(cy-38),self.width(),28),Qt.AlignCenter,label)
-        font.setPointSize(11);font.setBold(False);painter.setFont(font);painter.setPen(QColor('#99a8bc'))
-        painter.drawText(QRect(0,int(cy+8),self.width(),22),Qt.AlignCenter,self.elapsed_text)
-        painter.end()
 class WindowsWindowHost:
     """Reparent one existing Windows top-level window into a QWidget surface."""
     GWL_STYLE=-16; WS_CHILD=0x40000000; WS_POPUP=0x80000000
@@ -695,10 +639,25 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         self.codmunity_status.setText('CODMunity window closed. Restarting…')
         return False
+    def _sync_codmunity_embed_size(self):
+        try:
+            hwnd=getattr(self.codmunity_host,'hwnd',None)
+        except (AttributeError,RuntimeError):
+            return
+        if not hwnd:
+            return
+        try:
+            import ctypes as _ct
+            if _ct.windll.user32.IsWindowVisible(hwnd):
+                self.codmunity_host.resize(self.codmunity_surface.width(),self.codmunity_surface.height())
+        except Exception:
+            pass
+
     def app_tab_changed(self,index):
         if self.app_tabs.widget(index) is self.codmunity_page:
             if not self._validate_codmunity_attach():self.start_or_attach_codmunity()
             self.codmunity_host.focus_embedded()
+            self._sync_codmunity_embed_size()
             if not self.tab_prototype and not getattr(self,'poll_busy',False):
                 self.codmunity_status.setText('Pulling CODMunity matches into the tracker…')
                 self.poll_records(source='codmunity-tab')
@@ -940,8 +899,6 @@ class Window(QMainWindow):
         l=self.page('Squad Night','CODMunity match context plus the captured scoreboard become one verified, match-bound poster job.')
         for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture submits the complete job to Meta AI automatically and collects the finished picture; if the automation browser needs a login, the staged folder opens for manual handoff.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
-        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
-        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());l.addWidget(self.full_auto)
         self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True))
         squad_title=QLabel('SQUAD LEADERBOARD');squad_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;letter-spacing:1px;');l.addWidget(squad_title)
         squad_controls=QHBoxLayout();squad_controls.setSpacing(8)
@@ -1491,6 +1448,8 @@ class Window(QMainWindow):
         self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
         self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
         self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');l.addWidget(self.include_stats_checkbox)
+        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
+        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());l.addWidget(self.full_auto)
         self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);l.addWidget(self.generate_poster_button)
         self.photo_assignments=QLabel('Consented reference photos are matched automatically when available.');self.photo_assignments.setWordWrap(True);l.addWidget(self.photo_assignments)
         self.studio_heads_title=QLabel('Players Identified from ScreenShots');self.studio_heads_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');l.addWidget(self.studio_heads_title)
@@ -1598,7 +1557,7 @@ class Window(QMainWindow):
         QTimer.singleShot(0,self.update_screenshot_grid);QTimer.singleShot(0,self.update_cinematic_grid)
         self.refresh_cinematic_results()
     def build_tracker_browser(self):
-        l=self.page('Tracker Browser','The automation browser works hidden in the background. Watch every poster and video job live below — nothing here needs clicking while a job runs.')
+        l=self.page('Tracker Browser','The Meta AI browser opens in a visible window while a poster or video job runs - watch it work there. Nothing here needs clicking while a job runs.')
         self.browser_status=QLabel('Tracker browser: checking…');self.browser_status.setWordWrap(True);l.addWidget(self.browser_status)
         self.browser_queue=QLabel('');self.browser_queue.setWordWrap(True);self.browser_queue.setStyleSheet('color:#99a8bc');l.addWidget(self.browser_queue)
         self.browser_surface=QFrame();self.browser_surface.setObjectName('dashboardPanel');self.browser_surface.setMinimumSize(800,450);l.addWidget(self.browser_surface,1)
@@ -1614,16 +1573,10 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):return
         try:
             layout.addStretch(1)
-            core_row=QHBoxLayout();core_row.setSpacing(8)
-            core_row.addStretch(1)
-            self.auto_core=MissionCore(surface)
-            core_row.addWidget(self.auto_core)
-            core_row.addStretch(1)
-            layout.addLayout(core_row)
             self.login_card=QFrame();self.login_card.setObjectName('dashboardPanel')
             login_layout=QVBoxLayout(self.login_card);login_layout.setContentsMargins(14,12,14,12);login_layout.setSpacing(8)
             login_title=QLabel('META AI NEEDS YOU TO LOG IN');login_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');login_layout.addWidget(login_title)
-            login_hint=QLabel('Log in once in the window that opens, then press Verify. The browser hides itself again afterwards.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
+            login_hint=QLabel('Log in once in the window that opens, then press Verify. The window stays visible while jobs run and closes itself when each job finishes.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
             self.row(login_layout,self.button('Open login window',self.open_login_window,True),self.button("I've logged in — verify",self.verify_login))
             self.login_card.hide();layout.addWidget(self.login_card)
             layout.addStretch(1)
@@ -1639,7 +1592,7 @@ class Window(QMainWindow):
         try:
             if self.auto_stage=='failed':self.browser_status.setText('Automation stopped: '+self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('color:#ef6b77;font-weight:700;')
             elif self.auto_stage_detail:self.browser_status.setText(self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('')
-            elif self.auto_stage=='ready':self.browser_status.setText('Automation browser is idle in the background.');self.browser_status.setStyleSheet('')
+            elif self.auto_stage=='ready':self.browser_status.setText('The Meta AI browser opens visibly while a job runs.');self.browser_status.setStyleSheet('')
         except (AttributeError,RuntimeError):pass
         try:
             if self.auto_stage in ('submitting','generating','collecting'):
@@ -1681,6 +1634,15 @@ class Window(QMainWindow):
         except Exception:return None
         self.auto_browser_hwnd=None
         return None
+    def _show_auto_browser(self):
+        hwnd=getattr(self,'auto_browser_hwnd',None)
+        if not hwnd:return
+        try:
+            user32=ctypes.windll.user32
+            if not user32.IsWindow(hwnd):self.auto_browser_hwnd=None;return
+            if user32.IsIconic(hwnd):user32.ShowWindow(hwnd,9)
+        except Exception:pass
+
     def toggle_auto_browser(self):
         hwnd=self._auto_browser_alive()
         if hwnd is None:
@@ -1690,6 +1652,7 @@ class Window(QMainWindow):
         try:
             user32=ctypes.windll.user32
             visible=bool(user32.IsWindowVisible(hwnd))
+            self.auto_browser_user_shown=not visible
             user32.ShowWindow(hwnd,6 if visible else 9)
             try:self.browser_status.setText('Automation browser window: '+('hidden in the background.' if visible else 'brought forward. Hide it again any time.'))
             except (AttributeError,RuntimeError):pass
@@ -1735,7 +1698,7 @@ class Window(QMainWindow):
     def _login_opened(self):
         try:self.login_card.show()
         except (AttributeError,RuntimeError):pass
-        try:self.browser_status.setText('Log into Meta AI in the opened window, then press Verify. The browser hides itself afterwards.')
+        try:self.browser_status.setText('Log into Meta AI in the opened window, then press Verify. You can watch every job work in that window; it closes itself when each job finishes.')
         except (AttributeError,RuntimeError):pass
     def verify_login(self):
         context=getattr(self,'_login_context',None)
@@ -1774,14 +1737,17 @@ class Window(QMainWindow):
         try:self.login_card.hide()
         except (AttributeError,RuntimeError):pass
         self.set_automation_stage('ready')
-        try:self.browser_status.setText('Logged in. The browser is hidden in the background again.')
+        try:self.browser_status.setText('Logged in. The browser opens visibly each time a job runs.')
         except (AttributeError,RuntimeError):pass
-        self.log('Meta AI login verified; automation browser hidden.')
+        self.log('Meta AI login verified; the automation browser now stays visible while jobs run.')
     def _record_auto_browser(self,known):
         try:current=set(self.find_tracker_chrome_windows())
         except Exception:return
         fresh=[hwnd for hwnd in current if hwnd not in (known or set())]
         if fresh:self.auto_browser_hwnd=fresh[0]
+
+        try:self._show_auto_browser()
+        except (AttributeError,RuntimeError):pass
     def _show_login_card(self,message):
         try:self.login_card.show()
         except (AttributeError,RuntimeError):pass
@@ -2441,7 +2407,7 @@ class Window(QMainWindow):
             try:known_windows=set(self.find_tracker_chrome_windows())
             except Exception:pass
             with sync_playwright() as playwright:
-                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp')
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
                 try:self._record_auto_browser(known_windows);video=driver.submit_image_to_video(page,screenshot,faces,prompt,str(self.videos_dir()),on_stage=self._driver_stage)
@@ -3600,8 +3566,14 @@ class Window(QMainWindow):
             message='Could not prepare this match for Meta AI: '+str(exc)
             self.job_status.setText(message[:300]);self.notice(message);self.log('Poster preparation failed for '+job['id']+': '+str(exc));return
         if launched:
-            self.log(f"Match {job['id']} auto-submitted to Meta AI.")
-            self.job_status.setText('Submitting to Meta AI automatically — prompt and reference photos are being filled in the automation browser.')
+            try:queued=str((self.store.get(job['id']) or {}).get('gen_state') or '')=='queued'
+            except Exception:queued=False
+            if queued:
+                self.log(f"Match {job['id']} queued behind the running poster job.")
+                self.job_status.setText('A poster is already running — this match is queued and starts automatically when it finishes.')
+            else:
+                self.log(f"Match {job['id']} auto-submitted to Meta AI.")
+                self.job_status.setText('The Meta AI browser window is open and filling in the prompt and reference photos automatically.')
             return
         try:
             folder=E.DATA/'handoff'/E.disk_id(job['id'])
@@ -3627,7 +3599,11 @@ class Window(QMainWindow):
         photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
         self._poster_manual=manual
         launched=bool(self._start_poster_automation(mid,prepared['folder'],photo_names,final_prompt))
-        if launched:self.set_automation_stage('submitting',mid)
+        if launched:
+            try:stage=str((self.store.get(mid) or {}).get('gen_state') or 'submitting')
+            except Exception:stage='submitting'
+            if stage not in ('queued','submitting'):stage='submitting'
+            self.set_automation_stage(stage,mid)
         return launched
     def _toggle_full_auto(self):
         try:on=bool(self.full_auto.isChecked())
@@ -3644,6 +3620,8 @@ class Window(QMainWindow):
     def _pump_full_auto(self):
         if getattr(self,'tab_prototype',False):return
         if getattr(self,'closing',False):return
+        try:self._sweep_stale_poster_jobs()
+        except Exception:pass
         try:on=bool(self.full_auto.isChecked())
         except (AttributeError,RuntimeError):return
         if not on:return
@@ -3669,6 +3647,52 @@ class Window(QMainWindow):
             except Exception:pass
             self.log('Full Auto skipped '+target+': '+str(exc)[:160]);return
         if launched:self.log('Full Auto submitted '+target+' to Meta AI.')
+    def _sweep_stale_poster_jobs(self,max_age_s=2100):
+        try:rows=self.store.history()
+        except Exception:return 0
+        try:active=getattr(self,'_inapp_poster_active',None)
+        except Exception:active=None
+        import time as _time
+        now=_time.time();reset=0
+        for row in rows or []:
+            try:
+                if str(row.get('gen_state') or '')!='submitting':continue
+                if active and row.get('id')==active:continue
+                try:age=now-float(row.get('updated') or 0)
+                except (TypeError,ValueError):age=max_age_s+1
+                if age<max_age_s:continue
+                self.store.update(row['id'],gen_state='idle',error='Poster job was stuck submitting with no worker; reset so it can run again.')
+            except Exception:continue
+            reset+=1
+            try:self.log('Reset orphaned poster job '+str(row.get('id'))+'; submit it again to retry.')
+            except Exception:pass
+        return reset
+    def _drain_poster_queue(self):
+        try:self._pump_full_auto()
+        except Exception:pass
+        try:on=bool(self.full_auto.isChecked())
+        except (AttributeError,RuntimeError):on=False
+        if on:return
+        self._sweep_stale_poster_jobs()
+        if getattr(self,'_inapp_poster_active',None):return
+        try:rows=self.store.history()
+        except Exception:return
+        target=None
+        for row in reversed(rows or []):
+            if str(row.get('gen_state') or '')!='queued':continue
+            if str(row.get('status') or '') in ('delivered','solo_delivered','failed','uncertain'):continue
+            target=row.get('id');break
+        if target is None:return
+        try:launched=self._prepare_and_launch(target)
+        except Exception as exc:
+            try:self.store.update(target,gen_state='idle',error=str(exc)[:300])
+            except Exception:pass
+            try:self.log('Queued poster skipped '+str(target)+': '+str(exc)[:160])
+            except Exception:pass
+            return
+        if launched:
+            try:self.log('Queued poster submitted '+str(target)+' to Meta AI.')
+            except Exception:pass
     def _write_unified_prompt(self,folder,text):
         try:
             target=Path(folder)
@@ -3677,7 +3701,12 @@ class Window(QMainWindow):
         except OSError as exc:self.log('Could not refresh staged prompt text: '+str(exc))
     def _start_poster_automation(self,job_id,folder,filenames,prompt_text):
         if getattr(self,'_inapp_poster_active',None):
-            self.job_status.setText('A poster is already being submitted — wait for it to finish first.')
+            try:self.store.update(job_id,gen_state='queued')
+            except Exception:pass
+            self.job_status.setText('A poster is already running — this match is queued and starts automatically when it finishes.')
+            try:self.set_automation_stage('queued',job_id)
+            except (AttributeError,RuntimeError):pass
+            self.log('Match '+str(job_id)+' queued behind the running poster job.')
             return True
         try:
             from playwright.sync_api import sync_playwright
@@ -3696,7 +3725,7 @@ class Window(QMainWindow):
             try:known_windows=set(self.find_tracker_chrome_windows())
             except Exception:pass
             with playwright_factory() as playwright:
-                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp')
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
                 try:
@@ -3736,7 +3765,8 @@ class Window(QMainWindow):
         self.job_status.setText('Poster submitted and finished image collected automatically.')
         self.log('In-app poster completed: '+job_id)
         self.set_automation_stage('collected',job_id)
-        self._pump_full_auto()
+
+        self._drain_poster_queue()
     def _fail_inapp_poster(self,job_id,step,detail):
         self._inapp_poster_active=None
         try:self.generate_poster_button.setEnabled(True)
@@ -3754,7 +3784,8 @@ class Window(QMainWindow):
                 folder=E.DATA/'handoff'/E.disk_id(job_id)
                 if folder.is_dir():os.startfile(str(folder))
             except OSError:pass
-        self._pump_full_auto()
+
+        self._drain_poster_queue()
     def received_art(self,mid,path):
         current=self.store.get(mid)
         if not current:return

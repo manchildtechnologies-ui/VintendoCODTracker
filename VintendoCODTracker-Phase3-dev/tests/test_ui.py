@@ -185,30 +185,26 @@ class UITests(unittest.TestCase):
         self.assertEqual(w.active_id,mid)
         self.assertIn(mid,w.studio_match.text())
         self.assertTrue(w.generate_poster_button.isEnabled())
-    def test_mission_core_animates_real_stages(self):
+    def test_automation_stage_updates_status_without_dial(self):
         w=self.window
+        self.assertFalse(hasattr(w,'auto_core'))
         w.set_automation_stage('generating','test job overdrive')
-        self.assertEqual(w.auto_core.stage,'generating')
-        self.assertTrue(w.auto_core._timer.isActive())
+        self.assertEqual(w.auto_stage,'generating')
         self.assertIn('test job overdrive',w.browser_status.text())
         w._auto_stage_tick()
-        self.assertTrue(w.auto_core.elapsed_text)
         w.set_automation_stage('failed','boom')
-        self.assertEqual(w.auto_core.stage,'failed')
-        self.assertFalse(w.auto_core._timer.isActive())
+        self.assertEqual(w.auto_stage,'failed')
         self.assertIn('boom',w.browser_status.text())
         w.set_automation_stage('ready')
-        self.assertEqual(w.auto_core.stage,'ready')
-        self.assertIn('idle in the background',w.browser_status.text())
-    def test_mission_core_paints_every_stage(self):
-        from PySide6.QtGui import QPixmap
-        core=app.MissionCore()
-        core.resize(220,220)
-        for stage in ('ready','queued','submitting','generating','collecting','collected','posted','failed'):
-            core.set_stage(stage);core.set_elapsed('01:23')
-            pix=QPixmap(220,220);core.render(pix)
-        self.assertEqual(core.stage,'failed')
-        self.assertEqual(core.elapsed_text,'01:23')
+        self.assertEqual(w.auto_stage,'ready')
+        self.assertIn('visibly',w.browser_status.text())
+    def test_tracker_browser_tab_has_no_progress_dial(self):
+        w=self.window
+        self.assertFalse(hasattr(w,'auto_core'))
+        self.assertFalse(hasattr(app,'MissionCore'))
+        self.assertIsNotNone(w.browser_status)
+        self.assertIsNotNone(w.browser_surface)
+        self.assertIsNotNone(w.auto_stage_timer)
     def test_login_card_appears_on_login_failure(self):
         w=self.window
         mid,_=w.store.add({'matchId':'login-fail-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
@@ -422,6 +418,151 @@ class UITests(unittest.TestCase):
             self.assertEqual(calls,[mid]);self.assertEqual(w.nav.currentRow(),5)
         finally:
             w.load_studio=real;w.nav.setCurrentRow(0)
+    def test_open_image_composer_goes_straight_to_chat(self):
+        from unittest.mock import MagicMock
+        import meta_automation as MA
+        gotos = []
+        shown = MagicMock(); shown.is_visible.return_value = True
+        hidden = MagicMock(); hidden.is_visible.return_value = False
+        page = MagicMock()
+        def loc_side_effect(sel):
+            m = MagicMock()
+            if 'Ask Meta AI' in sel:
+                m.first = hidden
+            elif 'contenteditable' in sel:
+                m.first = shown
+            else:
+                m.first = hidden
+            return m
+        page.locator.side_effect = loc_side_effect
+        page.url = 'https://www.meta.ai/'
+        page.goto.side_effect = lambda url, wait_until=None: gotos.append(url)
+        driver = MA.MetaDriver.__new__(MA.MetaDriver)
+        driver.diagnose_dir = None
+        self.assertIs(page, driver.open_image_composer(page))
+        self.assertTrue(gotos)
+        self.assertTrue(all('/create' not in u for u in gotos))
+
+    def test_first_visible_polls_candidates_within_budget(self):
+        import time
+        from unittest.mock import MagicMock
+        import meta_automation as MA
+        driver = MA.MetaDriver.__new__(MA.MetaDriver)
+        hidden = MagicMock(); hidden.is_visible.return_value = False
+        page = MagicMock(); page.locator.return_value.first = hidden
+        t0 = time.monotonic()
+        self.assertIsNone(driver._first_visible(page, ['gone-a', 'gone-b'], timeout=600))
+        self.assertLess(time.monotonic() - t0, 5.0)
+        shown = MagicMock(); shown.is_visible.return_value = True
+        page2 = MagicMock(); page2.locator.return_value.first = shown
+        t0 = time.monotonic()
+        self.assertIs(shown, driver._first_visible(page2, ['here'], timeout=8000))
+        self.assertLess(time.monotonic() - t0, 2.0)
+
+    def test_sync_codmunity_embed_size_noops_safely(self):
+        w = self.window
+        w.codmunity_host.hwnd = None
+        w._sync_codmunity_embed_size()
+        w.codmunity_host.hwnd = 12345
+        w._sync_codmunity_embed_size()
+        self.assertEqual(w.codmunity_host.hwnd, 12345)
+
+    def test_show_auto_browser_clears_dead_handle(self):
+        w = self.window
+        w.auto_browser_hwnd = None
+        w._show_auto_browser()
+        self.assertIsNone(w.auto_browser_hwnd)
+        w.auto_browser_hwnd = 12345
+        w._show_auto_browser()
+        self.assertIsNone(w.auto_browser_hwnd)
+
+    def test_largest_image_skips_old_and_nav(self):
+        from unittest.mock import MagicMock
+        import meta_automation as MA
+        driver = MA.MetaDriver.__new__(MA.MetaDriver)
+        def make_img(w, h, in_nav=False, src=None):
+            img = MagicMock()
+            img.is_visible.return_value = True
+            img.bounding_box.return_value = {'width': w, 'height': h}
+            img.get_attribute.return_value = src
+            nav = MagicMock()
+            nav.count.return_value = 1 if in_nav else 0
+            img.locator.return_value = nav
+            return img
+        old_image = make_img(900, 900, src='https://meta.ai/old.png')
+        sidebar_thumb = make_img(900, 900, in_nav=True, src='https://meta.ai/nav.png')
+        small_icon = make_img(16, 16, src='https://meta.ai/icon.png')
+        fresh_image = make_img(800, 600, src='https://meta.ai/new.png')
+        page = MagicMock()
+        page.locator.return_value.all.return_value = [old_image, sidebar_thumb, small_icon, fresh_image]
+        img, key = driver._largest_image(page, {'https://meta.ai/old.png'}, set())
+        self.assertIs(img, fresh_image)
+        self.assertEqual(key, 'https://meta.ai/new.png')
+
+    def test_screenshot_largest_saves_valid_png(self):
+        import tempfile, shutil
+        from pathlib import Path
+        from unittest.mock import MagicMock
+        import meta_automation as MA
+        driver = MA.MetaDriver.__new__(MA.MetaDriver)
+        png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 2048
+        img = MagicMock()
+        img.is_visible.return_value = True
+        img.bounding_box.return_value = {'width': 800, 'height': 600}
+        img.get_attribute.return_value = None
+        nav = MagicMock(); nav.count.return_value = 0
+        img.locator.return_value = nav
+        img.screenshot.return_value = png
+        page = MagicMock()
+        page.locator.return_value.all.return_value = [img]
+        tmpdir = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, tmpdir, True)
+        target = driver._screenshot_largest(page, tmpdir)
+        self.assertIsNotNone(target)
+        data = Path(str(target)).read_bytes()
+        self.assertTrue(MA.valid_image_bytes(data))
+
+    def test_first_visible_polls_candidates_within_budget(self):
+        import time
+        from unittest.mock import MagicMock
+        import meta_automation as MA
+        driver = MA.MetaDriver.__new__(MA.MetaDriver)
+        hidden = MagicMock(); hidden.is_visible.return_value = False
+        page = MagicMock(); page.locator.return_value.first = hidden
+        t0 = time.monotonic()
+        self.assertIsNone(driver._first_visible(page, ['gone-a', 'gone-b'], timeout=600))
+        self.assertLess(time.monotonic() - t0, 5.0)
+        shown = MagicMock(); shown.is_visible.return_value = True
+        page2 = MagicMock(); page2.locator.return_value.first = shown
+        t0 = time.monotonic()
+        self.assertIs(shown, driver._first_visible(page2, ['here'], timeout=8000))
+        self.assertLess(time.monotonic() - t0, 2.0)
+
+    def test_acquire_viewer_shot_prefers_real_download(self):
+        from unittest.mock import MagicMock
+        import meta_automation as MA
+        driver = MA.MetaDriver.__new__(MA.MetaDriver)
+        img = MagicMock()
+        img.is_visible.return_value = True
+        img.bounding_box.return_value = {'width': 800, 'height': 600}
+        img.get_attribute.return_value = 'https://meta.ai/fresh.png'
+        nav = MagicMock(); nav.count.return_value = 0
+        img.locator.return_value = nav
+        dl_file = MagicMock()
+        fired = MagicMock(); fired.value = dl_file
+        ctx = MagicMock(); ctx.__enter__.return_value = fired
+        page = MagicMock()
+        def loc_side_effect(sel):
+            m = MagicMock()
+            if sel == 'img':
+                m.all.return_value = [img]
+            else:
+                m.first.is_visible.return_value = True
+            return m
+        page.locator.side_effect = loc_side_effect
+        page.expect_download.return_value = ctx
+        got = driver._acquire_viewer_shot(page, None, set(), set(), None)
+        self.assertIs(got, dl_file)
+        img.click.assert_called_once()
     def test_codmunity_window_picker_skips_helpers(self):
         w=self.window
         self.assertEqual(w._pick_codmunity_window([(2,16,16),(3,16,16),(1,1920,1023)]),1)
@@ -1398,7 +1539,8 @@ class UITests(unittest.TestCase):
         labels=[b.text() for b in page.findChildren(QPushButton)]
         self.assertIn('Log into Meta AI',labels)
         self.assertTrue(all('Open Tracker Chrome' not in text and 'Embed' not in text for text in labels))
-        self.assertIsInstance(self.window.auto_core,app.MissionCore)
+        self.assertFalse(hasattr(self.window,'auto_core'))
+        self.assertIsNotNone(self.window.browser_surface)
         found=True
         self.assertTrue(found)
 
@@ -1605,4 +1747,62 @@ class UITests(unittest.TestCase):
         w._boot_open_codmunity()
         self.assertEqual(called,[])
         self.assertIsNone(w.codmunity_process)
+    def test_second_poster_submit_queues_behind_active_job(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        mid,_=w.store.add({'matchId':'queue-second-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w._inapp_poster_active='job-a-running'
+        try:
+            launched=w._start_poster_automation(mid,app.E.DATA,[],'prompt')
+        finally:
+            pass
+        self.assertTrue(launched)
+        self.assertEqual(w._inapp_poster_active,'job-a-running')
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+        self.assertIn('queued',w.job_status.text().lower())
+        self.addCleanup(setattr,w,'_inapp_poster_active',None)
+    def test_sweep_resets_only_orphaned_submitting_jobs(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        stale,_=w.store.add({'matchId':'stale-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(stale,gen_state='submitting')
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-3600,stale))
+        fresh,_=w.store.add({'matchId':'fresh-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(fresh,gen_state='submitting')
+        active,_=w.store.add({'matchId':'active-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(active,gen_state='submitting')
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-3600,active))
+        w._inapp_poster_active=active
+        try:n=w._sweep_stale_poster_jobs()
+        finally:w._inapp_poster_active=None
+        self.assertEqual(n,1)
+        row=w.store.get(stale);self.assertEqual(row['gen_state'],'idle');self.assertTrue(row['error'])
+        self.assertEqual(w.store.get(fresh)['gen_state'],'submitting')
+        self.assertEqual(w.store.get(active)['gen_state'],'submitting')
+    def test_finish_starts_queued_job_when_full_auto_off(self):
+        import tempfile as _tf
+        from PIL import Image
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        done,_=w.store.add({'matchId':'drained-done-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(done,players=json.dumps([]))
+        waiting,_=w.store.add({'matchId':'drained-wait-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(waiting,players=json.dumps([]),gen_state='queued')
+        saved=app.E.DATA/('drained-'+uuid.uuid4().hex+'.png');Image.new('RGB',(640,360),'navy').save(saved)
+        w.notice=lambda _:None
+        w.full_auto.blockSignals(True);w.full_auto.setChecked(False);w.full_auto.blockSignals(False)
+        calls=[]
+        def fake_launch(mid,*args,**kwargs):calls.append(mid);w._inapp_poster_active=mid;return True
+        w._prepare_and_launch=fake_launch
+        w._inapp_poster_active=done
+        try:w._finish_inapp_poster(done,str(saved))
+        finally:w._inapp_poster_active=None
+        self.assertEqual(calls,[waiting])
+    def test_tracker_browser_has_no_hidden_progress_widget(self):
+        w=self.window
+        self.assertFalse(hasattr(w,'auto_core'))
 if __name__=='__main__':unittest.main()

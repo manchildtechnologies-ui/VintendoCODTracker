@@ -1805,4 +1805,63 @@ class UITests(unittest.TestCase):
     def test_tracker_browser_has_no_hidden_progress_widget(self):
         w=self.window
         self.assertFalse(hasattr(w,'auto_core'))
+    def test_poster_job_returns_ok_and_fail_dicts(self):
+        import tempfile as _tf
+        from unittest.mock import patch
+        from pathlib import Path
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        w._record_auto_browser=lambda *args:None
+        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+        class FakeCtx:
+            def new_page(self):return object()
+            def close(self):pass
+        class FakeMgr:
+            def __enter__(self):return None
+            def __exit__(self,*args):return False
+        class FakeDriver:
+            def __init__(self,*args):pass
+            def new_job_page(self):return object()
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return saved
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
+            ok=w._run_poster_job('job-ok',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
+        self.assertEqual(ok,{'ok':True,'path':str(saved)})
+        class BoomDriver(FakeDriver):
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):
+                raise app.meta_automation.MetaAutomationError('generation','boom')
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',BoomDriver):
+            bad=w._run_poster_job('job-bad',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
+        self.assertEqual(bad,{'ok':False,'step':'generation','detail':'boom'})
+    def test_deliver_poster_result_routes_ok_fail_and_malformed(self):
+        w=self.window
+        calls=[]
+        w._finish_inapp_poster=lambda mid,path:calls.append(('finish',mid,path))
+        w._fail_inapp_poster=lambda mid,step,detail:calls.append(('fail',mid,step,detail))
+        w._deliver_poster_result('m1',{'ok':True,'path':'p.png'})
+        w._deliver_poster_result('m2',{'ok':False,'step':'generation','detail':'boom'})
+        w._deliver_poster_result('m3',['x'])
+        self.assertEqual(calls[0],('finish','m1','p.png'))
+        self.assertEqual(calls[1],('fail','m2','generation','boom'))
+        self.assertEqual(calls[2][0],'fail');self.assertEqual(calls[2][1],'m3')
+    def test_start_poster_automation_hands_off_through_pool(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        mid,_=w.store.add({'matchId':'handoff-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        captured={}
+        def fake_async(fn,done=None,failed=None):
+            captured['fn']=fn;captured['done']=done
+        w.async_task=fake_async
+        w._poster_manual=False
+        launched=w._start_poster_automation(mid,str(_tmpdir),[],'prompt')
+        self.assertTrue(launched)
+        self.assertIn('fn',captured)
+        finished=[]
+        w._finish_inapp_poster=lambda m,p:finished.append((m,p))
+        w._run_poster_job=lambda *args:({'ok':True,'path':'routed.png'})
+        captured['done']({'ok':True,'path':'routed.png'})
+        self.assertEqual(finished,[(mid,'routed.png')])
+        self.addCleanup(setattr,w,'_inapp_poster_active',None)
 if __name__=='__main__':unittest.main()

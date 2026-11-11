@@ -3717,9 +3717,9 @@ class Window(QMainWindow):
         except Exception:pass
         try:self.generate_poster_button.setEnabled(False)
         except (AttributeError,RuntimeError):pass
-        thread=threading.Thread(target=self._run_inapp_poster,args=(job_id,sync_playwright,folder,list(filenames or []),prompt_text),daemon=True);thread.start()
+        self.async_task(lambda:self._run_poster_job(job_id,sync_playwright,folder,list(filenames or []),prompt_text),lambda result:self._deliver_poster_result(job_id,result))
         return True
-    def _run_inapp_poster(self,job_id,playwright_factory,folder,filenames,prompt_text):
+    def _run_poster_job(self,job_id,playwright_factory,folder,filenames,prompt_text):
         try:
             known_windows=set()
             try:known_windows=set(self.find_tracker_chrome_windows())
@@ -3731,18 +3731,27 @@ class Window(QMainWindow):
                 try:
                     base=Path(folder)
                     photos=[str(base/name) for name in filenames]
-                    self._record_auto_browser(known_windows)
+                    try:self._record_auto_browser(known_windows)
+                    except Exception:pass
                     saved=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'),on_stage=self._driver_stage)
                 finally:
                     try:page.close()
                     except Exception:pass
                     try:context.close()
                     except Exception:pass
+                return {'ok':True,'path':str(saved)}
         except Exception as exc:
-            detail=str(getattr(exc,'detail',None) or exc)
-            step=str(getattr(exc,'step','error'))
-            QTimer.singleShot(0,lambda:self._fail_inapp_poster(job_id,step,detail));return
-        QTimer.singleShot(0,lambda:self._finish_inapp_poster(job_id,str(saved)))
+            return {'ok':False,'step':str(getattr(exc,'step','error')),'detail':str(getattr(exc,'detail',None) or exc)}
+    def _deliver_poster_result(self,job_id,result):
+        try:
+            if isinstance(result,dict) and result.get('ok') is True and result.get('path'):
+                self._finish_inapp_poster(job_id,str(result['path']));return
+            if isinstance(result,dict) and result.get('ok') is False:
+                self._fail_inapp_poster(job_id,str(result.get('step') or 'automation'),str(result.get('detail') or 'Poster job failed'));return
+            self._fail_inapp_poster(job_id,'automation','Poster job returned an unreadable result')
+        except Exception as exc:
+            try:self.log('Poster result dispatch failed for '+str(job_id)+': '+str(exc)[:200])
+            except Exception:pass
     def _finish_inapp_poster(self,job_id,saved):
         self._inapp_poster_active=None
         try:self.generate_poster_button.setEnabled(True)

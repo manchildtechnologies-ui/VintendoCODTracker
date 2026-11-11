@@ -63,6 +63,15 @@ class FakeLocator:
 
     def click(self, timeout=0):
         self.page.clicks.append(self.selector)
+        if self.selector in meta_automation.SELECTORS['generate']:
+            self.page._generated()
+
+    def hover(self, timeout=0):
+        self.page.hovers.append(self.selector)
+        reveal = self.page.revealable
+        if reveal is None:
+            reveal = set(meta_automation.SELECTORS['download'])
+        self.page.missing.difference_update(reveal)
 
     def fill(self, text):
         self.page.filled[self.selector] = text
@@ -89,6 +98,9 @@ class FakePage:
         self.images = []
         self.waits = 0
         self.wait_limit = None
+        self.hovers = []
+        self.revealable = None
+        self.result_image = None
 
     def goto(self, url, wait_until=''):
         self.navigated.append(url)
@@ -97,6 +109,11 @@ class FakePage:
         self.waits += 1
         if self.wait_limit is not None and self.waits > self.wait_limit:
             raise RuntimeError('tired')
+
+    def _generated(self):
+        if self.result_image is not None:
+            self.images.append(self.result_image)
+            self.result_image = None
 
     def locator(self, selector):
         if selector in self.broken:
@@ -112,8 +129,11 @@ class FakePage:
 
 
 class FakeShot:
-    def __init__(self, payload=PNG_BYTES):
+    def __init__(self, payload=PNG_BYTES, src=None, width=800, height=600):
         self.payload = payload
+        self.page = None
+        self._src = src
+        self._box = {'width': width, 'height': height}
 
     def is_visible(self, timeout=0):
         return True
@@ -121,14 +141,24 @@ class FakeShot:
     def locator(self, _selector):
         return FakeEmpty()
 
-    def get_attribute(self, _name):
+    def get_attribute(self, name):
+        if name == 'src':
+            return self._src
         return None
 
     def bounding_box(self):
-        return {'width': 800, 'height': 600}
+        return dict(self._box)
 
     def click(self, timeout=0):
         pass
+
+    def hover(self, timeout=0):
+        if self.page is not None:
+            self.page.hovers.append('element')
+            reveal = self.page.revealable
+            if reveal is None:
+                reveal = set(meta_automation.SELECTORS['download'])
+            self.page.missing.difference_update(reveal)
 
     def screenshot(self, timeout=0):
         return self.payload
@@ -205,6 +235,7 @@ class PosterAutomationTests(unittest.TestCase):
     def test_image_flow_viewer_fallback_reports_screenshot(self):
         page = FakePage()
         page.missing.update(meta_automation.SELECTORS['download'])
+        page.revealable = set()
         page.images.append(FakeShot())
         page.wait_limit = 400
         photos = self.photos(2)
@@ -264,5 +295,48 @@ class PosterAutomationTests(unittest.TestCase):
         self.assertFalse(meta_automation.valid_image_bytes(b'plain text' + b'x' * 3000))
 
 
+    def test_image_flow_hovers_to_reveal_download(self):
+        page = FakePage()
+        page.missing.update(meta_automation.SELECTORS['download'])
+        page.images.append(FakeShot())
+        page.images[-1].page = page
+        page.result_image = FakeShot()
+        page.result_image.page = page
+        page.wait_limit = 400
+        with tempfile.TemporaryDirectory() as out:
+            target, via = make_driver(self.root).submit_text_to_image(
+                page, self.photos(1), 'prompt', out)
+            self.assertEqual(via, 'download')
+            self.assertTrue(page.hovers)
+            self.assertEqual(Path(target).read_bytes(), PNG_BYTES)
+    def test_image_flow_fetches_direct_image_url(self):
+        from unittest.mock import patch
+        page = FakePage()
+        page.missing.update(meta_automation.SELECTORS['download'])
+        page.revealable = set()
+        page.images.append(FakeShot(width=100, height=100))
+        page.images[-1].page = page
+        page.result_image = FakeShot(src='https://cdn.meta.ai/pic.png')
+        page.result_image.page = page
+        page.wait_limit = 400
+        fetched = []
+        class FakeResp:
+            def read(self, _n=-1):
+                return PNG_BYTES
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+        def fake_urlopen(request, timeout=0):
+            fetched.append(getattr(request, 'full_url', str(request)))
+            return FakeResp()
+        with tempfile.TemporaryDirectory() as out:
+            with patch('meta_automation.urllib.request.urlopen', side_effect=fake_urlopen):
+                target, via = make_driver(self.root).submit_text_to_image(
+                    page, self.photos(1), 'prompt', out)
+            self.assertEqual(via, 'download')
+            self.assertTrue(fetched)
+            self.assertTrue(any('cdn.meta.ai' in url for url in fetched))
+            self.assertEqual(Path(target).read_bytes(), PNG_BYTES)
 if __name__ == '__main__':
     unittest.main()

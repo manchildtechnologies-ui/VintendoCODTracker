@@ -12,6 +12,7 @@ the job so the next calibration run knows exactly what moved.
 
 import re
 import time
+import urllib.request
 from pathlib import Path
 
 META_HOME = 'https://www.meta.ai/'
@@ -186,14 +187,23 @@ class MetaDriver:
         return download
 
     def _image_flow(self, page, generate, on_stage, timeout_s, shot_dir):
+        # Snapshot the page before submission. Taking this after clicking Generate
+        # marks Meta's newly-created result as old and prevents the viewer fallback
+        # from selecting it when Meta does not emit a browser download event.
+        known_srcs = self._known_image_srcs(page)
         try:
             generate.click(timeout=8000)
         except Exception as exc:
             raise MetaAutomationError('submit', f'Could not start generation. ({exc})')
-        known_srcs = self._known_image_srcs(page)
         tried = set()
         deadline = time.time() + min(timeout_s, 600)
         while time.time() < deadline:
+            try:
+                img, _key = self._largest_image(page, known_srcs, tried)
+                if img is not None:
+                    self._hover(img)
+            except Exception:
+                pass
             button = self._first_visible(page, SELECTORS['download'], timeout=60000)
             if button is not None:
                 self._stage(on_stage, 'collecting')
@@ -203,9 +213,70 @@ class MetaDriver:
                     return download_info.value
                 except Exception:
                     pass
+            fetched = self._fetch_image_url(page, known_srcs, tried, shot_dir)
+            if fetched is not None:
+                return fetched
             got = self._acquire_viewer_shot(page, on_stage, known_srcs, tried, shot_dir)
             if got is not None:
                 return ('screenshot', got)
+        return None
+
+    @staticmethod
+    def _hover(locator):
+        try:
+            locator.hover(timeout=5000)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _download_url(src):
+        request = urllib.request.Request(src, headers={'User-Agent': 'Mozilla/5.0', 'Referer': META_HOME})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read(12 << 20)
+
+    def _fetch_image_url(self, page, exclude, tried, shot_dir):
+        try:
+            images = page.locator('img').all()
+        except Exception:
+            return None
+        exclude = exclude or set()
+        if tried is None:
+            tried = set()
+        candidates = []
+        for image in images or []:
+            try:
+                src = image.get_attribute('src')
+            except Exception:
+                continue
+            if not src or not src.startswith(('http://', 'https://')):
+                continue
+            if src in exclude or src in tried:
+                continue
+            try:
+                if not image.is_visible():
+                    continue
+                box = image.bounding_box()
+                area = box['width'] * box['height'] if box else 0
+            except Exception:
+                area = 0
+            candidates.append((area, src))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        for _area, src in candidates[:4]:
+            tried.add(src)
+            try:
+                data = self._download_url(src)
+            except Exception:
+                continue
+            if not valid_image_bytes(data):
+                continue
+            try:
+                folder = Path(shot_dir or '.')
+                folder.mkdir(parents=True, exist_ok=True)
+                target = folder / ('meta-direct-%d.png' % int(time.time() * 1000))
+                target.write_bytes(data)
+                return target
+            except OSError:
+                return None
         return None
 
     @staticmethod
@@ -280,6 +351,7 @@ class MetaDriver:
             page.wait_for_timeout(1500)
         except Exception:
             pass
+        self._hover(img)
         button = self._first_visible(page, SELECTORS['download'], timeout=20000)
         if button is not None:
             try:

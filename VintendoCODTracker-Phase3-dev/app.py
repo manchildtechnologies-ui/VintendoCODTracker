@@ -633,11 +633,14 @@ class Window(QMainWindow):
             preview_note=QLabel('Preview uses a copy of your settings, match history, and roster photos. It will not change live tracker data. Tracking and Discord posting are disabled in this window.')
             preview_note.setWordWrap(True);preview_note.setStyleSheet('padding:9px 12px;background:#1b2330;border-left:3px solid #ed2938;color:#cbd3df;');codmunity_layout.addWidget(preview_note)
         self.codmunity_surface=QFrame();self.codmunity_surface.setObjectName('dashboardPanel');self.codmunity_surface.setMinimumSize(800,550);codmunity_layout.addWidget(self.codmunity_surface,1);self.app_tabs.addTab(self.codmunity_page,'CODMunity')
+        self.codmunity_loading=QLabel(self.codmunity_surface);_load_pix=QPixmap(str(E.ROOT/'assets'/'loading.png'))
+        if not _load_pix.isNull():self.codmunity_loading.setPixmap(_load_pix.scaled(560,200,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        _load_layout=QVBoxLayout(self.codmunity_surface);_load_layout.addStretch(1);_load_layout.addWidget(self.codmunity_loading,0,Qt.AlignHCenter);_load_layout.addStretch(1)
         self.codmunity_poll=QTimer(self);self.codmunity_poll.setInterval(500);self.codmunity_poll.timeout.connect(self.try_attach_codmunity)
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
         self.app_tabs.currentChanged.connect(self.app_tab_changed)
         self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);self.app_tabs.setCornerWidget(self.exit_button,Qt.TopRightCorner)
-        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs();QTimer.singleShot(4000,self._boot_refresh_distributions)
+        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs();QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity)
         if self.tab_prototype:
             for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
@@ -669,6 +672,13 @@ class Window(QMainWindow):
         try:name=self.nav.item(row).data(Qt.UserRole)
         except (AttributeError,RuntimeError):return
         if name=='Tracker Browser':self.browser_host.focus_embedded()
+        if name=='AI Studio':
+            try:
+                current=getattr(self,'active_id',None)
+                if self.store.get(current) if current else None:return
+                mid=self.studio_match_picker.currentData() if hasattr(self,'studio_match_picker') else None
+                if mid:self.load_studio(mid)
+            except (AttributeError,RuntimeError):pass
     def app_tab_changed(self,index):
         if self.app_tabs.widget(index) is self.codmunity_page:
             self.start_or_attach_codmunity()
@@ -676,6 +686,19 @@ class Window(QMainWindow):
             if not self.tab_prototype and not getattr(self,'poll_busy',False):
                 self.codmunity_status.setText('Pulling CODMunity matches into the tracker…')
                 self.poll_records(source='codmunity-tab')
+            if not getattr(self,'codmunity_hwnd',None) and hasattr(self,'codmunity_loading'):
+                self.codmunity_loading.show();self.codmunity_loading.raise_()
+    def _boot_open_codmunity(self):
+        if getattr(self,'tab_prototype',False):return
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        if is_smoke_run():return
+        try:self.start_or_attach_codmunity()
+        except Exception as exc:self.log('CODMunity auto-open skipped: '+str(exc))
+    def _close_codmunity_process(self):
+        try:
+            proc=getattr(self,'codmunity_process',None)
+            if proc is not None and proc.poll() is None:proc.terminate()
+        except Exception:pass
     def codmunity_executable(self):
         override=os.environ.get('CODMUNITY_DESKTOP_EXE','').strip()
         candidates=[Path(override)] if override else []
@@ -716,10 +739,12 @@ class Window(QMainWindow):
         if hwnd:self.codmunity_poll.stop();self.attach_codmunity(hwnd)
         elif self.codmunity_process and self.codmunity_process.poll() is not None:
             self.codmunity_poll.stop();self.codmunity_status.setText(f'CODMunity Desktop exited with code {self.codmunity_process.returncode}.')
+            if hasattr(self,'codmunity_loading'):self.codmunity_loading.show();self.codmunity_loading.raise_()
     def attach_codmunity(self,hwnd):
         try:
             self.codmunity_surface.winId();self.codmunity_host.attach(hwnd,int(self.codmunity_surface.winId()));self.codmunity_hwnd=hwnd
             self.codmunity_host.resize(self.codmunity_surface.width(),self.codmunity_surface.height());self.codmunity_status.setText('CODMunity Desktop is running in this tab.')
+            if hasattr(self,'codmunity_loading'):self.codmunity_loading.hide()
         except Exception as exc:self.codmunity_status.setText('Window embedding failed: '+str(exc));self.log('CODMunity window embedding failed: '+str(exc))
     def resizeEvent(self,event):
         super().resizeEvent(event)
@@ -794,11 +819,11 @@ class Window(QMainWindow):
         center=QFrame();center.setObjectName('dashboardPanel');center_layout=QVBoxLayout(center);center_layout.setContentsMargins(13,12,13,13);center_layout.setSpacing(9)
         center_header=QHBoxLayout();center_title=QLabel('\u25b0  MATCH CENTER');center_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');center_header.addWidget(center_title);center_header.addStretch();self.center_count=QLabel('0 records');self.center_count.setStyleSheet('color:#aab4c3');center_header.addWidget(self.center_count);center_layout.addLayout(center_header)
         self.center_tabs=QTabWidget()
-        self.center_tables={};self.center_rows={'records':[],'posts':[],'review':[]}
-        for view,headers in (('records',['MATCH ID','RESULT','PLACE','MODE','KILLS','ELIMS','DAMAGE','DEATHS','ASSISTS','DATE / TIME','STATUS','ATTEMPTS']),('posts',['MATCH ID','RESULT','MODE','KILLS','DAMAGE','DATE / TIME']),('review',['MATCH ID','RESULT','MODE','STATUS','ATTEMPTS','DATE / TIME'])):
+        self.center_tables={};self.center_rows={'records':[],'review':[]}
+        for view,label,headers in (('records','RECORDS',['MATCH ID','RESULT','PLACE','MODE','KILLS','ELIMS','DAMAGE','DEATHS','ASSISTS','DATE / TIME','STATUS','ATTEMPTS']),('review','NEEDS ATTENTION',['MATCH ID','RESULT','MODE','STATUS','ATTEMPTS','DATE / TIME'])):
             table=QTableWidget(0,len(headers));table.setHorizontalHeaderLabels(headers);table.setEditTriggers(QTableWidget.NoEditTriggers);table.setSelectionBehavior(QTableWidget.SelectRows);table.setSelectionMode(QTableWidget.SingleSelection);table.setAlternatingRowColors(True);table.verticalHeader().hide();table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents);table.setMinimumHeight(260)
             table.cellDoubleClicked.connect(lambda _row,_col,view=view:self.open_center_match(view,_row,_col))
-            self.center_tabs.addTab(table,view.upper());self.center_tables[view]=table
+            self.center_tabs.addTab(table,label);self.center_tables[view]=table
         self.center_tabs.currentChanged.connect(lambda _index:self.refresh_center_count())
         center_layout.addWidget(self.center_tabs,1);body.addWidget(center,0,0,2,2)
 
@@ -929,7 +954,7 @@ class Window(QMainWindow):
         self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
         self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460);self.choose_result_row=self.row(l,QLabel('Choose Match Result'),self.result_override);self.choose_result_row.addStretch(1)
         split=QSplitter();self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(400,180);self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');split.addWidget(self.capture_preview);split.addWidget(self.ocr_text);l.addWidget(split,1)
-        self.row(l,self.button('Paste Screenshot Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove',self.remove_ocr_row))
+        self.row(l,self.button('Paste Screenshot Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove',self.remove_ocr_row),self.button('Keep matched only',self.keep_matched_ocr_rows))
         self.ocr_stat_keys=['kills','damage','score','assists','deaths'];self.ocr_table=QTableWidget(0,1+len(self.ocr_stat_keys));self.ocr_table.setHorizontalHeaderLabels(['Player','Kills','Damage','Score','Assists','Deaths']);self.ocr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);l.addWidget(self.ocr_table,1)
         self.verified=QCheckBox('I checked these names and numbers against the captured scoreboard');self.verified.setChecked(True);self.verified.hide()
         self.row(l,self.button('Save info',self.save_capture,True),self.button('Post Screenshot as is to Discord',self.post_capture_only))
@@ -2883,7 +2908,16 @@ class Window(QMainWindow):
             if hotkey:self.hotkey_status.setText('Capture failed; try Capture Screen Shot.');self._show_capture_review()
         self.async_task(work,done,failed)
     def parse_ocr(self):
-        rows=E.parse_scoreboard(self.ocr_text.toPlainText());keys=list(dict.fromkeys(key for row in rows for key in row.get('stats',{})))
+        rows=E.parse_scoreboard(self.ocr_text.toPlainText())
+        roster=self.store.roster()
+        self.ocr_roster_names=set()
+        for row in rows:
+            try:player,_=E.match_player(str(row.get('name','')),roster)
+            except Exception:player=None
+            if player is not None:
+                row['roster_match']=True;self.ocr_roster_names.add(str(row.get('name','')))
+        rows.sort(key=lambda row:not row.get('roster_match',False))
+        keys=list(dict.fromkeys(key for row in rows for key in row.get('stats',{})))
         self.set_ocr_columns(keys or ['kills','eliminations','deaths','assists','damage','score','placement','redeploys'])
         self.ocr_table.setRowCount(0)
         for row in rows:self.add_ocr_row(row=row)
@@ -2895,11 +2929,25 @@ class Window(QMainWindow):
     def add_ocr_row(self,checked=False,row=None):
         index=self.ocr_table.rowCount();self.ocr_table.insertRow(index);row=row or {'name':'','stats':{}}
         self.ocr_table.setItem(index,0,QTableWidgetItem(str(row.get('name',''))))
+        name_item=self.ocr_table.item(index,0)
+        if row.get('roster_match') and name_item is not None:
+            name_item.setBackground(QBrush(QColor('#1d3a2a')))
+            name_item.setToolTip('On the player roster')
         for col,key in enumerate(self.ocr_stat_keys,1):
             value=row.get('stats',{}).get(key,'')
             self.ocr_table.setItem(index,col,QTableWidgetItem('' if value is None else str(value)))
     def remove_ocr_row(self):
         if self.ocr_table.currentRow()>=0:self.ocr_table.removeRow(self.ocr_table.currentRow())
+    def keep_matched_ocr_rows(self):
+        roster=self.store.roster();kept=0
+        for r in range(self.ocr_table.rowCount()-1,-1,-1):
+            item=self.ocr_table.item(r,0);name=item.text().strip() if item else ''
+            try:player,_=E.match_player(name,roster)
+            except Exception:player=None
+            if player is not None:kept+=1
+            else:self.ocr_table.removeRow(r)
+        if kept:self.log(f'Kept {kept} roster-matched row(s); removed the rest.')
+        else:self.notice('No rows match the player roster.')
     def verified_players(self):
         rows=[]
         for r in range(self.ocr_table.rowCount()):
@@ -3350,7 +3398,7 @@ class Window(QMainWindow):
 
     def refresh_match_center(self,rows):
         if not hasattr(self,'center_tables'):return
-        self.center_rows={'records':list(rows),'posts':[job for job in rows if job['status']=='delivered'],'review':[job for job in rows if job['status'] in self.CENTER_REVIEW_STATUSES]}
+        self.center_rows={'records':list(rows),'review':[job for job in rows if job['status'] in self.CENTER_REVIEW_STATUSES]}
         for view,table in self.center_tables.items():
             view_rows=self.center_rows[view];table.setRowCount(len(view_rows))
             for row,job in enumerate(view_rows):
@@ -3363,8 +3411,6 @@ class Window(QMainWindow):
                     place=match.get('placement')
                     if place is None:place=stats.get('placement')
                     values=[job['id'][-12:],result,self._display_value(place),mode,self._display_value(stats.get('kills')),self._display_value(stats.get('eliminations')),self._display_value(stats.get('damage')),self._display_value(stats.get('deaths')),self._display_value(stats.get('assists')),played,str(job.get('status','\u2014')).replace('_',' ').upper(),str(job.get('attempts',0))]
-                elif view=='posts':
-                    values=[job['id'][-12:],result,mode,self._display_value(stats.get('kills')),self._display_value(stats.get('damage')),played]
                 else:
                     values=[job['id'][-12:],result,mode,str(job.get('status','\u2014')).replace('_',' ').upper(),str(job.get('attempts',0)),played]
                 for col,value in enumerate(values):
@@ -3377,10 +3423,10 @@ class Window(QMainWindow):
         self.refresh_center_count()
     def refresh_center_count(self):
         if not hasattr(self,'center_tabs') or not hasattr(self,'center_count'):return
-        views=('records','posts','review')
+        views=('records','review')
         try:index=self.center_tabs.currentIndex()
         except (AttributeError,RuntimeError):index=0
-        view=views[index] if 0<=index<3 else 'records'
+        view=views[index] if 0<=index<2 else 'records'
         rows=self.center_rows.get(view,[]) if hasattr(self,'center_rows') else []
         total=len(self.center_rows.get('records',[])) if hasattr(self,'center_rows') else 0
         self.center_count.setText(f"{len(rows)} of {total} records")
@@ -3790,7 +3836,7 @@ class Window(QMainWindow):
             try:app_instance.removeEventFilter(self.cinematic_fullscreen_filter)
             except Exception:pass
         self.closing=True;self.stop();self.timer.stop();self.unregister_global_hotkeys()
-        self.codmunity_poll.stop();self.codmunity_host.detach()
+        self.codmunity_poll.stop();self.codmunity_host.detach();self._close_codmunity_process()
         try:self.browser_host.detach()
         except Exception:pass
         if self.browser:self.browser.close()

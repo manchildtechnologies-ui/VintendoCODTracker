@@ -398,14 +398,13 @@ class UITests(unittest.TestCase):
         mid_post,_=w.store.add({'matchId':'post-'+tag,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-02T08:00:00Z','result':'win','stats':{'kills':5,'eliminations':5,'damage':2500,'deaths':1,'assists':0}},'delivered')
         mid_rev,_=w.store.add({'matchId':'rev-'+tag,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-03T08:00:00Z','result':'loss','stats':{'kills':2,'eliminations':2,'damage':900,'deaths':4,'assists':1}},'needs_review')
         w.refresh_history()
-        posts=w.center_rows['posts'];review=w.center_rows['review']
-        self.assertTrue(any(j['id']==mid_post for j in posts))
+        self.assertNotIn('posts',w.center_rows)
+        self.assertEqual(w.center_tabs.tabText(1),'NEEDS ATTENTION')
+        review=w.center_rows['review']
+        self.assertTrue(any(j['id']==mid_post for j in w.center_rows['records']))
         self.assertTrue(any(j['id']==mid_rev for j in review))
-        self.assertEqual(w.center_tables['posts'].rowCount(),len(posts))
         self.assertEqual(w.center_tables['review'].rowCount(),len(review))
         w.center_tabs.setCurrentIndex(1)
-        self.assertEqual(w.center_count.text(),f"{len(posts)} of {len(w.center_rows['records'])} records")
-        w.center_tabs.setCurrentIndex(2)
         self.assertEqual(w.center_count.text(),f"{len(review)} of {len(w.center_rows['records'])} records")
         w.center_tabs.setCurrentIndex(0)
         self.assertEqual(w.center_count.text(),f"{len(w.center_rows['records'])} of {len(w.center_rows['records'])} records")
@@ -1522,4 +1521,75 @@ class UITests(unittest.TestCase):
         self.assertIsNone(self._button_by_text('Select Area To Capture Score'))
         self.assertFalse(hasattr(self.window,'pick_region'))
         self.assertFalse(hasattr(self.window,'roi_label'))
+    def test_studio_tab_autoloads_latest_match(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        mid,_=w.store.add({'matchId':'studio-auto-1','game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
+        w.store.update(mid,players=json.dumps([{'name':'Vintendo','verified':True,'stats':{'kills':5}}]))
+        rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
+        home=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='Dashboard']
+        self.assertTrue(rows);self.assertTrue(home)
+        w.refresh_history()
+        w.active_id=None
+        w.nav.setCurrentRow(home[0]);w.nav.setCurrentRow(rows[0])
+        self.assertEqual(w.active_id,mid)
+        self.assertIn(mid,w.studio_match.text())
+    def test_studio_tab_keeps_loaded_job(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        old,_=w.store.add({'matchId':'studio-old-1','game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
+        new,_=w.store.add({'matchId':'studio-new-1','game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:05:00Z','result':'win'})
+        rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
+        home=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='Dashboard']
+        self.assertTrue(rows);self.assertTrue(home)
+        w.refresh_history()
+        w.active_id=old
+        w.nav.setCurrentRow(home[0]);w.nav.setCurrentRow(rows[0])
+        self.assertEqual(w.active_id,old)
+    def test_ocr_highlights_roster_matches_and_keeps_only_matched(self):
+        from PySide6.QtCore import Qt
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.store.save_player({'id':'me','name':'Vintendopower','display_name':'Vintendopower','aliases':[],'photo':'','enabled':True})
+        w.ocr_text.setPlainText('PLAYER  KILLS  DAMAGE\nJunkGuy  5  100\nVintendopower  12  3400')
+        w.parse_ocr()
+        names=[w.ocr_table.item(r,0).text() for r in range(w.ocr_table.rowCount())]
+        self.assertEqual(names,['Vintendopower','JunkGuy'])
+        self.assertEqual(w.ocr_table.item(0,0).background().color().name(),'#1d3a2a')
+        self.assertEqual(w.ocr_table.item(1,0).background().style(),Qt.NoBrush)
+        w.keep_matched_ocr_rows()
+        self.assertEqual(w.ocr_table.rowCount(),1)
+        self.assertEqual(w.ocr_table.item(0,0).text(),'Vintendopower')
+    def test_codmunity_loading_graphic_shows_until_attached(self):
+        w=self.window
+        self.assertFalse(w.codmunity_loading.pixmap().isNull())
+        self.assertFalse(w.codmunity_loading.isHidden())
+        w.codmunity_hwnd=None
+        w.start_or_attach_codmunity=lambda:None
+        idx=w.app_tabs.indexOf(w.codmunity_page)
+        w.app_tab_changed(idx)
+        self.assertFalse(w.codmunity_loading.isHidden())
+    def test_close_kills_only_launched_codmunity(self):
+        w=self.window
+        class Proc:
+            def __init__(self,code):self.code=code;self.killed=0
+            def poll(self):return self.code
+            def terminate(self):self.killed+=1
+        live=Proc(None);w.codmunity_process=live;w._close_codmunity_process()
+        self.assertEqual(live.killed,1)
+        gone=Proc(0);w.codmunity_process=gone;w._close_codmunity_process()
+        self.assertEqual(gone.killed,0)
+        w.codmunity_process=None;w._close_codmunity_process()
+    def test_boot_open_skips_during_tests(self):
+        w=self.window
+        called=[];w.start_or_attach_codmunity=lambda:called.append(1)
+        w._boot_open_codmunity()
+        self.assertEqual(called,[])
+        self.assertIsNone(w.codmunity_process)
 if __name__=='__main__':unittest.main()

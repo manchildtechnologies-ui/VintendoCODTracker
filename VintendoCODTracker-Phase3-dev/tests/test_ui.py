@@ -1823,10 +1823,10 @@ class UITests(unittest.TestCase):
         class FakeDriver:
             def __init__(self,*args):pass
             def new_job_page(self):return object()
-            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return saved
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
         with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
             ok=w._run_poster_job('job-ok',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
-        self.assertEqual(ok,{'ok':True,'path':str(saved)})
+        self.assertEqual(ok,{'ok':True,'path':str(saved),'via':'download'})
         class BoomDriver(FakeDriver):
             def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):
                 raise app.meta_automation.MetaAutomationError('generation','boom')
@@ -1836,12 +1836,12 @@ class UITests(unittest.TestCase):
     def test_deliver_poster_result_routes_ok_fail_and_malformed(self):
         w=self.window
         calls=[]
-        w._finish_inapp_poster=lambda mid,path:calls.append(('finish',mid,path))
+        w._finish_inapp_poster=lambda mid,path,via='download':calls.append(('finish',mid,path,via))
         w._fail_inapp_poster=lambda mid,step,detail:calls.append(('fail',mid,step,detail))
         w._deliver_poster_result('m1',{'ok':True,'path':'p.png'})
         w._deliver_poster_result('m2',{'ok':False,'step':'generation','detail':'boom'})
         w._deliver_poster_result('m3',['x'])
-        self.assertEqual(calls[0],('finish','m1','p.png'))
+        self.assertEqual(calls[0],('finish','m1','p.png','download'))
         self.assertEqual(calls[1],('fail','m2','generation','boom'))
         self.assertEqual(calls[2][0],'fail');self.assertEqual(calls[2][1],'m3')
     def test_start_poster_automation_hands_off_through_pool(self):
@@ -1859,9 +1859,85 @@ class UITests(unittest.TestCase):
         self.assertTrue(launched)
         self.assertIn('fn',captured)
         finished=[]
-        w._finish_inapp_poster=lambda m,p:finished.append((m,p))
+        w._finish_inapp_poster=lambda m,p,via='download':finished.append((m,p))
         w._run_poster_job=lambda *args:({'ok':True,'path':'routed.png'})
         captured['done']({'ok':True,'path':'routed.png'})
         self.assertEqual(finished,[(mid,'routed.png')])
         self.addCleanup(setattr,w,'_inapp_poster_active',None)
+    def test_screenshot_result_links_but_does_not_post(self):
+        import tempfile as _tf
+        from PIL import Image
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        w.full_auto.blockSignals(True);w.full_auto.setChecked(False);w.full_auto.blockSignals(False)
+        mid,_=w.store.add({'matchId':'held-shot-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([]))
+        saved=_tmpdir/'shot.png';Image.new('RGB',(640,360),'teal').save(saved)
+        delivered=[]
+        w.deliver=lambda m:delivered.append(m)
+        w._deliver_poster_result(mid,{'ok':True,'path':str(saved),'via':'screenshot'})
+        self.assertEqual(delivered,[])
+        row=w.store.get(mid)
+        self.assertTrue(row['artwork'].endswith('.png'))
+        self.assertEqual(row['gen_state'],'done')
+        self.assertIn('mport',w.job_status.text())
+    def test_ai_studio_matches_mockup_layout(self):
+        from PySide6.QtWidgets import QLabel, QPushButton
+        w=self.window
+        page,_layout=w.pages['AI Studio']
+        texts=[label.text() for label in page.findChildren(QLabel)]
+        for expected in ('MATCH INPUT','MATCH OPTIONS','AUTOMATION','PLAYERS IDENTIFIED FROM SCREENSHOTS','AI PREVIEW','SQUAD TOTALS'):
+            self.assertIn(expected,texts)
+        buttons=[b.text() for b in page.findChildren(QPushButton)]
+        for expected in ('Generate AI End Game Picture','APPROVE & POST','Cancel','Retry / review selected job'):
+            self.assertIn(expected,buttons)
+        steps=[label.text() for label in page.findChildren(QLabel) if label.objectName()=='stepTitle']
+        self.assertEqual(steps,['INPUT','GENERATE','REVIEW','DISCORD'])
+        for attr in ('opt_game_mode','opt_result','opt_placement','opt_style','studio_heads','art_preview','photo_assignments'):
+            self.assertTrue(hasattr(w,attr),attr)
+    def test_ai_studio_options_follow_loaded_match(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.mode.setCurrentText('Squad Night')
+        mid,_=w.store.add({'matchId':'opts-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','result':'win','placement':2})
+        w.load_studio(mid)
+        self.assertIn('Resurgence',w.opt_game_mode.text())
+        self.assertIn('Victory',w.opt_result.text())
+        self.assertIn('2nd place',w.opt_placement.text())
+    def test_record_auto_browser_embeds_fresh_window(self):
+        from unittest.mock import patch
+        w=self.window
+        attached=[]
+        class FakeHost:
+            hwnd=None
+            def attach(self,hwnd,parent):attached.append((hwnd,parent));self.hwnd=hwnd
+            def detach(self):self.hwnd=None
+            def resize(self,a,b):pass
+        w.auto_browser_host=FakeHost()
+        hwnd=int(w.winId())
+        w.find_tracker_chrome_windows=lambda:[hwnd]
+        with patch.object(app.ctypes.windll.user32,'IsWindow',return_value=True):
+            w._record_auto_browser(set())
+        self.assertEqual(w.auto_browser_hwnd,hwnd)
+        self.assertTrue(attached)
+        self.assertIn('tab',w.browser_status.text().lower())
+    def test_prepare_and_launch_shows_tracker_browser_tab(self):
+        import tempfile as _tf
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.mode.setCurrentText('Squad Night')
+        mid,_=w.store.add({'matchId':'tabswitch-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
+        photo=app.E.DATA/('fixture-tab-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+        roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+        w.notice=lambda _:None
+        with patch.object(w.store,'roster',return_value=roster):
+            w._start_poster_automation=lambda *args:True
+            w._prepare_and_launch(mid,manual=True)
+        self.assertIs(w.stack.currentWidget(),w.pages['Tracker Browser'][0])
+        self.addCleanup(w.store.update,mid,gen_state='idle',error='')
 if __name__=='__main__':unittest.main()

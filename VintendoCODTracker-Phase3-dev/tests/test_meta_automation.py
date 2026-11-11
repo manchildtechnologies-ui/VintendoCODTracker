@@ -42,7 +42,12 @@ class FakeLocator:
     def count(self):
         if self.selector == meta_automation.SELECTORS['file_inputs']:
             return len(self.page.inputs)
+        if self.selector.startswith('xpath='):
+            return 0
         return 1
+
+    def all(self):
+        return list(self.page.images)
 
     def wait_for(self, state='', timeout=0):
         if self.selector in self.page.missing:
@@ -80,14 +85,22 @@ class FakePage:
         self.download_payload = download_payload
         self.download_name = download_name
         self.navigated = []
+        self.broken = set()
+        self.images = []
+        self.waits = 0
+        self.wait_limit = None
 
     def goto(self, url, wait_until=''):
         self.navigated.append(url)
 
     def wait_for_timeout(self, _ms):
-        pass
+        self.waits += 1
+        if self.wait_limit is not None and self.waits > self.wait_limit:
+            raise RuntimeError('tired')
 
     def locator(self, selector):
+        if selector in self.broken:
+            raise RuntimeError('bad selector: ' + selector)
         return FakeLocator(self, selector)
 
     def screenshot(self, path=''):
@@ -96,6 +109,34 @@ class FakePage:
     @contextmanager
     def expect_download(self, timeout=0):
         yield FakeExpect(self)
+
+
+class FakeShot:
+    def __init__(self, payload=PNG_BYTES):
+        self.payload = payload
+
+    def is_visible(self, timeout=0):
+        return True
+
+    def locator(self, _selector):
+        return FakeEmpty()
+
+    def get_attribute(self, _name):
+        return None
+
+    def bounding_box(self):
+        return {'width': 800, 'height': 600}
+
+    def click(self, timeout=0):
+        pass
+
+    def screenshot(self, timeout=0):
+        return self.payload
+
+
+class FakeEmpty:
+    def count(self):
+        return 0
 
 
 class FakeExpect:
@@ -133,9 +174,10 @@ class PosterAutomationTests(unittest.TestCase):
         stages = []
         photos = self.photos(2)
         with tempfile.TemporaryDirectory() as out:
-            result = make_driver(self.root).submit_text_to_image(
+            target, via = make_driver(self.root).submit_text_to_image(
                 page, photos, 'Victory poster prompt', out, on_stage=lambda stage, detail=None: stages.append(stage))
-            saved = Path(result)
+            self.assertEqual(via, 'download')
+            saved = Path(target)
             self.assertTrue(saved.is_file())
             self.assertEqual(saved.suffix.lower(), '.png')
             self.assertEqual(saved.read_bytes(), PNG_BYTES)
@@ -152,6 +194,31 @@ class PosterAutomationTests(unittest.TestCase):
             make_driver(self.root).submit_text_to_image(
                 page, photos, 'prompt', out)
         self.assertEqual(page.attached, photos[:4])
+
+    def test_first_visible_skips_broken_candidate(self):
+        page = FakePage()
+        page.broken.add('role=button[name=/download/i]')
+        found = make_driver(self.root)._first_visible(page, ['role=button[name=/download/i]', 'a[download]'], timeout=1000)
+        self.assertIsNotNone(found)
+        self.assertEqual(found.selector, 'a[download]')
+
+    def test_image_flow_viewer_fallback_reports_screenshot(self):
+        page = FakePage()
+        page.missing.update(meta_automation.SELECTORS['download'])
+        page.images.append(FakeShot())
+        page.wait_limit = 400
+        photos = self.photos(2)
+        with tempfile.TemporaryDirectory() as out:
+            target, via = make_driver(self.root).submit_text_to_image(page, photos, 'prompt', out)
+            self.assertEqual(via, 'screenshot')
+            self.assertTrue(Path(target).is_file())
+            self.assertEqual(Path(target).read_bytes(), PNG_BYTES)
+
+    def test_download_selectors_cover_viewer_overlay(self):
+        sels = meta_automation.SELECTORS['download']
+        text = ' '.join(sels)
+        self.assertIn('role=button', text)
+        self.assertIn('a[download]', text)
 
     def test_submit_rejects_invalid_image_download(self):
         page = FakePage(download_payload=b'not-an-image' + b'x' * 3000)

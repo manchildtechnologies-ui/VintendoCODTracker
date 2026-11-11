@@ -77,6 +77,18 @@ class CoreTests(unittest.TestCase):
         rows=E.parse_scoreboard('Vintendo  12  3400  4500');self.assertEqual(rows[0]['stats'],{})
     def test_ocr_invalid_numbers_stay_unknown(self):
         rows=E.parse_scoreboard('PLAYER  KILLS  DAMAGE\nVintendo  I2  3400');self.assertIsNone(rows[0]['stats']['kills'])
+    def test_clan_tag_column_does_not_become_player_name(self):
+        rows=E.parse_scoreboard('LVL  NAME  SCORE  ELIMINATIONS  KILLS\nMWL   Killaone5050   8035   19   12\nMWI   DFZHNJ  7995   20   13')
+        self.assertEqual(rows[0]['name'],'Killaone5050');self.assertEqual(rows[1]['name'],'DFZHNJ')
+    def test_bracketed_tag_column_does_not_become_player_name(self):
+        rows=E.parse_scoreboard('LVL  NAME  SCORE\n[MWL]   Killaone5050   8035')
+        self.assertEqual(rows[0]['name'],'Killaone5050')
+    def test_leading_rank_number_does_not_drop_row(self):
+        rows=E.parse_scoreboard('LVL  NAME  SCORE  DAMAGE\n48.  [POOP]VinTenDoPower  19125  10206')
+        self.assertEqual(rows[0]['name'],'[POOP]VinTenDoPower')
+    def test_multiword_name_split_across_columns_keeps_first_part(self):
+        rows=E.parse_scoreboard('PLAYER  KILLS  DAMAGE\nAlpha  Bravo  8  2000')
+        self.assertEqual(rows[0]['name'],'Alpha')
     def test_mode_specific_scoreboard_columns_keep_eliminations_and_other_metrics(self):
         rows=E.parse_scoreboard('PLAYER  ELIMINATIONS  DEATHS  K/D  HEADSHOTS  SCORE\n[WZ] Alpha  8  2  4.0  3  1200\nBravo  5  4  1.25  1  900')
         self.assertEqual(rows[0]['stats'],{'eliminations':8,'deaths':2,'kd':4.0,'headshots':3,'score':1200})

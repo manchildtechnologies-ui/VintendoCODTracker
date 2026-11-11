@@ -317,6 +317,8 @@ def parse_scoreboard(text):
     headings=[]; rows=[]
     for line in lines:
         cells=re.split(r'\s{2,}|\t|\|',line)
+        while len(cells)>=3 and re.fullmatch(r'\d{1,3}\.',cells[0].strip()):
+            cells=cells[1:]
         header_stats=[_header_stat(token) for token in cells]
         if len(cells)>=2 and header_stats[0] is None and sum(field is not None for field in header_stats[1:])>=1:
             headings=[field or re.sub(r'[^a-z0-9]+','_',cells[index].casefold()).strip('_') for index,field in enumerate(header_stats[1:],1)]
@@ -324,6 +326,11 @@ def parse_scoreboard(text):
         if len(cells)<2: continue
         name=cells[0].strip()
         if not re.search(r'[A-Za-z]',name): continue
+        if (len(cells)>=3 and re.search(r'[A-Za-z]',cells[1])
+                and not re.fullmatch(r'\d+(\.\d+)?',cells[1].strip().replace(',',''))
+                and (re.fullmatch(r'\[[A-Za-z0-9]{1,5}\]',name)
+                     or (name.isupper() and re.fullmatch(r'[A-Z0-9]{2,4}',name)))):
+            name=cells[1].strip()
         nums=[]
         for cell in cells[1:]:
             cleaned=cell.strip().replace(',','')

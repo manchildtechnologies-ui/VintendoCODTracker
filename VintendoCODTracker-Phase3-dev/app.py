@@ -570,6 +570,7 @@ class Window(QMainWindow):
         self.stack=QStackedWidget();tracker_shell_layout.addWidget(self.sidebar);tracker_shell_layout.addWidget(self.stack,1)
         self.codmunity_host=WindowsWindowHost();self.codmunity_process=None;self.codmunity_hwnd=None
         self.browser_host=WindowsWindowHost();self.browser_hwnd=None
+        self.auto_browser_host=WindowsWindowHost()
         self.codmunity_page=QWidget();codmunity_layout=QVBoxLayout(self.codmunity_page);codmunity_layout.setContentsMargins(20,16,20,16);codmunity_layout.setSpacing(10)
         codmunity_header=QHBoxLayout();codmunity_title=QLabel('CODMunity Desktop');codmunity_title.setObjectName('title');codmunity_header.addWidget(codmunity_title);codmunity_header.addStretch()
         self.codmunity_status=QLabel('Select this tab to open CODMunity Desktop');self.codmunity_status.setStyleSheet('color:#99a8bc;font-weight:700;');codmunity_header.addWidget(self.codmunity_status);codmunity_layout.addLayout(codmunity_header)
@@ -619,7 +620,12 @@ class Window(QMainWindow):
     def on_nav_row_changed(self,row):
         try:name=self.nav.item(row).data(Qt.UserRole)
         except (AttributeError,RuntimeError):return
-        if name=='Tracker Browser':self.browser_host.focus_embedded()
+        if name=='Tracker Browser':
+            self.browser_host.focus_embedded()
+            try:self.auto_browser_host.focus_embedded()
+            except (AttributeError,RuntimeError):pass
+            try:self._validate_auto_browser_attach()
+            except (AttributeError,RuntimeError):pass
         if name=='AI Studio':
             try:
                 current=getattr(self,'active_id',None)
@@ -737,6 +743,11 @@ class Window(QMainWindow):
     def resizeEvent(self,event):
         super().resizeEvent(event)
         browser_page=self.pages.get('Tracker Browser',(None,None))[0] if hasattr(self,'pages') else None
+        try:
+            if (hasattr(self,'auto_browser_host') and self.auto_browser_host.hwnd and browser_page is not None
+                    and self.stack.currentWidget() is browser_page):
+                self.auto_browser_host.resize(self.browser_surface.width(),self.browser_surface.height())
+        except (AttributeError,RuntimeError):pass
         if (hasattr(self,'browser_host') and self.browser_host.hwnd and browser_page is not None
                 and self.stack.currentWidget() is browser_page and hasattr(self,'browser_surface')):
             self.browser_host.resize(self.browser_surface.width(),self.browser_surface.height())
@@ -1445,18 +1456,58 @@ class Window(QMainWindow):
         return card
     def build_studio(self):
         l=self.page('AI Studio','CODMunity + verified scoreboard → prepared Meta AI inputs → Meta AI artwork with in-scene match results → Discord.')
-        self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');l.addWidget(self.studio_match)
-        self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');l.addWidget(self.prompt,1)
-        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');l.addWidget(self.include_stats_checkbox)
-        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));l.addWidget(self.auto_post)
-        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());l.addWidget(self.full_auto)
-        self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);l.addWidget(self.generate_poster_button)
-        self.photo_assignments=QLabel('Consented reference photos are matched automatically when available.');self.photo_assignments.setWordWrap(True);l.addWidget(self.photo_assignments)
-        self.studio_heads_title=QLabel('Players Identified from ScreenShots');self.studio_heads_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');l.addWidget(self.studio_heads_title)
-        self.studio_heads=QGridLayout();self.studio_heads.setSpacing(12);l.addLayout(self.studio_heads)
-        self.art_preview=QLabel('Finished artwork preview');self.art_preview.setAlignment(Qt.AlignCenter);self.art_preview.setMinimumHeight(180);l.addWidget(self.art_preview,1)
-        self.approve_post_button=self.button('APPROVE & POST',self.post_active,True);self.row(l,self.approve_post_button)
-        self.row(l,self.button('Cancel',self.cancel_browser),self.button('Retry / review selected job',self.retry_job));self.job_status=QLabel('No active job');l.addWidget(self.job_status)
+        steps=QFrame();steps.setObjectName('codAiSteps');steps_layout=QHBoxLayout(steps);steps_layout.setContentsMargins(14,8,14,8);steps_layout.setSpacing(10)
+        for index,(icon,title,desc) in enumerate((('☰','INPUT','Match Details'),('✦','GENERATE','Create AI Artwork'),('✓','REVIEW','Approve & Post'),('◉','DISCORD','Auto Post Results'))):
+            num=QLabel(str(index+1));num.setObjectName('stepNum');num.setAlignment(Qt.AlignCenter);steps_layout.addWidget(num)
+            step_icon=QLabel(icon);step_icon.setObjectName('stepIcon');step_icon.setAlignment(Qt.AlignCenter);steps_layout.addWidget(step_icon)
+            copy=QVBoxLayout();copy.setSpacing(1)
+            step_title=QLabel(title);step_title.setObjectName('stepTitle');copy.addWidget(step_title)
+            step_desc=QLabel(desc);step_desc.setObjectName('stepDesc');copy.addWidget(step_desc)
+            steps_layout.addLayout(copy)
+            if index<3:
+                arrow=QLabel(chr(187));arrow.setObjectName('stepArrow');steps_layout.addWidget(arrow);steps_layout.addStretch(1)
+        l.addWidget(steps)
+        self.studio_match=QLabel('Select a match or save a reviewed OCR scoreboard.');self.studio_match.setWordWrap(True);l.addWidget(self.studio_match)
+        top=QHBoxLayout();top.setSpacing(10)
+        input_panel=QFrame();input_panel.setObjectName('dashboardPanel');input_layout=QVBoxLayout(input_panel);input_layout.setContentsMargins(12,10,12,10);input_layout.setSpacing(8)
+        input_title=QLabel('MATCH INPUT');input_title.setObjectName('codPanelTitle');input_layout.addWidget(input_title)
+        self.prompt=QPlainTextEdit();self.prompt.setReadOnly(True);self.prompt.setPlaceholderText('A creative 16:9 prompt is prepared automatically from the verified scoreboard.');self.prompt.setMinimumHeight(110);input_layout.addWidget(self.prompt,1)
+        top.addWidget(input_panel,5)
+        opts_panel=QFrame();opts_panel.setObjectName('dashboardPanel');opts_layout=QVBoxLayout(opts_panel);opts_layout.setContentsMargins(12,10,12,10);opts_layout.setSpacing(8)
+        opts_title=QLabel('MATCH OPTIONS');opts_title.setObjectName('codPanelTitle');opts_layout.addWidget(opts_title)
+        self.opt_game_mode=QLabel('-');self.opt_result=QLabel('-');self.opt_placement=QLabel('-');self.opt_style=QLabel('Wild / Cinematic (Random)')
+        for label_text,value_label in (('Game Mode',self.opt_game_mode),('Result',self.opt_result),('Placement',self.opt_placement),('Style / Vibe',self.opt_style)):
+            option_row=QHBoxLayout();option_row.setSpacing(8)
+            option_label=QLabel(label_text);option_label.setStyleSheet('color:#99a8bc;font-weight:700;');option_row.addWidget(option_label,1)
+            value_label.setStyleSheet('color:#f2f4f7;font-weight:700;');value_label.setWordWrap(True);option_row.addWidget(value_label,1)
+            opts_layout.addLayout(option_row)
+        opts_layout.addStretch(1)
+        top.addWidget(opts_panel,3)
+        auto_panel=QFrame();auto_panel.setObjectName('dashboardPanel');auto_layout=QVBoxLayout(auto_panel);auto_layout.setContentsMargins(12,10,12,10);auto_layout.setSpacing(8)
+        auto_title=QLabel('AUTOMATION');auto_title.setObjectName('codPanelTitle');auto_layout.addWidget(auto_title)
+        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');auto_layout.addWidget(self.include_stats_checkbox)
+        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');auto_layout.addWidget(self.auto_post)
+        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');auto_layout.addWidget(self.full_auto)
+        auto_layout.addStretch(1)
+        top.addWidget(auto_panel,3)
+        l.addLayout(top)
+        self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);self.generate_poster_button.setMinimumHeight(44);l.addWidget(self.generate_poster_button)
+        bottom=QHBoxLayout();bottom.setSpacing(10)
+        players_panel=QFrame();players_panel.setObjectName('dashboardPanel');players_layout=QVBoxLayout(players_panel);players_layout.setContentsMargins(12,10,12,10);players_layout.setSpacing(8)
+        self.studio_heads_title=QLabel('PLAYERS IDENTIFIED FROM SCREENSHOTS');self.studio_heads_title.setObjectName('codPanelTitle');players_layout.addWidget(self.studio_heads_title)
+        self.studio_heads=QGridLayout();self.studio_heads.setSpacing(12);players_layout.addLayout(self.studio_heads,1)
+        bottom.addWidget(players_panel,3)
+        preview_panel=QFrame();preview_panel.setObjectName('dashboardPanel');preview_layout=QVBoxLayout(preview_panel);preview_layout.setContentsMargins(12,10,12,10);preview_layout.setSpacing(8)
+        preview_title=QLabel('AI PREVIEW');preview_title.setObjectName('codPanelTitle');preview_layout.addWidget(preview_title)
+        self.art_preview=QLabel('Finished artwork preview');self.art_preview.setAlignment(Qt.AlignCenter);self.art_preview.setMinimumHeight(180);preview_layout.addWidget(self.art_preview,1)
+        bottom.addWidget(preview_panel,5)
+        squad_panel=QFrame();squad_panel.setObjectName('dashboardPanel');squad_layout=QVBoxLayout(squad_panel);squad_layout.setContentsMargins(12,10,12,10);squad_layout.setSpacing(8)
+        squad_title=QLabel('SQUAD TOTALS');squad_title.setObjectName('codPanelTitle');squad_layout.addWidget(squad_title)
+        self.photo_assignments=QLabel('Consented reference photos are matched automatically when available.');self.photo_assignments.setWordWrap(True);self.photo_assignments.setStyleSheet('color:#c4ccd8;');squad_layout.addWidget(self.photo_assignments,1)
+        bottom.addWidget(squad_panel,3)
+        l.addLayout(bottom,1)
+        self.approve_post_button=self.button('APPROVE & POST',self.post_active,True)
+        self.row(l,self.button('Cancel',self.cancel_browser),self.approve_post_button,self.button('Retry / review selected job',self.retry_job));self.job_status=QLabel('No active job');self.job_status.setWordWrap(True);l.addWidget(self.job_status)
     def build_cod_ai(self):
         l=self.page('ScreenShots and Videos','Capture a Call of Duty moment and send screenshots to Meta AI for cinematic videos.');l.setSpacing(9);l.setContentsMargins(24,14,24,14)
         steps=QFrame();steps.setObjectName('codAiSteps');steps_layout=QHBoxLayout(steps);steps_layout.setContentsMargins(14,8,14,8);steps_layout.setSpacing(10)
@@ -1557,7 +1608,7 @@ class Window(QMainWindow):
         QTimer.singleShot(0,self.update_screenshot_grid);QTimer.singleShot(0,self.update_cinematic_grid)
         self.refresh_cinematic_results()
     def build_tracker_browser(self):
-        l=self.page('Tracker Browser','The Meta AI browser opens in a visible window while a poster or video job runs - watch it work there. Nothing here needs clicking while a job runs.')
+        l=self.page('Tracker Browser','The Meta AI browser docks in this tab while a poster or video job runs - watch it work here. Nothing here needs clicking while a job runs.')
         self.browser_status=QLabel('Tracker browser: checking…');self.browser_status.setWordWrap(True);l.addWidget(self.browser_status)
         self.browser_queue=QLabel('');self.browser_queue.setWordWrap(True);self.browser_queue.setStyleSheet('color:#99a8bc');l.addWidget(self.browser_queue)
         self.browser_surface=QFrame();self.browser_surface.setObjectName('dashboardPanel');self.browser_surface.setMinimumSize(800,450);l.addWidget(self.browser_surface,1)
@@ -1649,17 +1700,22 @@ class Window(QMainWindow):
             try:self.browser_status.setText('The automation browser is not open right now. It opens on its own when a job runs — or press Log into Meta AI.')
             except (AttributeError,RuntimeError):pass
             return
-        try:
-            user32=ctypes.windll.user32
-            visible=bool(user32.IsWindowVisible(hwnd))
-            self.auto_browser_user_shown=not visible
-            user32.ShowWindow(hwnd,6 if visible else 9)
-            try:self.browser_status.setText('Automation browser window: '+('hidden in the background.' if visible else 'brought forward. Hide it again any time.'))
+        host=getattr(self,'auto_browser_host',None)
+        docked=getattr(host,'hwnd',None) if host is not None else None
+        try:docked_alive=bool(docked and ctypes.windll.user32.IsWindow(docked))
+        except Exception:docked_alive=False
+        if docked_alive:
+            try:host.detach()
+            except Exception:pass
+            try:self.browser_status.setText('Automation browser popped out into its own window. Press Show / hide browser to dock it back here.')
             except (AttributeError,RuntimeError):pass
-            self.log('Automation browser window hidden.' if visible else 'Automation browser window shown.')
-        except Exception as exc:
-            try:self.browser_status.setText('Could not move the browser window: '+str(exc)[:160])
-            except (AttributeError,RuntimeError):pass
+            try:self.log('Automation browser popped out of the tab.')
+            except Exception:pass
+            return
+        if host is not None and getattr(host,'hwnd',None):
+            try:host.detach()
+            except Exception:pass
+        self._embed_auto_browser(hwnd)
     def open_login_window(self):
         if getattr(self,'_inapp_active',None) or getattr(self,'_inapp_poster_active',None):
             try:self.browser_status.setText('A job is running right now — wait for it to finish, then log in.')
@@ -1746,8 +1802,62 @@ class Window(QMainWindow):
         fresh=[hwnd for hwnd in current if hwnd not in (known or set())]
         if fresh:self.auto_browser_hwnd=fresh[0]
 
-        try:self._show_auto_browser()
+        try:self._embed_auto_browser()
         except (AttributeError,RuntimeError):pass
+    def _embed_auto_browser(self,hwnd=None):
+        try:
+            hwnd=hwnd or getattr(self,'auto_browser_hwnd',None)
+            if not hwnd:return
+            try:
+                if not ctypes.windll.user32.IsWindow(hwnd):
+                    self.auto_browser_hwnd=None
+                    try:self.auto_browser_host.detach()
+                    except Exception:pass
+                    self.auto_browser_host.hwnd=None
+                    return
+            except Exception:return
+            try:self.browser_surface.winId()
+            except (AttributeError,RuntimeError):return
+            try:
+                if getattr(self.auto_browser_host,'hwnd',None):self.auto_browser_host.detach()
+            except Exception:pass
+            try:
+                _bh=getattr(self,'browser_host',None)
+                if _bh is not None and getattr(_bh,'hwnd',None):
+                    try:
+                        import ctypes as _ct
+                        if _ct.windll.user32.IsWindow(_bh.hwnd):_bh.detach()
+                        else:_bh.hwnd=None
+                    except Exception:pass
+            except (AttributeError,RuntimeError):pass
+            self.auto_browser_host.attach(hwnd,int(self.browser_surface.winId()))
+            self.auto_browser_hwnd=self.auto_browser_host.hwnd
+            self.auto_browser_host.resize(self.browser_surface.width(),self.browser_surface.height())
+            try:self.browser_status.setText('Meta AI browser is running in this tab. Watch it work - nothing here needs clicking while a job runs.')
+            except (AttributeError,RuntimeError):pass
+        except Exception as exc:
+            try:self.browser_status.setText('Browser embedding failed, showing the window instead: '+str(exc)[:160])
+            except (AttributeError,RuntimeError):pass
+            try:self._show_auto_browser()
+            except (AttributeError,RuntimeError):pass
+    def _validate_auto_browser_attach(self):
+        host=getattr(self,'auto_browser_host',None)
+        hwnd=getattr(host,'hwnd',None) if host is not None else None
+        if not hwnd:return False
+        try:alive=bool(ctypes.windll.user32.IsWindow(hwnd))
+        except Exception:alive=False
+        if alive:return True
+        try:host.detach()
+        except Exception:pass
+        try:host.hwnd=None
+        except (AttributeError,RuntimeError):pass
+        return False
+    def _show_tracker_browser_tab(self):
+        try:
+            for row in range(self.nav.count()):
+                if self.nav.item(row).data(Qt.UserRole)=='Tracker Browser':
+                    self.nav.setCurrentRow(row);break
+        except (AttributeError,RuntimeError,TypeError):pass
     def _show_login_card(self,message):
         try:self.login_card.show()
         except (AttributeError,RuntimeError):pass
@@ -3450,6 +3560,12 @@ class Window(QMainWindow):
         job=self.store.get(mid)
         if not job:return
         self.active_id=mid;match=json.loads(job['payload']);context=E.extract_match_context(match,job.get('ocr',''));self.studio_match.setText(mid+'  /  '+job['status'].upper()+'  ·  '+context['game_mode']+'  ·  '+context['result']+('  ·  '+context['placement'] if not context['placement'].startswith('Not shown') else ''));self.show_image(self.art_preview,job['image'],800,300)
+        try:self.opt_game_mode.setText(str(context.get('game_mode') or '—'))
+        except (AttributeError,RuntimeError):pass
+        try:self.opt_result.setText(str(context.get('result') or '—'))
+        except (AttributeError,RuntimeError):pass
+        try:placement=str(context.get('placement') or '—');self.opt_placement.setText('—' if placement.startswith('Not shown') else placement)
+        except (AttributeError,RuntimeError):pass
         players=json.loads(job['players'] or '[]');self.ensure_match_prompt(job,players);self.preview_reference_photos(players)
         if job['capture']:
             self.show_image(self.capture_preview,job['capture'],650,290);self.ocr_text.setPlainText(job['ocr'])
@@ -3604,6 +3720,8 @@ class Window(QMainWindow):
             except Exception:stage='submitting'
             if stage not in ('queued','submitting'):stage='submitting'
             self.set_automation_stage(stage,mid)
+            try:self._show_tracker_browser_tab()
+            except (AttributeError,RuntimeError):pass
         return launched
     def _toggle_full_auto(self):
         try:on=bool(self.full_auto.isChecked())
@@ -3733,26 +3851,28 @@ class Window(QMainWindow):
                     photos=[str(base/name) for name in filenames]
                     try:self._record_auto_browser(known_windows)
                     except Exception:pass
-                    saved=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'),on_stage=self._driver_stage)
+                    saved, via=driver.submit_text_to_image(page,photos,prompt_text,str(E.DATA/'artwork'/'inbox'),on_stage=self._driver_stage)
                 finally:
                     try:page.close()
                     except Exception:pass
                     try:context.close()
                     except Exception:pass
-                return {'ok':True,'path':str(saved)}
+                return {'ok':True,'path':str(saved),'via':via}
         except Exception as exc:
             return {'ok':False,'step':str(getattr(exc,'step','error')),'detail':str(getattr(exc,'detail',None) or exc)}
     def _deliver_poster_result(self,job_id,result):
         try:
             if isinstance(result,dict) and result.get('ok') is True and result.get('path'):
-                self._finish_inapp_poster(job_id,str(result['path']));return
+                self._finish_inapp_poster(job_id,str(result['path']),via=str(result.get('via') or 'download'));return
             if isinstance(result,dict) and result.get('ok') is False:
                 self._fail_inapp_poster(job_id,str(result.get('step') or 'automation'),str(result.get('detail') or 'Poster job failed'));return
             self._fail_inapp_poster(job_id,'automation','Poster job returned an unreadable result')
         except Exception as exc:
             try:self.log('Poster result dispatch failed for '+str(job_id)+': '+str(exc)[:200])
             except Exception:pass
-    def _finish_inapp_poster(self,job_id,saved):
+            try:self._fail_inapp_poster(job_id,'dispatch',str(exc)[:200])
+            except Exception:pass
+    def _finish_inapp_poster(self,job_id,saved,via='download'):
         self._inapp_poster_active=None
         try:self.generate_poster_button.setEnabled(True)
         except (AttributeError,RuntimeError):pass
@@ -3770,6 +3890,19 @@ class Window(QMainWindow):
         self.active_id=job_id
         try:self.load_studio(job_id)
         except Exception:pass
+
+        if via!='download':
+            try:linked=self.store.note_artwork(job_id,str(target))
+            except Exception:linked=False
+            if linked:
+                try:self.show_image(self.art_preview,str(target),800,300)
+                except (AttributeError,RuntimeError):pass
+                try:self.refresh_history()
+                except (AttributeError,RuntimeError):pass
+            self.log('Poster held for manual download: '+str(job_id))
+            self.job_status.setText('Browser screenshot linked for review, not posted: only a real Meta download goes to Discord. Right-click save the clean picture in the Meta window, then press Import Artwork.')
+            self.set_automation_stage('collected',job_id)
+            self._drain_poster_queue();return
         self.received_art(job_id,str(target))
         self.job_status.setText('Poster submitted and finished image collected automatically.')
         self.log('In-app poster completed: '+job_id)

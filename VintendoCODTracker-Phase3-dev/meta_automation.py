@@ -38,6 +38,9 @@ SELECTORS = {
         'button:has-text("Download")',
         'a:has-text("Download")',
         '[aria-label*="Download"]',
+        'role=button[name=/download/i]',
+        'a[download]',
+        '[data-testid*="download" i]',
     ],
     'file_inputs': 'input[type="file"]',
     'prompt_box': [
@@ -132,7 +135,7 @@ class MetaDriver:
                     if locator.is_visible():
                         return locator
                 except Exception:
-                    return None
+                    continue
             if time.time() >= deadline:
                 return None
             try:
@@ -202,7 +205,7 @@ class MetaDriver:
                     pass
             got = self._acquire_viewer_shot(page, on_stage, known_srcs, tried, shot_dir)
             if got is not None:
-                return got
+                return ('screenshot', got)
         return None
 
     @staticmethod
@@ -414,6 +417,9 @@ class MetaDriver:
         except OSError:
             pass
         result = self._submit_composer(page, prompt, on_stage, timeout_s, expect_button=True, shot_dir=str(out_dir))
+        via = 'download'
+        if isinstance(result, tuple):
+            via, result = result
         if isinstance(result, Path):
             target = result
         else:
@@ -436,7 +442,7 @@ class MetaDriver:
             except OSError:
                 pass
             raise MetaAutomationError('download', 'The downloaded file is not a valid image.')
-        return target
+        return target, via
 
     def submit_image_to_video(self, page, screenshot, faces, prompt,
                               download_dir, timeout_s=1500, on_stage=None):

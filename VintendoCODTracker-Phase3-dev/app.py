@@ -3897,7 +3897,7 @@ class Window(QMainWindow):
         except Exception:pass
         try:self.generate_poster_button.setEnabled(False)
         except (AttributeError,RuntimeError):pass
-        self.async_task(lambda:self._run_poster_job(job_id,sync_playwright,folder,list(filenames or []),prompt_text,attempt),lambda result:self._deliver_poster_result(job_id,result))
+        self.async_task(lambda:self._run_poster_job(job_id,sync_playwright,folder,list(filenames or []),prompt_text),lambda result:self._deliver_poster_result(job_id,result))
         return True
     def _run_poster_job(self,job_id,playwright_factory,folder,filenames,prompt_text):
         try:

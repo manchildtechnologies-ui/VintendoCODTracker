@@ -2062,4 +2062,31 @@ class UITests(unittest.TestCase):
         try:w._drain_stage_queue()
         finally:del w.set_automation_stage
         self.assertEqual(seen,[('generating','overdrive')])
+    def test_start_builds_runnable_worker_lambda(self):
+        import tempfile as _tf
+        from unittest.mock import patch
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.notice=lambda _:None
+        mid,_=w.store.add({'matchId':'lambda-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+        class FakeCtx:
+            def new_page(self):return object()
+            def close(self):pass
+        class FakeMgr:
+            def __enter__(self):return self
+            def __exit__(self,*args):return False
+        class FakeDriver:
+            def __init__(self,*args):pass
+            def new_job_page(self):return object()
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
+        captured={}
+        def fake_async(fn,done=None,failed=None):captured['fn']=fn;captured['done']=done
+        w.async_task=fake_async
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver),patch('playwright.sync_api.sync_playwright',return_value=FakeMgr()):
+            launched=w._start_poster_automation(mid,str(_tmpdir),[],'prompt')
+            self.assertTrue(launched)
+            result=captured['fn']()
+        self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
+        self.addCleanup(setattr,w,'_inapp_poster_active',None)
 if __name__=='__main__':unittest.main()

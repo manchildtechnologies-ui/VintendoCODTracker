@@ -19,6 +19,28 @@ from version import APP_VERSION
 SCOREBOARD_HOTKEY_ID=0x5638
 COD_AI_SCREENSHOT_HOTKEY_ID=0x5639
 AUTO_OCR_INTERVAL_SECONDS=30
+# Pixel bounds of the scoreboard in the supplied 2560×1440 reference image.
+# Other supported resolutions scale these same bounds proportionally.
+SCOREBOARD_REFERENCE_SIZE=(2560,1440)
+SCOREBOARD_REFERENCE_BOUNDS=(202,487,2156,464)
+def _scaled_scoreboard_bounds(size):
+    scale=size[0]/SCOREBOARD_REFERENCE_SIZE[0]
+    return tuple(int(value*scale+0.5) for value in SCOREBOARD_REFERENCE_BOUNDS)
+SCOREBOARD_REGION_TEMPLATES={
+    size:_scaled_scoreboard_bounds(size)
+    for size in ((1920,1080),(2560,1440),(3840,2160))
+}
+# Multiplayer template captures only the left team table (player, score, kills,
+# objective time), excluding the opposing team and match banner.
+MULTIPLAYER_REFERENCE_SIZE=(2560,1440)
+MULTIPLAYER_REFERENCE_BOUNDS=(126,408,1148,370)
+def _scaled_multiplayer_bounds(size):
+    scale=size[0]/MULTIPLAYER_REFERENCE_SIZE[0]
+    return tuple(int(value*scale+0.5) for value in MULTIPLAYER_REFERENCE_BOUNDS)
+MULTIPLAYER_REGION_TEMPLATES={
+    size:_scaled_multiplayer_bounds(size)
+    for size in ((1920,1080),(2560,1440),(3840,2160))
+}
 
 def visible_cinematic_rows(rows,selected_id=None):
     """Queue rows worth showing. Finished jobs leave the list once they have nothing left to post: completed jobs stay only while their MP4 file still exists, failed jobs stay only while selected so their error stays visible."""
@@ -475,8 +497,8 @@ class TacticalBackdrop(QWidget):
         painter.end()
 
 MOD_ALT=0x0001;MOD_CONTROL=0x0002;MOD_SHIFT=0x0004;MOD_NOREPEAT=0x4000
-DEFAULT_SCOREBOARD_HOTKEY=(0x77,MOD_CONTROL|MOD_SHIFT)
-DEFAULT_SCREENSHOT_HOTKEY=(0x77,MOD_CONTROL)
+DEFAULT_SCOREBOARD_HOTKEY=(0x26,0)
+DEFAULT_SCREENSHOT_HOTKEY=(0x28,0)
 VK_NAMES={0x70+i:f'F{i+1}' for i in range(24)}
 VK_NAMES.update({0x30+i:str(i) for i in range(10)})
 VK_NAMES.update({0x41+i:chr(0x41+i) for i in range(26)})
@@ -499,9 +521,9 @@ def format_hotkey(vk,mod):
     if mod&MOD_SHIFT:parts.append('Shift')
     parts.append(vk_name(vk));return ' + '.join(parts)
 class HotkeyEdit(QLineEdit):
-    def __init__(self,vk,mod,parent=None):
-        super().__init__(parent);self.setReadOnly(True);self._waiting=False;self.set_hotkey(vk,mod);self.setPlaceholderText('Click here, then press the new keys')
-        self.setToolTip('Click this box and press the key combination to use. Hold Ctrl, Shift or Alt plus another key.')
+    def __init__(self,vk,mod,parent=None,confirm=True):
+        super().__init__(parent);self.setReadOnly(True);self._waiting=False;self._confirm=bool(confirm);self.set_hotkey(vk,mod);self.setPlaceholderText('Click here, then press the new keys')
+        self.setToolTip('Click this box and press the keys to use. Bare keys work but fire on every press.')
     def set_hotkey(self,vk,mod):
         self.vk=int(vk or 0);self.mod=int(mod or 0)&(MOD_CONTROL|MOD_SHIFT|MOD_ALT);self.setText(format_hotkey(self.vk,self.mod))
     def _set_waiting(self,on):
@@ -526,7 +548,9 @@ class HotkeyEdit(QLineEdit):
         if native>0:vk=native
         elif Qt.Key_F1<=key<=Qt.Key_F24:vk=0x70+(key-Qt.Key_F1)
         elif 0x30<=key<=0x39 or 0x41<=key<=0x5A:vk=key
-        if vk and mod:self.set_hotkey(vk,mod);self._set_waiting(False);QMessageBox.information(self,'Hotkeys Set','Hotkey updated to '+format_hotkey(self.vk,self.mod)+'.')
+        elif key in (Qt.Key_Up,Qt.Key_Down,Qt.Key_Left,Qt.Key_Right):vk={Qt.Key_Up:0x26,Qt.Key_Down:0x28,Qt.Key_Left:0x25,Qt.Key_Right:0x27}[key]
+        if vk:self.set_hotkey(vk,mod);self._set_waiting(False)
+        if vk and self._confirm:QMessageBox.information(self,'Hotkeys Set','Hotkey updated to '+format_hotkey(self.vk,self.mod)+'.')
 class Window(QMainWindow):
 
     def __init__(self):
@@ -620,6 +644,7 @@ class Window(QMainWindow):
     def on_nav_row_changed(self,row):
         try:name=self.nav.item(row).data(Qt.UserRole)
         except (AttributeError,RuntimeError):return
+        if name=='Scoreboard Capture':QTimer.singleShot(0,self.setup_scoreboard_display)
         if name=='Tracker Browser':
             self.browser_host.focus_embedded()
             try:self.auto_browser_host.focus_embedded()
@@ -838,7 +863,7 @@ class Window(QMainWindow):
         tools_title=QLabel('⚡  QUICK TOOLS');tools_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');tools_layout.addWidget(tools_title)
         review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   OPEN AI STUDIO',lambda:self.nav.setCurrentRow(5))
         tools_layout.addWidget(review);tools_layout.addWidget(capture);tools_layout.addWidget(poster);body.addWidget(tools,1,2)
-        self.hotkey_hint=QLabel('At match end, press Ctrl + Shift + F8 while the scoreboard is visible.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
+        self.hotkey_hint=QLabel('At match end, press Up while the scoreboard is visible.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
         body.setColumnStretch(0,1);body.setColumnStretch(1,1);body.setColumnStretch(2,0);body.setRowStretch(0,3);body.setRowStretch(1,2);l.addLayout(body,1)
 
         footer=QFrame();footer.setObjectName('dashboardFooter');footer_layout=QHBoxLayout(footer);footer_layout.setContentsMargins(13,8,13,8)
@@ -945,17 +970,35 @@ class Window(QMainWindow):
         else:self.log('Squad Night is already active. Press Start to begin.')
         self.nav.setCurrentRow(0)
     def build_capture(self):
-        l=self.page('Scoreboard Capture','At match end, press Ctrl + Shift + F8 while the final scoreboard is visible. A full screenshot is captured automatically.');self.capture_subtitle=l.itemAt(1).widget()
-        self.monitor=QComboBox()
-        self.row(l,self.monitor,self.button('Refresh monitors',self.refresh_monitors),self.button('Capture Screen Shot',self.capture_once,True))
-        self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');l.addWidget(self.hotkey_status)
+        l=self.page('Scoreboard Capture','At match end, leave the final scoreboard visible. The app captures it with the selected display template; use the hotkey or Capture Now to review the result.');self.capture_subtitle=l.itemAt(1).widget()
+        self.monitor=QComboBox();self.monitor.hide()
+        self.capture_display_status=QLabel('Game display will be selected during first-time setup.');self.capture_display_status.setStyleSheet('font-size:11px;color:#aab4c3;font-weight:700;padding:3px;')
+        self.capture_setup_button=self.button('Capture Setup',lambda:self.setup_scoreboard_display(force=True))
+        self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');self.hotkey_status.setCursor(Qt.PointingHandCursor);self.hotkey_status.setToolTip('Click to set the scoreboard hotkey');self.hotkey_status.mousePressEvent=lambda _event:self.open_hotkey_dialog('scoreboard')
+        self.capture_now_button=self.button('Capture Now',self.capture_once,True)
+        hotkey_row=QHBoxLayout();hotkey_row.addStretch(1);hotkey_row.addWidget(self.hotkey_status);l.addLayout(hotkey_row)
+        display_row=QHBoxLayout();display_row.addWidget(self.capture_display_status,3);display_row.addWidget(self.capture_setup_button,1);display_row.addWidget(self.capture_now_button,1);l.addLayout(display_row)
+        self.scoreboard_profile=QComboBox();self.scoreboard_profile.addItem('Auto-detect','auto');self.scoreboard_profile.addItem('Warzone','warzone');self.scoreboard_profile.addItem('Multiplayer','multiplayer')
+        self.scoreboard_profile.setCurrentIndex(max(0,self.scoreboard_profile.findData(str(self.settings.values.get('scoreboard_profile','auto')))))
+        self.scoreboard_profile.currentIndexChanged.connect(self.scoreboard_profile_changed)
+        self.capture_subtitle.setText(self._scoreboard_capture_instruction())
+        self.scoreboard_profile.setMaximumWidth(300)
+
         self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
-        self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460);self.choose_result_row=self.row(l,QLabel('Choose Match Result'),self.result_override);self.choose_result_row.addStretch(1)
-        split=QSplitter();self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(400,180);self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');split.addWidget(self.capture_preview);split.addWidget(self.ocr_text);l.addWidget(split,1)
-        self.row(l,self.button('Paste Screenshot Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove',self.remove_ocr_row),self.button('Keep matched only',self.keep_matched_ocr_rows))
-        self.ocr_stat_keys=['kills','damage','score','assists','deaths'];self.ocr_table=QTableWidget(0,1+len(self.ocr_stat_keys));self.ocr_table.setHorizontalHeaderLabels(['Player','Kills','Damage','Score','Assists','Deaths']);self.ocr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch);l.addWidget(self.ocr_table,1)
+        self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460)
+        controls_row=QHBoxLayout();controls_row.addWidget(QLabel('Scoreboard type'));controls_row.addWidget(self.scoreboard_profile);controls_row.addSpacing(12);controls_row.addWidget(QLabel('Match result'));controls_row.addWidget(self.result_override);l.addLayout(controls_row)
+        self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(320,200)
+        self.ocr_review_status=QLabel('Capture the final match scoreboard to read player rows.');self.ocr_review_status.setWordWrap(True);self.ocr_review_status.setStyleSheet('font-size:11px;color:#aab4c3;padding:2px;')
+        self.ocr_stat_keys=['kills','damage','score','assists','deaths'];self.ocr_table=QTableWidget(0,1+len(self.ocr_stat_keys));self.ocr_table.setHorizontalHeaderLabels(['Player','Kills','Damage','Score','Assists','Deaths']);self.ocr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.capture_review_split=QSplitter(Qt.Horizontal);self.capture_review_split.setChildrenCollapsible(False);self.capture_review_split.addWidget(self.capture_preview)
+        results_panel=QWidget();results_layout=QVBoxLayout(results_panel);results_layout.setContentsMargins(0,0,0,0);results_layout.setSpacing(8);results_layout.addWidget(self.ocr_review_status);results_layout.addWidget(self.ocr_table,1)
+        self.capture_review_split.addWidget(results_panel);self.capture_review_split.setStretchFactor(0,2);self.capture_review_split.setStretchFactor(1,5);self.capture_review_split.setSizes([620,1550]);l.addWidget(self.capture_review_split,1)
         self.verified=QCheckBox('I checked these names and numbers against the captured scoreboard');self.verified.setChecked(True);self.verified.hide()
-        self.row(l,self.button('Save info',self.save_capture,True),self.button('Post Screenshot as is to Discord',self.post_capture_only))
+        actions_row=QHBoxLayout();actions_row.addWidget(self.button('Save info',self.save_capture,True),1);actions_row.addWidget(self.button('Post Screenshot as is to Discord',self.post_capture_only),1);l.addLayout(actions_row)
+        self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');self.ocr_text.setToolTip('Automatically read from the captured scoreboard crop. Edit this only to correct an OCR mistake.')
+        self.ocr_advanced=QWidget();advanced_layout=QVBoxLayout(self.ocr_advanced);advanced_layout.setContentsMargins(0,2,0,0);advanced_layout.addWidget(self.ocr_text)
+        self.row(advanced_layout,self.button('Re-parse OCR Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove Row',self.remove_ocr_row),self.button('Keep matched only',self.keep_matched_ocr_rows))
+        self.ocr_advanced.hide();self.ocr_advanced_toggle=QPushButton('Show OCR corrections and manual row tools');self.ocr_advanced_toggle.setCheckable(True);self.ocr_advanced_toggle.toggled.connect(self.ocr_advanced.setVisible);l.addWidget(self.ocr_advanced_toggle);l.addWidget(self.ocr_advanced)
     def build_roster(self):
         l=self.page('Player Roster','Manage your COD player roster, aliases, and headshots for Meta AI artwork.')
         split=QSplitter();split.setChildrenCollapsible(False)
@@ -1521,7 +1564,7 @@ class Window(QMainWindow):
             if index<2:
                 arrow=QLabel(chr(187));arrow.setObjectName('stepArrow');steps_layout.addWidget(arrow);steps_layout.addStretch(1)
         hotkey_bar=QHBoxLayout();hotkey_bar.setContentsMargins(0,0,0,0);hotkey_bar.setSpacing(10);hotkey_bar.addStretch(1)
-        self.cod_ai_hotkey_status=QLabel('Hotkey: Ctrl + F8');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);hotkey_bar.addWidget(self.cod_ai_hotkey_status)
+        self.cod_ai_hotkey_status=QLabel('Hotkey: Down');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);self.cod_ai_hotkey_status.setCursor(Qt.PointingHandCursor);self.cod_ai_hotkey_status.setToolTip('Click to set the screenshot hotkey');self.cod_ai_hotkey_status.mousePressEvent=lambda _event:self.open_hotkey_dialog('screenshot');hotkey_bar.addWidget(self.cod_ai_hotkey_status)
         hotkey_wrap=QWidget();hotkey_wrap.setLayout(hotkey_bar);l.addWidget(hotkey_wrap)
         l.addWidget(steps)
         actions=QHBoxLayout();actions.setSpacing(10)
@@ -1529,37 +1572,37 @@ class Window(QMainWindow):
         actions.addWidget(self.button('Capture Game Screenshot',self.capture_cod_ai_screenshot,True),1)
         self.queue_cinematic_button=self.button('Send Selected Material to Meta Ai to Make A Video',self.queue_selected_cinematic);self.queue_cinematic_button.setObjectName('codBlue');actions.addWidget(self.queue_cinematic_button,1)
         l.addLayout(actions)
-        self.cod_ai_capture_status=QLabel('Screenshots will be saved as lossless PNG files in the tracker data folder. Press Ctrl + F8 in game to capture.')
+        self.cod_ai_capture_status=QLabel('Screenshots will be saved as lossless PNG files in the tracker data folder. Press Down in game to capture.')
         self.cod_ai_capture_status.setWordWrap(True);self.cod_ai_capture_status.setStyleSheet('color:#99a8bc');l.addWidget(self.cod_ai_capture_status)
         media_panel=QFrame();media_panel.setObjectName('dashboardPanel');media_layout=QVBoxLayout(media_panel);media_layout.setContentsMargins(12,12,12,12);media_layout.setSpacing(8)
-        media_head=QHBoxLayout();media_title=QLabel('Cinematics & Videos');media_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');media_head.addWidget(media_title);media_head.addStretch(1)
-        self.media_count=QLabel('0 screenshots • 0 videos');self.media_count.setStyleSheet('color:#99a8bc;font-weight:700;');media_head.addWidget(self.media_count)
+        media_head=QHBoxLayout();media_title=QLabel('Screenshots');media_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');media_head.addWidget(media_title);media_head.addStretch(1)
+        self.media_count=QLabel('0 screenshots');self.media_count.setStyleSheet('color:#99a8bc;font-weight:700;');media_head.addWidget(self.media_count)
         media_head.addWidget(self.button('Open Cinematics Folder',self.open_cinematics_folder));media_layout.addLayout(media_head)
-        self.media_tabs=QTabWidget();self.media_tabs.setObjectName('mediaTabs');self.media_tabs.currentChanged.connect(lambda _index:(self.update_screenshot_grid(),self.update_cinematic_grid()))
-        shots_tab=QWidget();shots_layout=QVBoxLayout(shots_tab);shots_layout.setContentsMargins(6,6,6,6);shots_layout.setSpacing(8)
+        self.preview_tabs=QTabWidget();self.preview_tabs.setObjectName('mediaTabs');self.preview_tabs.currentChanged.connect(lambda _index:(self.update_screenshot_grid(),self.update_cinematic_grid()))
+
         self.screenshot_tiles={}
-        self.cod_ai_screenshots=QListWidget();self.cod_ai_screenshots.setObjectName('cinematicGallery');self.cod_ai_screenshots.setViewMode(QListWidget.IconMode);self.cod_ai_screenshots.setFlow(QListWidget.LeftToRight);self.cod_ai_screenshots.setMovement(QListWidget.Static);self.cod_ai_screenshots.setResizeMode(QListWidget.Adjust);self.cod_ai_screenshots.setWrapping(True);self.cod_ai_screenshots.setSpacing(6);self.cod_ai_screenshots.setMinimumHeight(220);self.cod_ai_screenshots.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cod_ai_screenshots.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cod_ai_screenshots.currentItemChanged.connect(self.preview_cod_ai_screenshot);shots_layout.addWidget(self.cod_ai_screenshots,1)
-        self.cod_ai_empty=QLabel('No screenshots yet\nCapture a screenshot or open your folder.');self.cod_ai_empty.setObjectName('codEmpty');self.cod_ai_empty.setAlignment(Qt.AlignCenter);self.cod_ai_empty.setWordWrap(True);self.cod_ai_empty.hide();shots_layout.addWidget(self.cod_ai_empty,1)
-        self.media_tabs.addTab(shots_tab,'Screenshots')
+        self.cod_ai_screenshots=QListWidget();self.cod_ai_screenshots.setObjectName('cinematicGallery');self.cod_ai_screenshots.setViewMode(QListWidget.IconMode);self.cod_ai_screenshots.setFlow(QListWidget.LeftToRight);self.cod_ai_screenshots.setMovement(QListWidget.Static);self.cod_ai_screenshots.setResizeMode(QListWidget.Adjust);self.cod_ai_screenshots.setWrapping(True);self.cod_ai_screenshots.setSpacing(6);self.cod_ai_screenshots.setMinimumHeight(220);self.cod_ai_screenshots.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cod_ai_screenshots.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cod_ai_screenshots.currentItemChanged.connect(self.preview_cod_ai_screenshot);media_layout.addWidget(self.cod_ai_screenshots,1)
+        self.cod_ai_empty=QLabel('No screenshots yet\nCapture a screenshot or open your folder.');self.cod_ai_empty.setObjectName('codEmpty');self.cod_ai_empty.setAlignment(Qt.AlignCenter);self.cod_ai_empty.setWordWrap(True);self.cod_ai_empty.hide();media_layout.addWidget(self.cod_ai_empty,1)
+
         videos_tab=QWidget();videos_layout=QVBoxLayout(videos_tab);videos_layout.setContentsMargins(6,6,6,6);videos_layout.setSpacing(8)
         self.cinematic_tiles={};self.cinematic_duration_cache={}
         self.cinematic_results=QListWidget();self.cinematic_results.setObjectName('cinematicGallery');self.cinematic_results.setViewMode(QListWidget.IconMode);self.cinematic_results.setFlow(QListWidget.LeftToRight);self.cinematic_results.setMovement(QListWidget.Static);self.cinematic_results.setResizeMode(QListWidget.Adjust);self.cinematic_results.setWrapping(True);self.cinematic_results.setSpacing(6);self.cinematic_results.setMinimumHeight(300);self.cinematic_results.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cinematic_results.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cinematic_results.currentItemChanged.connect(self.preview_cinematic_video);videos_layout.addWidget(self.cinematic_results,1)
         self.cinematic_empty=QLabel('No videos yet\nSend a screenshot to Meta AI to make a cinematic.');self.cinematic_empty.setObjectName('codEmpty');self.cinematic_empty.setAlignment(Qt.AlignCenter);self.cinematic_empty.setWordWrap(True);self.cinematic_empty.hide();videos_layout.addWidget(self.cinematic_empty,1)
-        self.media_tabs.addTab(videos_tab,'Videos')
-        media_layout.addWidget(self.media_tabs,1)
+        self.preview_tabs.addTab(videos_tab,'Videos')
+
         self.cinematic_status=QLabel('Choose an existing gameplay screenshot to test Meta AI Frame to Video. Nothing posts automatically.')
         self.cinematic_status.setWordWrap(True);self.cinematic_status.setStyleSheet('color:#99a8bc')
         main_split=QSplitter(Qt.Horizontal);main_split.setHandleWidth(10);main_split.setChildrenCollapsible(False)
         main_split.addWidget(media_panel)
         preview_panel=QFrame();preview_panel.setObjectName('dashboardPanel');right_layout=QVBoxLayout(preview_panel);right_layout.setContentsMargins(12,12,12,12);right_layout.setSpacing(8)
-        preview_title=QLabel('Preview');preview_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');right_layout.addWidget(preview_title)
-        preview_sub=QLabel('Watch the selected video.');preview_sub.setStyleSheet('color:#99a8bc');right_layout.addWidget(preview_sub)
+        preview_tab=QWidget();preview_layout=QVBoxLayout(preview_tab);preview_layout.setContentsMargins(12,12,12,12);preview_layout.setSpacing(8)
+        preview_sub=QLabel('Watch the selected video.');preview_sub.setStyleSheet('color:#99a8bc');preview_layout.addWidget(preview_sub)
         self.preview_sub=preview_sub
-        self.preview_image=QLabel('Select a screenshot to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(180);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');right_layout.addWidget(self.preview_image,1)
+        self.preview_image=QLabel('Select a screenshot to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(180);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');preview_layout.addWidget(self.preview_image,1)
         self.cinematic_video_widget=QVideoWidget();self.cinematic_fullscreen_filter=FullscreenExitFilter(lambda:bool(getattr(self,'cinematic_video_widget',None) and self.cinematic_video_widget.isFullScreen()),self.exit_cinematic_fullscreen,self.toggle_cinematic_fullscreen)
         app_instance=QApplication.instance()
         if app_instance is not None:app_instance.installEventFilter(self.cinematic_fullscreen_filter)
-        self.cinematic_video_widget.setMinimumHeight(180);self.cinematic_video_widget.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;');right_layout.addWidget(self.cinematic_video_widget,1);self.cinematic_video_widget.hide()
+        self.cinematic_video_widget.setMinimumHeight(180);self.cinematic_video_widget.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;');preview_layout.addWidget(self.cinematic_video_widget,1);self.cinematic_video_widget.hide()
         self.cinematic_player=QMediaPlayer(self);self.cinematic_audio=QAudioOutput(self);self.cinematic_audio.setVolume(.8);self.cinematic_player.setAudioOutput(self.cinematic_audio);self.cinematic_player.setVideoOutput(self.cinematic_video_widget);self.cinematic_player.errorOccurred.connect(lambda error,message:self.cinematic_status.setText('Video preview error: '+str(message)[:200]) if error else None)
         self.cinematic_seek=QSlider(Qt.Horizontal);self.cinematic_seek.setRange(0,0)
         self.cinematic_time=QLabel('0:00 / 0:00');self.cinematic_time.setStyleSheet('color:#c4ccd8;font-weight:700;')
@@ -1574,7 +1617,8 @@ class Window(QMainWindow):
         self.cinematic_fullscreen_button=self.button('Fullscreen',self.toggle_cinematic_fullscreen);self.cinematic_fullscreen_button.setToolTip('Fullscreen - press Esc or double-click the video to exit');self.cinematic_fullscreen_button.setEnabled(False)
         self.refresh_cinematic_button=self.button('Refresh',self.refresh_cinematic_results)
         preview_actions=QHBoxLayout();preview_actions.addStretch(1);preview_actions.addWidget(self.cinematic_fullscreen_button);preview_actions.addWidget(self.refresh_cinematic_button);controls_layout.addLayout(preview_actions)
-        right_layout.addWidget(self.video_controls);self.video_controls.hide()
+        preview_layout.addWidget(self.video_controls);self.video_controls.hide()
+        self.preview_tabs.addTab(preview_tab,'Preview');right_layout.addWidget(self.preview_tabs,1)
         main_split.addWidget(preview_panel);main_split.setStretchFactor(0,5);main_split.setStretchFactor(1,6);main_split.setSizes([740,860]);l.addWidget(main_split,1)
         action_bar=QHBoxLayout();action_bar.setSpacing(10);action_bar.addWidget(self.cinematic_status,1)
         self.test_cinematic_button=None
@@ -2078,7 +2122,7 @@ class Window(QMainWindow):
         automation_layout.addStretch()
         self.settings_tabs.addTab(self.discord_settings_panel,'Discord')
         hotkeys_tab=QWidget();hotkeys_layout=QVBoxLayout(hotkeys_tab);hotkeys_layout.setContentsMargins(12,12,12,12);hotkeys_layout.setSpacing(12)
-        hotkeys_note=QLabel('Global hotkeys work while the tracker is minimized. Click a box, then press the new keys (hold Ctrl, Shift or Alt plus another key).');hotkeys_note.setWordWrap(True);hotkeys_layout.addWidget(hotkeys_note)
+        hotkeys_note=QLabel('Global hotkeys work while the tracker is minimized. Click a box, then press the new keys (a modifier plus another key, or a bare key).');hotkeys_note.setWordWrap(True);hotkeys_layout.addWidget(hotkeys_note)
         score_vk,score_mod=self.hotkey_setting('scoreboard_hotkey_vk','scoreboard_hotkey_mod',DEFAULT_SCOREBOARD_HOTKEY)
         shot_vk,shot_mod=self.hotkey_setting('screenshot_hotkey_vk','screenshot_hotkey_mod',DEFAULT_SCREENSHOT_HOTKEY)
         self.scoreboard_hotkey_edit=HotkeyEdit(score_vk,score_mod);self.screenshot_hotkey_edit=HotkeyEdit(shot_vk,shot_mod)
@@ -2115,8 +2159,24 @@ class Window(QMainWindow):
     def refresh_hotkey_labels(self):
         score=self.hotkey_text('scoreboard');shot=self.hotkey_text('screenshot')
         if hasattr(self,'hotkey_hint'):self.hotkey_hint.setText(f'At match end, press {score} while the scoreboard is visible.')
-        if hasattr(self,'capture_subtitle'):self.capture_subtitle.setText(f'Set the scoreboard region once. At match end, press {score} while the final scoreboard is visible.')
+        if hasattr(self,'capture_subtitle'):self.capture_subtitle.setText(f'At match end, press {score} while the final scoreboard is visible. The selected display template reads the scoreboard; review rows here before saving.')
         if hasattr(self,'cod_ai_capture_status') and not getattr(self,'screenshot_busy',False):self.cod_ai_capture_status.setText(f'Screenshots will be saved as lossless PNG files in your screenshots folder. Press {shot} in game to capture.')
+    def open_hotkey_dialog(self,kind):
+        is_scoreboard=kind=='scoreboard'
+        vk_key,mod_key,default=(('scoreboard_hotkey_vk','scoreboard_hotkey_mod',DEFAULT_SCOREBOARD_HOTKEY) if is_scoreboard else ('screenshot_hotkey_vk','screenshot_hotkey_mod',DEFAULT_SCREENSHOT_HOTKEY))
+        vk,mod=self.hotkey_setting(vk_key,mod_key,default)
+        dialog=QDialog(self);dialog.setWindowTitle('Scoreboard hotkey' if is_scoreboard else 'Screenshot hotkey');dialog.setModal(True)
+        layout=QVBoxLayout(dialog);layout.setContentsMargins(18,18,18,18);layout.setSpacing(12)
+        hint=QLabel('Click the box and press the new keys, then Save. Applies immediately; no need to visit Settings.');hint.setWordWrap(True);layout.addWidget(hint)
+        edit=HotkeyEdit(vk,mod,dialog,confirm=False);layout.addWidget(edit)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+        center=self.mapToGlobal(self.rect().center());dialog.adjustSize();dialog.move(center.x()-dialog.width()//2,center.y()-dialog.height()//2)
+        if dialog.exec()!=QDialog.Accepted:return
+        self.settings.values.update({vk_key:edit.vk,mod_key:edit.mod});self.settings.save()
+        if hasattr(self,'scoreboard_hotkey_edit') and hasattr(self,'screenshot_hotkey_edit'):
+            if is_scoreboard:self.scoreboard_hotkey_edit.set_hotkey(edit.vk,edit.mod)
+            else:self.screenshot_hotkey_edit.set_hotkey(edit.vk,edit.mod)
+        self.refresh_hotkey_labels();self.register_global_hotkeys()
     def register_global_hotkeys(self):
 
         self.hotkey_filter=None;self.hotkey_registered=False;self.screenshot_hotkey_registered=False
@@ -2140,12 +2200,12 @@ class Window(QMainWindow):
             self.screenshot_hotkey_registered=bool(ctypes.windll.user32.RegisterHotKey(None,COD_AI_SCREENSHOT_HOTKEY_ID,shot_mod|MOD_NOREPEAT,shot_vk))
             screenshot_error=0 if self.screenshot_hotkey_registered else ctypes.windll.kernel32.GetLastError()
             if self.hotkey_registered:
-                self.hotkey_status.setText('GLOBAL HOTKEY ACTIVE  '+chr(0xB7)+'  '+score_text);self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;')
+                self.hotkey_status.setText('GLOBAL HOTKEY ACTIVE  '+chr(0xB7)+'  '+score_text);self.hotkey_status.setObjectName('hotkeyPill');self.hotkey_status.setAlignment(Qt.AlignCenter);self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;')
             elif self.tab_prototype:
                 self.hotkey_status.setText('Scoreboard OCR hotkey disabled in CODMunity tab preview mode.');self.hotkey_status.setStyleSheet('color:#aab4c3')
             else:
                 reason='key combination is already in use' if scoreboard_error==1409 else f'Windows error {scoreboard_error}'
-                self.hotkey_status.setText('HOTKEY UNAVAILABLE  ·  '+reason+'  ·  use Capture & OCR');self.hotkey_status.setStyleSheet('color:#ffb15e;font-weight:800;')
+                self.hotkey_status.setText('HOTKEY UNAVAILABLE  ·  '+reason+'  ·  use Capture & OCR');self.hotkey_status.setObjectName('');self.hotkey_status.setStyleSheet('color:#ffb15e;font-weight:800;')
             if self.screenshot_hotkey_registered:
                 self.cod_ai_hotkey_status.setText('GLOBAL HOTKEY ACTIVE  '+chr(0xB7)+'  '+shot_text);self.cod_ai_hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;')
             else:
@@ -2157,17 +2217,17 @@ class Window(QMainWindow):
                 QApplication.instance().removeNativeEventFilter(self.hotkey_filter);self.hotkey_filter=None
         except Exception as exc:
             if self.hotkey_filter:QApplication.instance().removeNativeEventFilter(self.hotkey_filter)
-            self.hotkey_filter=None;self.hotkey_status.setText('HOTKEY UNAVAILABLE  ·  use Capture & OCR')
+            self.hotkey_filter=None;self.hotkey_status.setObjectName('');self.hotkey_status.setText('HOTKEY UNAVAILABLE  ·  use Capture & OCR')
             self.hotkey_status.setToolTip(str(exc));self.hotkey_status.setStyleSheet('color:#ffb15e;font-weight:800;')
             self.cod_ai_hotkey_status.setText('HOTKEY UNAVAILABLE  ·  '+str(exc));self.cod_ai_hotkey_status.setStyleSheet('color:#ffb15e;font-weight:800;')
 
     def capture_scoreboard_hotkey(self):
         if self.mode.currentText()!='Squad Night':
             message='Switch to Squad Night or combined tracking before using scoreboard capture.'
-            self.hotkey_status.setText(message);self.log(message)
+            self.hotkey_status.setText(message);self.hotkey_status.setObjectName('');self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;');self.log(message)
             if self.tray.isVisible():self.tray.showMessage('Scoreboard capture',message)
             return
-        self.log('Ctrl + Shift + F8 pressed. Capturing the visible scoreboard…')
+        self.log(f'{self.hotkey_text("scoreboard")} pressed. Capturing the visible scoreboard…')
         self.capture_once(hotkey=True)
 
     def _show_capture_review(self):
@@ -2406,8 +2466,8 @@ class Window(QMainWindow):
             item=gallery.item(index)
             if item:item.setSizeHint(QSize(tile_w,tile_h))
     def update_media_count(self):
-        shots=len(getattr(self,'_shot_paths',[]) or []);videos=len(getattr(self,'_video_rows',[]) or [])
-        if hasattr(self,'media_count'):self.media_count.setText(f"{shots} screenshot{'s' if shots!=1 else ''} • {videos} video{'s' if videos!=1 else ''}")
+        shots=len(getattr(self,'_shot_paths',[]) or [])
+        if hasattr(self,'media_count'):self.media_count.setText(f"{shots} screenshot{'s' if shots!=1 else ''}")
     def _sync_screenshot_tiles(self):
         if not hasattr(self,'cod_ai_screenshots'):return
         current=self.cod_ai_screenshots.currentItem()
@@ -2486,7 +2546,7 @@ class Window(QMainWindow):
         self.cinematic_results.blockSignals(False)
         self.update_cinematic_grid();self._sync_cinematic_tiles()
         self._video_rows=list(rows);self.update_media_count();self.cinematic_results.setVisible(bool(rows));self.cinematic_empty.setVisible(not rows)
-        if hasattr(self,'media_tabs'):self.media_tabs.setTabText(1,f'Videos ({len(rows)})')
+        if hasattr(self,'preview_tabs'):self.preview_tabs.setTabText(0,f'Videos ({len(rows)})')
         self.ensure_cinematic_thumbs()
         selected=self.cinematic_results.currentItem();selected_video=selected.data(Qt.UserRole+1) if selected else ''
         pending=getattr(self,'cinematic_auto_post_pending',False)
@@ -2508,6 +2568,7 @@ class Window(QMainWindow):
         else:self.cinematic_player.setSource(QUrl());self.cinematic_play_button.setText('Play')
         has_video=bool(path and Path(path).is_file());self.preview_image.setVisible(not has_video);self.cinematic_video_widget.setVisible(has_video);self.video_controls.setVisible(has_video);self.preview_sub.setText(Path(path).name if has_video else 'Watch the selected video.')
         self.post_cinematic_button.setEnabled(has_video)
+        if has_video and hasattr(self,'preview_tabs'):self.preview_tabs.setCurrentIndex(1)
         if hasattr(self,'cinematic_play_button'):self.cinematic_play_button.setEnabled(has_video)
         if hasattr(self,'cinematic_fullscreen_button'):self.cinematic_fullscreen_button.setEnabled(has_video)
         self._sync_cinematic_tiles()
@@ -2692,7 +2753,7 @@ class Window(QMainWindow):
         self.cod_ai_screenshots.blockSignals(False)
         self.update_screenshot_grid();self._sync_screenshot_tiles()
         self._shot_paths=list(paths);self.update_media_count()
-        if hasattr(self,'media_tabs'):self.media_tabs.setTabText(0,f'Screenshots ({len(paths)})')
+
         self.cod_ai_screenshots.setVisible(bool(paths));self.cod_ai_empty.setVisible(not paths)
         if self.cod_ai_screenshots.count():
             if not self.cod_ai_screenshots.currentItem():self.cod_ai_screenshots.setCurrentRow(0)
@@ -3020,53 +3081,167 @@ class Window(QMainWindow):
         return self.capture
     def refresh_monitors(self):
         try:
-            self.outputs=self.ensure_capture().outputs();self.monitor.clear();self.monitor.addItems([x['label'] for x in self.outputs]);self.monitor.setCurrentIndex(min(self.settings.values.get('monitor',0),max(0,len(self.outputs)-1)));self.log('Display list refreshed.')
+            self.outputs=self.ensure_capture().outputs();self.monitor.clear();self.monitor.addItems([x['label'] for x in self.outputs])
+            saved=str(self.settings.values.get('scoreboard_monitor_device') or '')
+            selected=next((i for i,item in enumerate(self.outputs) if saved and str(item.get('device_name') or '')==saved),None)
+            if selected is None:
+                if self.settings.values.get('scoreboard_display_setup'):
+                    try:selected=max(0,min(int(self.settings.values.get('monitor',0)),len(self.outputs)-1))
+                    except (TypeError,ValueError):selected=0
+                else:selected=next((i for i,item in enumerate(self.outputs) if item.get('primary')),0)
+            self.monitor.setCurrentIndex(selected);self.log('Display list refreshed.')
         except Exception as exc:self.log(str(exc))
+    def setup_scoreboard_display(self,force=False):
+        already_setup=bool(self.settings.values.get('scoreboard_display_setup'))
+        try:
+            self.outputs=self.ensure_capture().outputs()
+            if not self.outputs:raise RuntimeError('No screen outputs found.')
+            self.monitor.clear();self.monitor.addItems([item['label'] for item in self.outputs])
+            saved=str(self.settings.values.get('scoreboard_monitor_device') or '')
+            primary_index=next((i for i,item in enumerate(self.outputs) if item.get('primary')),0)
+            selected=next((i for i,item in enumerate(self.outputs) if saved and str(item.get('device_name') or '')==saved),primary_index)
+            if already_setup and not saved:
+                try:selected=max(0,min(int(self.settings.values.get('monitor',primary_index)),len(self.outputs)-1))
+                except (TypeError,ValueError):selected=primary_index
+            self.monitor.setCurrentIndex(selected)
+            if already_setup and not force:
+                self.capture_display_status.setText('Game display: '+self.outputs[selected]['label'])
+                return
+            if len(self.outputs)>1:
+                choice,ok=QInputDialog.getItem(self,'Choose Game Display','Which display do you play Call of Duty on? Resolution is detected automatically.',[item['label'] for item in self.outputs],selected,False)
+                if not ok:return
+                self.monitor.setCurrentIndex(max(0,[item['label'] for item in self.outputs].index(choice)))
+            self._remember_scoreboard_monitor(self.outputs[self.monitor.currentIndex()])
+            self.settings.values['scoreboard_display_setup']=True;self.settings.save()
+            self.capture_display_status.setText('Game display: '+self.outputs[self.monitor.currentIndex()]['label'])
+            self.ocr_review_status.setText('Game display saved. The scoreboard crop will be selected automatically from its resolution.')
+            self.ocr_review_status.setStyleSheet('font-size:11px;color:#56e99a;font-weight:700;padding:2px;')
+        except Exception as exc:self.ocr_review_status.setText('Could not list displays: '+str(exc)[:180])
     def selected_output(self):
         if not self.outputs:self.refresh_monitors()
         if not self.outputs:raise RuntimeError('No screen outputs found.')
         return self.outputs[max(0,self.monitor.currentIndex())]
+    def _remember_scoreboard_monitor(self,output):
+        device_name=str(output.get('device_name') or '')
+        if device_name:self.settings.values['scoreboard_monitor_device']=device_name
+        self.settings.values['monitor']=max(0,self.monitor.currentIndex());self.settings.save()
+    def scoreboard_profile_changed(self,_index=None):
+        if not hasattr(self,'scoreboard_profile'):return
+        profile=str(self.scoreboard_profile.currentData() or 'auto')
+        self.settings.values['scoreboard_profile']=profile;self.settings.save()
+        self.capture_subtitle.setText(self._scoreboard_capture_instruction())
+    def _scoreboard_capture_instruction(self):
+        profile=str(self.scoreboard_profile.currentData() or 'auto') if hasattr(self,'scoreboard_profile') else str(self.settings.values.get('scoreboard_profile','auto'))
+        if profile=='auto':return 'At match end, leave the scoreboard visible. The app identifies the layout and selects the matching crop automatically.'
+        label='Multiplayer' if profile=='multiplayer' else 'Warzone'
+        return f'At match end, leave the {label} scoreboard visible. The app captures it with the matching display template.'
+    def _scoreboard_region_for_profile(self,output,profile):
+        width,height=int(output.get('width',0)),int(output.get('height',0))
+        templates=MULTIPLAYER_REGION_TEMPLATES if str(profile)=='multiplayer' else SCOREBOARD_REGION_TEMPLATES
+        bounds=templates.get((width,height))
+        if not bounds:
+            template_size=min(templates,key=lambda size:abs(size[1]-height))
+            bounds=templates[template_size]
+        x,y,crop_width,crop_height=bounds
+        return (x/width,y/height,crop_width/width,crop_height/height)
+    def _scoreboard_region(self,output):
+        return self._scoreboard_region_for_profile(output,str(self.settings.values.get('scoreboard_profile','auto')))
+    @staticmethod
+    def _scoreboard_profile_score(text,profile):
+        raw=str(text or '').casefold();tokens=set(re.findall(r'[a-z0-9]+',raw));joined=re.sub(r'[^a-z0-9]+','',raw)
+        if profile=='multiplayer':
+            return (4 if 'objtime' in joined or 'objectivetime' in joined else 0)+\
+                   (3 if {'player','level'}<=tokens else 0)+\
+                   (2 if 'hardpoint' in tokens else 0)+\
+                   (1 if 'shadow' in tokens or 'company' in tokens else 0)
+        return (3 if 'redeploy' in joined or 'redeploys' in joined else 0)+\
+               (2 if 'damage' in tokens else 0)+\
+               (2 if 'elimination' in tokens or 'eliminations' in tokens else 0)+\
+               (1 if 'assist' in tokens or 'assists' in tokens else 0)+\
+               (2 if 'name' in tokens and ('lvl' in tokens or 'level' in tokens) else 0)
+    @staticmethod
+    def _crop_scoreboard_region(frame,region):
+        h,w=frame.shape[:2];rx,ry,rw,rh=(max(0.0,min(1.0,float(v))) for v in region)
+        x0=max(0,min(w-1,round(rx*w)));y0=max(0,min(h-1,round(ry*h)))
+        x1=max(x0+1,min(w,round((rx+rw)*w)));y1=max(y0+1,min(h,round((ry+rh)*h)))
+        return frame[y0:y1,x0:x1].copy()
+    def _finish_scoreboard_ocr(self,frame,text,lines,hotkey=False,automatic=False,detected_profile=None,ocr_tokens=None,ocr_region_width=None):
+        if automatic:
+            from capture_utils import looks_like_scoreboard
+            if not self.detector.observe(text,looks_like_scoreboard(lines)):return
+            self.log('Stable scoreboard detected; draft ready for review.')
+        self.last_frame=frame;self.last_capture=None;self.last_detected_scoreboard_profile=detected_profile;self.last_ocr_capture_text=text;self.last_ocr_tokens=ocr_tokens or [];self.last_ocr_region_width=ocr_region_width;self.verified.setChecked(True);self.ocr_text.setPlainText(text);self.capture_preview.setPixmap(frame_pixmap(frame).scaled(650,290,Qt.KeepAspectRatio,Qt.SmoothTransformation));self.parse_ocr()
+        if hotkey:self._show_capture_review();self.log('Scoreboard OCR draft is ready. Review the names and values, then save it.')
     def capture_once(self,checked=False,automatic=False,hotkey=False):
         if self.capture_busy:
             if hotkey:self.log('Scoreboard capture is already running; wait for the current OCR draft.')
             return
         try:
             service=self.ensure_capture();output=self.selected_output()
+            self._remember_scoreboard_monitor(output)
         except Exception as exc:
             if automatic:self.auto_detect.setChecked(False)
             self.log(str(exc))
-            if hotkey:self.hotkey_status.setText(str(exc));self._show_capture_review()
+            if hotkey:self.hotkey_status.setText(str(exc));self.hotkey_status.setObjectName('');self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;');self._show_capture_review()
             return
         self.capture_busy=True
         def work():
-            frame=service.grab(output,None);text,lines,boxes=service.recognize(frame);return frame,text,lines
+            frame=service.grab(output,None)
+            profile=str(self.settings.values.get('scoreboard_profile','auto'))
+            if profile=='auto':
+                candidates=[]
+                for candidate in ('warzone','multiplayer'):
+                    region=self._scoreboard_region_for_profile(output,candidate)
+                    source=self._crop_scoreboard_region(frame,region)
+                    text,lines,tokens=service.recognize_with_tokens(source)
+                    score=self._scoreboard_profile_score(text,candidate)
+                    candidates.append((score,candidate,text,lines,tokens,source.shape[1]))
+                score,profile,text,lines,tokens,region_width=max(candidates,key=lambda item:item[0])
+                if score<2:
+                    profile='warzone';text,lines,tokens,region_width=next((item[2],item[3],item[4],item[5]) for item in candidates if item[1]=='warzone')
+                    self.log('Could not confidently identify scoreboard; using the Warzone crop. Review OCR before saving.')
+                else:self.log(f"Auto-detected {profile.title()} scoreboard ({score} layout signals).")
+            else:
+                region=self._scoreboard_region_for_profile(output,profile)
+                source=self._crop_scoreboard_region(frame,region)
+                text,lines,tokens=service.recognize_with_tokens(source)
+                region_width=source.shape[1]
+            return frame,text,lines,profile,tokens,region_width
         def done(result):
-            self.capture_busy=False;frame,text,lines=result
-            if automatic:
-                from capture_utils import looks_like_scoreboard
-                if not self.detector.observe(text,looks_like_scoreboard(lines)):return
-                self.log('Stable scoreboard detected; draft ready for review.')
-            self.last_frame=frame;self.last_capture=None;self.verified.setChecked(True);self.ocr_text.setPlainText(text);self.capture_preview.setPixmap(frame_pixmap(frame).scaled(650,290,Qt.KeepAspectRatio,Qt.SmoothTransformation));self.parse_ocr()
-            if hotkey:self._show_capture_review();self.log('Scoreboard OCR draft is ready. Review the names and values, then save it.')
+            self.capture_busy=False;frame,text,lines,profile,tokens,region_width=result
+            self._finish_scoreboard_ocr(frame,text,lines,hotkey,automatic,profile,tokens,region_width)
         def failed(message):
             self.capture_busy=False
-            if hotkey:self.hotkey_status.setText('Capture failed; try Capture Screen Shot.');self._show_capture_review()
+            if hotkey:self.hotkey_status.setText('Capture failed; try Capture Screen Shot.');self.hotkey_status.setObjectName('');self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;');self._show_capture_review()
         self.async_task(work,done,failed)
     def parse_ocr(self):
-        rows=E.parse_scoreboard(self.ocr_text.toPlainText())
+        self._parse_ocr_text(self.ocr_text.toPlainText())
+    def _parse_ocr_text(self,text):
+        tokens=getattr(self,'last_ocr_tokens',[]) if text==getattr(self,'last_ocr_capture_text',None) else []
+        rows=E.parse_scoreboard(text,ocr_tokens=tokens,profile=getattr(self,'last_detected_scoreboard_profile',None),region_width=getattr(self,'last_ocr_region_width',None))
         roster=self.store.roster()
         self.ocr_roster_names=set()
         for row in rows:
-            try:player,_=E.match_player(str(row.get('name','')),roster)
-            except Exception:player=None
+            try:player,score=E.match_player(str(row.get('name','')),roster)
+            except Exception:player=None;score=0
             if player is not None:
-                row['roster_match']=True;self.ocr_roster_names.add(str(row.get('name','')))
+                row['roster_match']=True;row['roster_match_score']=score;row['roster_match_name']=player.get('name','');self.ocr_roster_names.add(str(row.get('name','')))
         rows.sort(key=lambda row:not row.get('roster_match',False))
         keys=list(dict.fromkeys(key for row in rows for key in row.get('stats',{})))
         self.set_ocr_columns(keys or ['kills','eliminations','deaths','assists','damage','score','placement','redeploys'])
         self.ocr_table.setRowCount(0)
         for row in rows:self.add_ocr_row(row=row)
-        self.verified.setChecked(True);self.log(f'{len(rows)} candidate player rows. Review columns and correct values before saving.')
+        self.verified.setChecked(True)
+        if rows:
+            detected=getattr(self,'last_detected_scoreboard_profile',None)
+            detected_label=(detected.title()+' detected · ') if detected in ('warzone','multiplayer') else ''
+            mapping_label='Position-mapped · ' if rows[0].get('source')=='ocr_spatial' else ''
+            self.ocr_review_status.setText(mapping_label+detected_label+f'{len(rows)} player row'+('s' if len(rows)!=1 else '')+' detected. Check names and scores against the screenshot before saving.')
+            self.ocr_review_status.setStyleSheet('font-size:11px;color:#56e99a;font-weight:700;padding:2px;')
+        else:
+            self.ocr_review_status.setText('No player scoreboard detected. Keep the final match scoreboard visible and capture again; menu and Combat Record text will not be treated as players.')
+            self.ocr_review_status.setStyleSheet('font-size:11px;color:#f2bb62;font-weight:700;padding:2px;')
+        self.log(f'{len(rows)} scoreboard player rows detected. Review columns and correct values before saving.')
     def set_ocr_columns(self,keys):
         self.ocr_stat_keys=list(dict.fromkeys(str(key) for key in keys if key))
         labels={'kills':'Kills','eliminations':'Eliminations','deaths':'Deaths','assists':'Assists','damage':'Damage','score':'Score','placement':'Placement','redeploys':'Redeploys','revives':'Revives','headshots':'Headshots','kd':'K/D','downs':'Downs'}
@@ -3077,7 +3252,8 @@ class Window(QMainWindow):
         name_item=self.ocr_table.item(index,0)
         if row.get('roster_match') and name_item is not None:
             name_item.setBackground(QBrush(QColor('#1d3a2a')))
-            name_item.setToolTip('On the player roster')
+            score=float(row.get('roster_match_score',0) or 0)
+            name_item.setToolTip(f"Roster match: {row.get('roster_match_name','')} · {score:.0%} confidence")
         for col,key in enumerate(self.ocr_stat_keys,1):
             value=row.get('stats',{}).get(key,'')
             self.ocr_table.setItem(index,col,QTableWidgetItem('' if value is None else str(value)))
@@ -3125,7 +3301,9 @@ class Window(QMainWindow):
             base_payload=json.loads(existing['payload'])
         else:
             digest=__import__('hashlib').sha256(self.last_frame.tobytes()).hexdigest()[:24]
-            base_payload={'matchId':'capture-'+digest,'modeKey':self.settings.values.get('game','Squad scoreboard'),'playedAt':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),'result':'match','source':'screen_capture'}
+            profile=str(getattr(self,'last_detected_scoreboard_profile',None) or self.settings.values.get('scoreboard_profile','auto'))
+            mode_key='multiplayer' if profile=='multiplayer' else 'warzone' if profile=='warzone' else self.settings.values.get('game','Squad scoreboard')
+            base_payload={'matchId':'capture-'+digest,'modeKey':mode_key,'playedAt':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),'result':'match','source':'screen_capture'}
         snapshot=self.store.meta('codmunity_stats') or {};aliases=[hit.get(key) for hit in (snapshot.get('identity') or {}).get('hits',[]) for key in ('username','displayName') if hit.get(key)]
         aliases+=[alias for player in self.store.roster() if str(player.get('name','')).casefold()==str(self.settings.values.get('player','vintendo')).casefold() for alias in (player.get('aliases') or [])]
         players,personal_added=E.merge_personal_row(players,base_payload,self.settings.values.get('player','vintendo'),aliases)
@@ -3653,7 +3831,8 @@ class Window(QMainWindow):
         players=json.loads(job['players'] or '[]') if players is None else players
         existing=str(job.get('prompt') or '').split('\nREFERENCE PHOTO MAPPING:')[0]
         if any(isinstance(p,dict) and p.get('verified') for p in players):
-            if E.MATCH_POSTER_PROMPT_MARKER not in existing:
+            legacy_fields=('Unique match ID:','Creative variation ID:','performance_rank','ranking_basis','CODMunity benchmark context')
+            if E.MATCH_POSTER_PROMPT_MARKER not in existing or any(field in existing for field in legacy_fields):
                 try:existing=E.match_poster_prompt(players,json.loads(job['payload']),job.get('ocr',''),roster=self.store.roster(),snapshot=self.store.meta('codmunity_stats'))
                 except ValueError as exc:existing='';self.job_status.setText(str(exc))
                 else:self.store.update(job['id'],prompt=existing,theme=None)

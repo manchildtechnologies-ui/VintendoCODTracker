@@ -13,7 +13,7 @@ MATCH_POSTER_PROMPT_MARKER = 'VERIFIED MATCH POSTER REQUEST v3'
 DEFAULTS = dict(mode='Solo Ops', player='vintendo', stats_dir='', poll_seconds=5, warzone_enabled=False,
                 protected_webhook='', provider='Meta AI manual handoff',
                 auto_detect=False, auto_post=True, photos_consent=False, allow_both=False, roi=None,
-                monitor=0, profile_url='', career_summary_every_matches=10,
+                monitor=0, scoreboard_profile='auto', profile_url='', career_summary_every_matches=10,
                 browser_navigation_timeout=60, browser_download_timeout=1800, browser_retries=1,
                 scoreboard_hotkey_vk=0x77, scoreboard_hotkey_mod=0x0002|0x0004,
                 screenshot_hotkey_vk=0x77, screenshot_hotkey_mod=0x0002,
@@ -301,45 +301,160 @@ STAT_ALIASES={
     'placement':'placement','place':'placement','position':'placement','redeploy':'redeploys','redeploys':'redeploys',
     'revive':'revives','revives':'revives','headshot':'headshots','headshots':'headshots','objective':'objective','objectives':'objectives',
     'captures':'captures','capture':'captures','downs':'downs','down':'downs','wins':'wins','win':'wins','streak':'streak',
-    'kd':'kd','kdratio':'kd','objective':'objective','objectives':'objectives'
+    'kd':'kd','kdratio':'kd','objective':'objective','objectives':'objectives',
+    'objtime':'objective_time','objectivetime':'objective_time'
 }
 
-def _header_stat(token):
-    cleaned=re.sub(r'[^a-z0-9]+','',str(token).casefold())
-    if cleaned in ('player','players','username','name','operator','rank','team','squad'):return None
-    if cleaned in STAT_ALIASES:return STAT_ALIASES[cleaned]
-    if not re.search(r'[a-z]',cleaned):return None
-    return re.sub(r'[^a-z0-9]+','_',str(token).casefold()).strip('_')
+def _parse_scoreboard_spatial(text,ocr_tokens,profile=None,region_width=None):
+    """Map captured values to columns using OCR word bounds instead of text gaps."""
+    tokens=[]
+    try:
+        for value,box in ocr_tokens or []:
+            left,top,right,bottom=map(float,box)
+            value=str(value).strip()
+            if value:tokens.append({'text':value,'left':left,'right':right,'x':(left+right)/2,'y':(top+bottom)/2,'h':max(1.0,bottom-top)})
+    except (TypeError,ValueError):return []
+    if not tokens:return []
+    tolerance=max(6.0,sum(token['h'] for token in tokens)/len(tokens)*0.9)
+    if profile=='warzone':
+        # The Warzone board is a fixed-width table in our resolution templates.
+        # Use its known column centers so a missed zero cannot shift later stats.
+        right_edge=max(token['right'] for token in tokens)
+        estimated_width=float(region_width or (right_edge/0.95))
+        fixed_centers=(('score',0.439),('eliminations',0.539),('kills',0.631),
+                       ('assists',0.733),('redeploys',0.833),('damage',0.930))
+        stat_headers=[(estimated_width*fraction,key) for key,fraction in fixed_centers]
+        name_left=estimated_width*0.14
+        name_right=estimated_width*0.40
+        row_tokens=tokens
+    else:
+        name_headers={'player','players','username','gamertag','operator','name'}
+        normalized=lambda value:re.sub(r'[^a-z0-9]+','',str(value).casefold())
+        name_header=next((token for token in sorted(tokens,key=lambda item:item['y']) if normalized(token['text']) in name_headers),None)
+        if name_header is None:return []
+        header=[token for token in tokens if abs(token['y']-name_header['y'])<=tolerance]
+        stat_headers=[]
+        for token in header:
+            key=STAT_ALIASES.get(normalized(token['text']))
+            if key and key not in {field for _,field in stat_headers}:stat_headers.append((token['x'],key))
+        stat_headers.sort()
+        if len(stat_headers)<2:return []
+        name_left=name_header['x']-max(12.0,(stat_headers[0][0]-name_header['x'])*0.05)
+        name_right=stat_headers[0][0]
+        row_tokens=[token for token in tokens if token['y']>name_header['y']+max(2*tolerance,8.0)]
+    first_stat_x=stat_headers[0][0]
+    groups=[]
+    for token in sorted(row_tokens,key=lambda item:(item['y'],item['x'])):
+        target=next((group for group in reversed(groups) if abs(group[0]['y']-token['y'])<=tolerance),None)
+        if target is None:groups.append([token])
+        else:target.append(token);target[0]['y']=sum(item['y'] for item in target)/len(target)
+    rows=[]
+    for group in groups:
+        name_parts=[token['text'] for token in sorted(group,key=lambda item:item['x'])
+                    if name_left<=token['x']<name_right
+                    and re.search(r'[A-Za-z]',token['text'])]
+        name=' '.join(name_parts).strip()
+        normalized_name=re.sub(r'[^a-z0-9]+',' ',name.casefold()).strip()
+        if (not name or normalized_name.startswith(('squad totals','team totals')) or
+                normalized_name in {'player','players','name','team','total','totals'}):continue
+        stats={key:None for _,key in stat_headers};numeric_count=0
+        for token in group:
+            cleaned=token['text'].strip().replace(',','')
+            if not re.fullmatch(r'\d+(?:\.\d+)?',cleaned):continue
+            header_x,key=min(stat_headers,key=lambda pair:abs(pair[0]-token['x']))
+            if token['x']<first_stat_x-(stat_headers[1][0]-first_stat_x)*0.4:continue
+            stats[key]=float(cleaned) if '.' in cleaned else int(cleaned);numeric_count+=1
+        if numeric_count>=(2 if profile=='warzone' else 1):
+            rows.append(dict(name=name,stats=stats,verified=False,source='ocr_spatial',confidence='review_required'))
+    return rows[:16]
 
-def parse_scoreboard(text):
-    """Candidate rows only. User review is mandatory before they are verified."""
+def parse_scoreboard(text,ocr_tokens=None,profile=None,region_width=None):
+    """Read rows only after OCR exposes a recognizable player/stat table header."""
+    spatial_rows=_parse_scoreboard_spatial(text,ocr_tokens,profile,region_width)
+    if spatial_rows:return spatial_rows
     lines=[line.strip() for line in str(text or '').splitlines() if line.strip()]
-    headings=[]; rows=[]
+    non_player_labels={'player','players','score','team','squad','squad totals','team totals','totals','total','recent matches','combat record',
+        'create a class','createaclass','top stats','multiplayer','time played','avg kills game',
+        'average kills game','score per minute','kills ratio','kd ratio','assault rifle','smg',
+        'launcher','victory','defeat','cachette'}
+    name_headers={'player','players','username','gamertag','operator','name'}
+    active_header=None; rows=[]
     for line in lines:
         cells=re.split(r'\s{2,}|\t|\|',line)
-        while len(cells)>=3 and re.fullmatch(r'\d{1,3}\.',cells[0].strip()):
-            cells=cells[1:]
-        header_stats=[_header_stat(token) for token in cells]
-        if len(cells)>=2 and header_stats[0] is None and sum(field is not None for field in header_stats[1:])>=1:
-            headings=[field or re.sub(r'[^a-z0-9]+','_',cells[index].casefold()).strip('_') for index,field in enumerate(header_stats[1:],1)]
+        normalized_cells=[re.sub(r'[^a-z0-9]+','',cell.casefold()) for cell in cells]
+        name_index=next((index for index,token in enumerate(normalized_cells) if token in name_headers),None)
+        stat_columns=[(index,STAT_ALIASES[token]) for index,token in enumerate(normalized_cells)
+                      if token in STAT_ALIASES and index!=name_index]
+        if name_index is not None and len(stat_columns)>=2:
+            active_header={'name_index':name_index,'stat_columns':stat_columns}
             continue
-        if len(cells)<2: continue
-        name=cells[0].strip()
+        # A capture without an explicit player column is often a Combat Record,
+        # weapon/loadout panel, or menu. Do not turn its labels into players.
+        if active_header is None:continue
+        expected_name_index=active_header['name_index']
+        if len(cells)<=expected_name_index:continue
+        name_index=expected_name_index
+        name=cells[name_index].strip()
+        # OCR may omit a level/rank badge at the start of an individual row.
+        # That shifts the player's name and every stat one cell to the left.
+        # Recover the nearby text cell instead of silently dropping that row.
+        if not re.search(r'[A-Za-z]',name):
+            nearby=[]
+            for candidate_index in range(max(0,expected_name_index-2),min(len(cells),expected_name_index+3)):
+                candidate=cells[candidate_index].strip()
+                if not re.search(r'[A-Za-z]',candidate):continue
+                normalized_candidate=re.sub(r'[^a-z0-9]+',' ',candidate.casefold()).strip()
+                if normalized_candidate in non_player_labels:continue
+                numeric_after=sum(bool(re.fullmatch(r'\d+(?:\.\d+)?',cell.strip().replace(',','')))
+                                  for cell in cells[candidate_index+1:])
+                nearby.append((numeric_after,-abs(candidate_index-expected_name_index),candidate_index,candidate))
+            if nearby:
+                _,_,name_index,name=max(nearby)
+        stat_columns=active_header['stat_columns']
+        shift=name_index-expected_name_index
         if not re.search(r'[A-Za-z]',name): continue
-        if (len(cells)>=3 and re.search(r'[A-Za-z]',cells[1])
-                and not re.fullmatch(r'\d+(\.\d+)?',cells[1].strip().replace(',',''))
-                and (re.fullmatch(r'\[[A-Za-z0-9]{1,5}\]',name)
-                     or (name.isupper() and re.fullmatch(r'[A-Z0-9]{2,4}',name)))):
-            name=cells[1].strip()
-        nums=[]
-        for cell in cells[1:]:
+        normalized=re.sub(r'[^a-z0-9]+',' ',name.casefold()).strip()
+        if normalized in non_player_labels or re.fullmatch(r'\d+\s*[.]?\s*[a-z]{1,4}',normalized):continue
+        stats={};numeric_count=0
+        for header_index,key in stat_columns:
+            index=header_index+shift
+            if index>=len(cells):
+                stats[key]=None
+                continue
+            if index<0:
+                stats[key]=None
+                continue
+            cell=cells[index]
             cleaned=cell.strip().replace(',','')
-            if re.fullmatch(r'\d+',cleaned):nums.append(int(cleaned))
-            elif re.fullmatch(r'\d+\.\d+',cleaned):nums.append(float(cleaned))
-            else:nums.append(None)
-        if any(n is not None for n in nums):
-            stats=dict(zip(headings,nums)) if headings and len(headings)==len(nums) else {}
+            if re.fullmatch(r'\d+',cleaned):stats[key]=int(cleaned);numeric_count+=1
+            elif re.fullmatch(r'\d+\.\d+',cleaned):stats[key]=float(cleaned);numeric_count+=1
+        if numeric_count>=1:
             rows.append(dict(name=name,stats=stats,verified=False,source='ocr',confidence='review_required'))
+    if not rows:
+        # Some game scoreboards show only player rows in the selected strip and
+        # omit the column headings. Preserve those values by their stable visual
+        # order instead of guessing which number means kills, score, or damage.
+        candidates=[]
+        for line in lines:
+            cells=[cell.strip() for cell in re.split(r'\s{2,}|\t|\|',line) if cell.strip()]
+            if len(cells)<4:continue
+            name=cells[0];normalized=re.sub(r'[^a-z0-9]+',' ',name.casefold()).strip()
+            if not re.search(r'[A-Za-z]',name) or normalized in non_player_labels:continue
+            values=[]
+            for cell in cells[1:]:
+                cleaned=cell.replace(',','')
+                if re.fullmatch(r'\d+',cleaned):values.append(int(cleaned))
+                elif re.fullmatch(r'\d+\.\d+',cleaned):values.append(float(cleaned))
+                else:break
+            if len(values)>=3 and len(values)==len(cells)-1:candidates.append((name,values))
+        counts={}
+        for _,values in candidates:counts[len(values)]=counts.get(len(values),0)+1
+        if counts:
+            _,count=max(counts.items(),key=lambda item:(item[1],item[0]))
+            if count>=3:
+                for name,values in candidates:
+                    stats={f'stat_{index+1}':value for index,value in enumerate(values)}
+                    rows.append(dict(name=name,stats=stats,verified=False,source='ocr',confidence='review_required'))
     rows.sort(key=lambda row:sum(value is not None for value in row.get('stats',{}).values()),reverse=True)
     return rows[:16]
 
@@ -821,22 +936,26 @@ def match_poster_prompt(players, match=None, ocr_text='', variation_id=None, ros
         detail=match_player_detail(player['name'],roster or []) if roster else {'player':None}
         matched=detail.get('player')
         poster_name=str((matched or {}).get('display_name') or player['name']).strip()
-        row={'player':poster_name,'cod_username_for_identity':player['name'],'verified_statistics':player['stats']}
-        if player['rank'] is not None:row['performance_rank']=player['rank']
-        if player['ranking_basis']:row['ranking_basis']=player['ranking_basis']
+        row={'player':poster_name,'verified_statistics':player['stats']}
+        if poster_name!=player['name']:row['cod_username_for_identity']=player['name']
+
         if player['mvp']:row['mvp']=True
         scoreboard.append(row)
     structured=json.dumps(scoreboard,ensure_ascii=False,separators=(',',':'))
-    benchmark_lines=_codmunity_context(match or {},snapshot)
-    benchmark_block=('\nCODMunity benchmark context (background only; do not render these benchmark numbers as match statistics; render only the verified match statistics above): '+'; '.join(benchmark_lines)+'\n' if benchmark_lines else '')
+    header_lines=[]
+    if not context['game_mode'].startswith('Not shown'):header_lines.append(f'Game mode: {context["game_mode"]}')
+    if not context['result'].startswith('Not shown'):header_lines.append(f'Result: {context["result"]}')
+    if not context['placement'].startswith('Not shown'):header_lines.append(f'Placement: {context["placement"]}')
+    header='\n'.join(header_lines)
+
     return (
         'Create a wildly creative, hilarious, completely unpredictable 16:9 cinematic Call of Duty end-match image that celebrates or roasts this actual result. '
         'Invent the setting, story, costumes, title, action and visual comedy yourself. Do not choose from presets; make the artwork different every time.\n'
         f'{MATCH_POSTER_PROMPT_MARKER}\n'
-        f'Unique match ID: {str((match or {}).get("matchId") or "unavailable")}\n'
-        f'Creative variation ID: {str(variation_id or uuid.uuid4().hex[:12])}\n'
-        f'Game mode: {context["game_mode"]}\nResult: {context["result"]}\nPlacement: {context["placement"]}\n'
-        'Actual players and verified scoreboard values (JSON; omitted fields were unavailable):\n'+structured+'\n'+benchmark_block+
+
+
+        +(header+'\n' if header else '')+
+        'Actual players and verified scoreboard values (JSON; omitted fields were unavailable):\n'+structured+'\n'+
         'Use the poster display name as the visible name in the artwork. COD usernames are identity keys for matching people to their attached photos; do not print a different COD username when a poster display name is supplied. Use attached headshots only for the corresponding identities in the reference-photo mapping. You may feature the verified MVP prominently or the entire squad, depending on the match. '
         'Compose one full-bleed cinematic poster with the match results physically built into the scene on a dramatic in-world scoreboard, monitor, banner, sign, or match-complete display. Keep the players large and clear. '
         'Render the supplied result, game mode, poster display names, and exact verified statistics as visible text within the generated scene itself. Copy every supplied display name and number exactly; do not invent a lobby size, rank, score, or unavailable statistic. '
@@ -890,7 +1009,7 @@ def automatic_match_prompt(players, game_mode, outcome, assignments, snapshot=No
         f'Reference image assignments: {"; ".join(mapping)}. Do not substitute another person\'s image or claim a missing headshot is attached. '
         'The in-scene display must visibly include the exact supplied result, game mode, poster display names, and verified statistics. Copy every listed display name and value exactly. Treat COD usernames only as photo identity keys; do not print them as the poster name when a separate display name is given. Do not add a lobby size, rank, score, or other number unless it appears in the supplied statistics. '
         'Keep the results as part of the generated environment; do not add a separate footer, caption, post-processing overlay, or clean floating stats box.'
-        +(' CODMunity benchmark context (background only; do not render these benchmark numbers as match statistics): '+'; '.join(_codmunity_context(str(game_mode),snapshot))+'.' if _codmunity_context(str(game_mode),snapshot) else ''))
+        +'')
 
 def render_poster(background,target,match,players):
     from PIL import Image,ImageOps

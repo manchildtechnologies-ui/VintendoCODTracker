@@ -138,10 +138,27 @@ class CoreTests(unittest.TestCase):
     def test_match_poster_prompt_uses_verified_scoreboard_ranking_and_open_creativity(self):
         players=[dict(name='Alpha',stats={'kills':12,'damage':4000},verified=True),dict(name='Bravo',stats={'kills':8,'damage':5000},verified=True),dict(name='Unverified',stats={'kills':999999},verified=False)]
         prompt=E.match_poster_prompt(players,WZ)
-        self.assertIn('16:9',prompt);self.assertIn('invent the setting',prompt.lower());self.assertIn('creative variation id',prompt.lower())
-        self.assertIn('"player":"Alpha"',prompt);self.assertIn('"player":"Bravo"',prompt);self.assertIn('"performance_rank":1',prompt);self.assertIn('"mvp":true',prompt);self.assertNotIn('Unverified',prompt);self.assertNotIn('999999',prompt)
+        self.assertIn('16:9',prompt);self.assertIn('invent the setting',prompt.lower());self.assertNotIn('creative variation id',prompt.lower());self.assertNotIn('unique match id',prompt.lower())
+        self.assertIn('"player":"Alpha"',prompt);self.assertIn('"player":"Bravo"',prompt);self.assertNotIn('performance_rank',prompt);self.assertNotIn('ranking_basis',prompt);self.assertIn('"mvp":true',prompt);self.assertNotIn('Unverified',prompt);self.assertNotIn('999999',prompt)
         self.assertNotIn('rubber duck',prompt.lower());self.assertNotIn('Theme:',prompt)
         self.assertIn('Game mode: Warzone · Resurgence',prompt);self.assertIn('Result: Defeat',prompt);self.assertIn('Placement: 4th place',prompt)
+    def test_match_poster_prompt_omits_artwork_irrelevant_fields(self):
+        match={'matchId':'app-3ef3d5c344f26f23','modeKey':'kill_confirmed','result':'loss'}
+        players=[dict(name='[POOP]VinTenDoPower',stats={'kills':25,'eliminations':16,'deaths':4},verified=True),dict(name='Vintendo',stats={'kills':10,'damage':5209},verified=True)]
+        roster=[dict(name='[POOP]VinTenDoPower',display_name='VinTen',enabled=True)]
+        with patch.object(E,'_codmunity_context',return_value=['CODMunity benchmark: fake median 1.03']):
+            prompt=E.match_poster_prompt(players,match,snapshot={'anything':True},roster=roster)
+            auto=E.automatic_match_prompt([{'name':'Vintendo','verified':True,'stats':{'kills':10}}],'Kill Confirmed','Defeat',[{'username':'Vintendo','status':'ready','filename':'Vintendo.jpg'}],snapshot={'anything':True})
+        self.assertIn(E.MATCH_POSTER_PROMPT_MARKER,prompt)
+        self.assertIn('Defeat',prompt);self.assertIn('Kill Confirmed',prompt)
+        self.assertNotIn('app-3ef3d5c344f26f23',prompt);self.assertNotIn('variation',prompt.lower())
+        self.assertNotIn('Not shown',prompt);self.assertNotIn('Placement:',prompt)
+        self.assertNotIn('performance_rank',prompt);self.assertNotIn('ranking_basis',prompt)
+        self.assertNotIn('benchmark',prompt.lower());self.assertNotIn('1.03',prompt)
+        self.assertIn('"mvp":true',prompt)
+        self.assertIn('"player":"VinTen"',prompt);self.assertIn('"cod_username_for_identity":"[POOP]VinTenDoPower"',prompt)
+        self.assertIn('"player":"Vintendo"',prompt);self.assertNotIn('"cod_username_for_identity":"Vintendo"',prompt)
+        self.assertNotIn('benchmark',auto.lower())
     def test_match_poster_requires_verified_ocr_but_allows_missing_stat_rows(self):
         with self.assertRaisesRegex(ValueError,'actual match scoreboard'):
             E.match_poster_prompt([dict(name='Alpha',stats={'kills':12},verified=False)],WZ)

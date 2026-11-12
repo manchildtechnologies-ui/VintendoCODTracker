@@ -99,7 +99,7 @@ class CodmunityStatsTests(unittest.TestCase):
         self.assertEqual(hits[0]['leaderboard'], 'warzone_battle_royale')
         self.assertEqual(hits[0]['rank'], 42)
 
-    def test_recap_and_poster_gain_benchmark_context_only_when_snapshot_given(self):
+    def test_recap_gains_benchmark_context_but_poster_omits_it(self):
         match = {'game': 'warzone', 'mode': 'resurgence', 'playedAt': '2026-11-07T12:00:00Z',
                  'result': 'loss', 'stats': {'kills': 17, 'placement': 2}}
         plain = E.recap(match, [])
@@ -109,8 +109,8 @@ class CodmunityStatsTests(unittest.TestCase):
         self.assertIn('median', enriched.lower())
         poster = E.match_poster_prompt(
             [dict(name='Alpha', stats={'kills': 12}, verified=True)], match, snapshot=self.snapshot)
-        self.assertIn('benchmark context', poster.lower())
-        self.assertIn('do not render', poster.lower())
+        self.assertNotIn('benchmark', poster.lower())
+        self.assertNotIn('median', poster.lower())
 
     def test_import_is_idempotent_and_keeps_matches_as_baseline(self):
         store = E.Store(self.tmp / 'history.sqlite3')

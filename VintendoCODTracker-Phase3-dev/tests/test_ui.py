@@ -168,6 +168,9 @@ class UITests(unittest.TestCase):
         confirm.assert_called_once()
         self.assertEqual(confirm.call_args[0][1],'Hotkeys Set')
         self.assertNotIn('Press the new keys',edit.text())
+    def test_default_hotkeys_are_bare_arrows(self):
+        self.assertEqual(app.DEFAULT_SCOREBOARD_HOTKEY,(0x26,0));self.assertEqual(app.format_hotkey(*app.DEFAULT_SCOREBOARD_HOTKEY),'Up')
+        self.assertEqual(app.DEFAULT_SCREENSHOT_HOTKEY,(0x28,0));self.assertEqual(app.format_hotkey(*app.DEFAULT_SCREENSHOT_HOTKEY),'Down')
     def test_codmunity_tab_pulls_matches_into_tracker(self):
         from unittest.mock import patch
         w=self.window
@@ -1137,6 +1140,19 @@ class UITests(unittest.TestCase):
         self.assertNotIn('PLAYER STATISTICS:',without_text)
         w.include_stats_checkbox.setChecked(True)
         self.assertIn('PLAYER STATISTICS:',w.ensure_match_prompt(w.store.get(mid)))
+    def test_legacy_poster_prompt_regenerates_without_removed_fields(self):
+        w=self.window
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        mid,_=w.store.add({'matchId':'legacy-'+uuid.uuid4().hex,'game':'mw4','modeKey':'kill_confirmed','playedAt':'2026-11-11T10:00:00Z','result':'loss'})
+        w.store.update(mid,players=json.dumps([{'name':'Alpha','verified':True,'stats':{'kills':12}}]),
+            prompt=app.E.MATCH_POSTER_PROMPT_MARKER+'\nUnique match ID: old\nCreative variation ID: old\nActual players (JSON):\n[{"player":"Alpha","cod_username_for_identity":"Alpha","verified_statistics":{"kills":12},"performance_rank":1,"ranking_basis":["kills"]}]\nCODMunity benchmark context (background only; do not render): median 1.03')
+        text=w.ensure_match_prompt(w.store.get(mid))
+        for junk in ('Unique match ID:','Creative variation ID:','performance_rank','ranking_basis','CODMunity benchmark context','median 1.03'):
+            self.assertNotIn(junk,text)
+        self.assertIn(app.E.MATCH_POSTER_PROMPT_MARKER,text)
+        self.assertIn('Defeat',text);self.assertIn('"player":"Alpha"',text)
     def test_roster_cards_show_ladder_rank_or_placeholder(self):
         from PySide6.QtWidgets import QLabel
         w=self.window
@@ -1231,7 +1247,7 @@ class UITests(unittest.TestCase):
         self.assertIsNotNone(self._button_by_text('Change Photo'))
         self.assertIsNotNone(self._button_by_text('Remove Photo'))
         self.assertIsNotNone(self._button_by_text('Capture Game Screenshot'))
-        self.assertIn('Ctrl + F8',self.window.cod_ai_hotkey_status.text())
+        self.assertIn(self.window.hotkey_text('screenshot'),self.window.cod_ai_hotkey_status.text())
     def test_cinematic_display_helpers_format_duration_and_shorten_names(self):
         self.assertEqual(app.format_cinematic_duration(18),'0:18')
         self.assertEqual(app.format_cinematic_duration(75),'1:15')

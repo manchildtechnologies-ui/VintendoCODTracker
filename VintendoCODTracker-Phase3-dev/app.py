@@ -654,9 +654,14 @@ class Window(QMainWindow):
         if name=='AI Studio':
             try:
                 current=getattr(self,'active_id',None)
-                if self.store.get(current) if current else None:return
+                job=self.store.get(current) if current else None
+                if job and job['status'] not in ('delivered','solo_delivered'):return
                 rows=self.store.history()
-                if rows:self.load_studio(next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id']))
+                nxt=next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),None)
+                if nxt:self.load_studio(nxt)
+                else:
+                    try:self._clear_studio_for_next()
+                    except (AttributeError,RuntimeError):pass
             except (AttributeError,RuntimeError):pass
     def _validate_codmunity_attach(self):
         hwnd=getattr(self,'codmunity_hwnd',None)
@@ -2575,7 +2580,37 @@ class Window(QMainWindow):
     def test_cinematic_video(self):
         source,_=QFileDialog.getOpenFileName(self,'Choose a COD gameplay screenshot',str(self.screenshots_dir()),'Images (*.png *.jpg *.jpeg *.webp)')
         if source:self.queue_cinematic_source(source)
+    def _sweep_stale_cinematics(self,max_age_s=2100):
+        """Requeue video jobs whose worker died mid-run (restart/crash) instead of leaving them stuck."""
+        try:rows=self.store.recent_cinematics(100)
+        except Exception:return 0
+        try:active=getattr(self,'_inapp_active',None)
+        except Exception:active=None
+        try:started=getattr(self,'_inapp_started',None)
+        except Exception:started=None
+        now=time.time();reset=0
+        for row in rows or []:
+            try:
+                if str(row.get('status') or '') not in ('running','awaiting_generation','awaiting_download'):continue
+                try:age=now-float(row.get('updated') or 0)
+                except (TypeError,ValueError):age=max_age_s+1
+                if age<max_age_s:continue
+                if active and row.get('id')==active:
+                    try:flag_age=now-float(started) if started is not None else -1
+                    except (TypeError,ValueError):flag_age=-1
+                    if flag_age<max_age_s:continue
+                    self._inapp_active=None
+                    try:self._inapp_started=None
+                    except Exception:pass
+                self.store.update_cinematic(row['id'],status='queued',error='Video worker ended with no result; requeued automatically.')
+            except Exception:continue
+            reset+=1
+            try:self.log('Reset orphaned video job '+str(row.get('id'))+'; it retries automatically.')
+            except Exception:pass
+        return reset
     def poll_inapp_cinematics(self):
+        try:self._sweep_stale_cinematics()
+        except Exception:pass
         if getattr(self,'_inapp_active',None):return
         try:pending=self.store.pending_cinematics(1)
         except Exception:return
@@ -2586,6 +2621,8 @@ class Window(QMainWindow):
         except Exception:return
         if not claimed:return
         self._inapp_active=job_id
+        try:self._inapp_started=time.time()
+        except Exception:pass
         try:self.store.update_cinematic(job_id,status='awaiting_generation')
         except Exception:pass
         self._start_embed_poll()
@@ -2594,7 +2631,10 @@ class Window(QMainWindow):
         try:row=self.store.get_cinematic(job_id)
         except Exception:row=None
         if not row or row.get('status') not in ('running','awaiting_generation'):
-            self._inapp_active=None;return
+            self._inapp_active=None
+            try:self._inapp_started=None
+            except Exception:pass
+            return
         prompt=str(row.get('prompt') or '');screenshot=str(row.get('image') or '')
         try:talent_ids=json.loads(row.get('talent_ids') or '[]')
         except Exception:talent_ids=[]
@@ -2638,6 +2678,8 @@ class Window(QMainWindow):
         try:self.on_log('In-app cinematic completed: '+job_id)
         except Exception:pass
         self._inapp_active=None
+        try:self._inapp_started=None
+        except Exception:pass
         QTimer.singleShot(0,self.refresh_cinematic_results)
     def _fail_inapp_cinematic(self,job_id,message):
         try:self.store.update_cinematic(job_id,status='failed',error=str(message)[:300])
@@ -2645,6 +2687,8 @@ class Window(QMainWindow):
         try:self.on_log('In-app cinematic failed: '+job_id+' — '+str(message)[:160]);QTimer.singleShot(0,lambda:self._show_login_card(message) if ('login' in str(message).lower() or 'signed out' in str(message).lower()) else self.set_automation_stage('failed',message))
         except Exception:pass
         self._inapp_active=None
+        try:self._inapp_started=None
+        except Exception:pass
         QTimer.singleShot(0,self.refresh_cinematic_results)
     def queue_selected_cinematic(self):
         item=self.cod_ai_screenshots.currentItem()
@@ -3603,9 +3647,16 @@ class Window(QMainWindow):
         if not hasattr(self,'history'):return
         rows=self.store.history()
         active_id=getattr(self,'active_id',None)
+        current=self.store.get(active_id) if active_id else None
+        if current and current['status'] in ('delivered','solo_delivered'):
+            active_id=None
+            self.active_id=None
         if active_id and self.store.get(active_id):picked=active_id
-        else:picked=next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),rows[0]['id'] if rows else None)
+        else:picked=next((r['id'] for r in rows if r['status'] not in ('baseline','solo_delivered','delivered')),None)
         if picked and picked!=getattr(self,'active_id',None):self.load_studio(picked)
+        elif picked is None and getattr(self,'active_id',None) is None:
+            try:self._clear_studio_for_next()
+            except (AttributeError,RuntimeError):pass
         self.dashboard_metrics['matches'].setText(f'{len(rows):,}')
         self.dashboard_metrics['squad_posts'].setText(f"{sum(j['status']=='delivered' for j in rows):,}")
         review_statuses={'needs_review','art_ready','ready','failed','uncertain','awaiting_artwork'}
@@ -3798,6 +3849,24 @@ class Window(QMainWindow):
                     self.verified.setChecked(True)
                 except (OSError,ValueError):self.last_frame=None
         self.job_status.setText(job['error'] or 'Ready for review')
+    def _clear_studio_for_next(self,message=''):
+        """One-shot Studio: drop the posted match so the next screenshot starts fresh."""
+        self.active_id=None
+        try:self.studio_match.setText('Ready for the next match — capture a scoreboard.')
+        except (AttributeError,RuntimeError):pass
+        try:self.prompt.clear()
+        except (AttributeError,RuntimeError):pass
+        for attr in ('opt_game_mode','opt_result','opt_placement'):
+            try:getattr(self,attr).setText('—')
+            except (AttributeError,RuntimeError):pass
+        try:self.art_preview.setText('Finished artwork preview')
+        except (AttributeError,RuntimeError):pass
+        try:self.photo_assignments.setText('Consented reference photos are matched automatically when available.')
+        except (AttributeError,RuntimeError):pass
+        try:self.generate_poster_button.setEnabled(False)
+        except (AttributeError,RuntimeError):pass
+        try:self.job_status.setText(message or 'Ready for the next match.')
+        except (AttributeError,RuntimeError):pass
     def view_source(self):
         job=self.selected_job()
         if not job:return
@@ -3875,11 +3944,12 @@ class Window(QMainWindow):
         self.log('Browser cancellation requested; match retained.');self.refresh_history()
     def prepare_artwork(self):
         job=self.store.get(self.active_id) if self.active_id else None
+        if job and job['status'] in ('delivered','solo_delivered'):job=None
         if not job:
             rows=self.store.history()
-            if not rows:self.notice('Select a match or save a verified scoreboard first.');return
             actionable=[row for row in rows if row['status'] not in ('baseline','solo_delivered','delivered')]
-            pool=sorted(actionable or rows,key=lambda row:row.get('created') or 0,reverse=True)
+            if not actionable:self.notice('All tracked matches are already posted. Capture a new scoreboard for the next one.');return
+            pool=sorted(actionable,key=lambda row:row.get('created') or 0,reverse=True)
             mid=pool[0]['id']
             self.active_id=mid;job=self.store.get(mid)
             self.log('One-click poster: newest actionable match selected automatically.')
@@ -4246,7 +4316,10 @@ class Window(QMainWindow):
         url=self.webhook.text().strip();match=json.loads(job['payload']);players=json.loads(job['players']);content=E.recap(match,players,snapshot=self.store.meta('codmunity_stats'));poster=job.get('poster') or job['image']
         if job['capture'] and not players:content+='\nOCR (not verified):\n'+job['ocr'][:600]
         def done(message_id):
-            self.store.update(mid,status='delivered',message_id=message_id,error='');E.reserve_legacy_match(match);self.refresh_history();self.log('Discord poster delivered: '+mid);QTimer.singleShot(0,lambda:self.set_automation_stage('posted',mid))
+            self.store.update(mid,status='delivered',message_id=message_id,error='');E.reserve_legacy_match(match);self.refresh_history();self.log('Discord poster delivered: '+mid)
+            try:self._clear_studio_for_next('Posted to Discord. Ready for the next match — capture a new scoreboard.')
+            except (AttributeError,RuntimeError):pass
+            QTimer.singleShot(0,lambda:self.set_automation_stage('posted',mid))
         def failed(error):
             self.store.update(mid,status='uncertain' if 'uncertain' in error.lower() else 'failed',error=error);self.refresh_history()
         self.async_task(lambda:E.send_discord(url,poster,content),done,failed);self.refresh_history()

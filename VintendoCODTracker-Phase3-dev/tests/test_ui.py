@@ -702,6 +702,27 @@ class UITests(unittest.TestCase):
                 save_download(root,mid,Download(),w.received_art,w.log)
                 self.wait_until(lambda:w.store.get(mid)['status']=='delivered')
             self.assertEqual(len(calls),1);self.assertIn('kills: 9',calls[0][2]);self.assertTrue(Path(calls[0][1]).is_file())
+    def test_stale_awaiting_download_video_is_requeued(self):
+        import sqlite3
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        db=_tmpdir/'history.sqlite3';w=self.window;w.store=app.E.Store(db)
+        image=_tmpdir/'shot.png';image.write_bytes(b'png')
+        stale='cin-stale-'+uuid.uuid4().hex
+        self.assertTrue(w.store.create_cinematic(stale,'COD_2026-11-12.png',image,'prompt'))
+        w.store.update_cinematic(stale,status='awaiting_download')
+        con=sqlite3.connect(db);con.execute('UPDATE cinematic_jobs SET updated=? WHERE id=?',(time.time()-7200,stale));con.commit();con.close()
+        fresh='cin-fresh-'+uuid.uuid4().hex
+        self.assertTrue(w.store.create_cinematic(fresh,'shot.png',image,'prompt'))
+        w.store.update_cinematic(fresh,status='awaiting_download')
+        w._inapp_active=fresh;w._inapp_started=time.time()
+        try:reset=w._sweep_stale_cinematics()
+        finally:
+            w._inapp_active=None
+            try:w._inapp_started=None
+            except Exception:pass
+        self.assertEqual(reset,1)
+        self.assertEqual(w.store.get_cinematic(stale)['status'],'queued')
+        self.assertEqual(w.store.get_cinematic(fresh)['status'],'awaiting_download')
     def test_headshots_only_for_identified_consenting_players(self):
         from PIL import Image
         from unittest.mock import patch
@@ -1718,6 +1739,27 @@ class UITests(unittest.TestCase):
         w.active_id=old
         w.nav.setCurrentRow(home[0]);w.nav.setCurrentRow(rows[0])
         self.assertEqual(w.active_id,old)
+    def test_delivered_match_leaves_studio_ready_for_next(self):
+        import tempfile as _tf
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        old,_=w.store.add({'matchId':'studio-posted-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'},'delivered')
+        new,_=w.store.add({'matchId':'studio-next-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(new,players=json.dumps([{'name':'Vintendo','verified':True,'stats':{'kills':5}}]))
+        w.active_id=old
+        w.refresh_history()
+        self.assertEqual(w.active_id,new)
+        self.assertIn(new,w.studio_match.text())
+        w.store.update(new,status='delivered')
+        w.refresh_history()
+        self.assertIsNone(w.active_id)
+        self.assertIn('Ready for the next match',w.studio_match.text())
+        self.assertFalse(w.generate_poster_button.isEnabled())
+        calls=[]
+        w._prepare_and_launch=lambda mid,manual=True:(calls.append(mid) or True)
+        w.notice=lambda _:None
+        w.prepare_artwork()
+        self.assertEqual(calls,[])
     def test_ocr_highlights_roster_matches_and_keeps_only_matched(self):
         from PySide6.QtCore import Qt
         w=self.window

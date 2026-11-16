@@ -376,6 +376,28 @@ class LegacyRegressionTests(unittest.TestCase):
             os.utime(old/'matches.json',(1000000000,1000000000));os.utime(new/'matches.json',(1800000000,1800000000))
             with patch.object(m,'APP',fake):
                 self.assertEqual(m.find_stats_dir({}),new)
+    def test_automatic_prompt_accepts_larger_verified_squad(self):
+        players=[{'name':f'Player{i}','verified':True,'stats':{'kills':i}} for i in range(1,6)]
+        assignments=[{'username':p['name'],'filename':f"{p['name']}.jpg" if index<4 else '','status':'ready' if index<4 else 'limit_reached','reason':'' if index<4 else 'Only four player headshots can be staged for one poster job.'} for index,p in enumerate(players)]
+        prompt=E.automatic_match_prompt(players,'Resurgence','Victory',assignments)
+        self.assertIn('featuring these 5 people',prompt)
+        for player in players:self.assertIn(player['name'],prompt)
+        self.assertIn('NO REFERENCE IMAGE (Only four player headshots can be staged for one poster job.)',prompt)
+    def test_automatic_prompt_rejects_zero_identified_players(self):
+        with self.assertRaisesRegex(ValueError,'at least one identified player'):
+            E.automatic_match_prompt([{'name':'Ghost','verified':False}],'Resurgence','Victory',[])
+        with self.assertRaisesRegex(ValueError,'at least one identified player'):
+            E.automatic_match_prompt([],'Resurgence','Victory',[])
+    def test_prepare_poster_job_accepts_five_verified_players(self):
+        with fixture_dir() as tmp:
+            root=Path(tmp);store=E.Store(root/'history.sqlite3')
+            players=[{'name':f'Player{i}','verified':True,'stats':{'kills':i},'source':'user_verified_ocr'} for i in range(1,6)]
+            mid,_=store.add({'matchId':'five-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win','playedAt':'2026-11-07T10:00:00Z','stats':{'kills':20}},'needs_review')
+            store.update(mid,players=json.dumps(players))
+            prepared=E.prepare_poster_job(store,root,mid)
+            self.assertIsNotNone(prepared)
+            for player in players:self.assertIn(player['name'],prepared['prompt'])
+            self.assertEqual(E.Store(root/'history.sqlite3').get(mid)['gen_state'],'prepared')
 def sys_module():
     import sys
     return sys

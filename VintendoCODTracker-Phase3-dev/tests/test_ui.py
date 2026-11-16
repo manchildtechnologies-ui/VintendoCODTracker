@@ -2204,4 +2204,37 @@ class UITests(unittest.TestCase):
             try:w.store.delete_player(w.current_player)
             except Exception:pass
             w.restore_save_button(w.roster_save_button)
+    def test_effective_stats_dir_prefers_valid_override_then_discovers(self):
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        w=self.window
+        tmp=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmp,True)
+        (tmp/'matches.json').write_text('[]')
+        original=w.stats_dir.text()
+        try:
+            w.stats_dir.setText(str(tmp))
+            self.assertEqual(w._effective_stats_dir(),str(tmp))
+            w.stats_dir.setText(str(tmp/'ghost-folder'))
+            with patch.object(app.E,'legacy',return_value=SimpleNamespace(find_stats_dir=lambda config:str(tmp))):
+                self.assertEqual(w._effective_stats_dir(),str(tmp))
+            with patch.object(app.E,'legacy',side_effect=FileNotFoundError('none')):
+                self.assertEqual(w._effective_stats_dir(),str(tmp/'ghost-folder'))
+        finally:w.stats_dir.setText(original)
+    def test_stats_field_autofills_from_discovered_folder(self):
+        import tempfile
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        w=self.window
+        tmp=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmp,True)
+        (tmp/'matches.json').write_text('[]')
+        original=w.stats_dir.text()
+        try:
+            w.stats_dir.setText('')
+            with patch.object(app.E,'legacy',return_value=SimpleNamespace(find_stats_dir=lambda config:str(tmp))):
+                w._autofill_stats_dir()
+            self.assertEqual(w.stats_dir.text(),str(tmp))
+        finally:
+            w.stats_dir.setText(original)
+            w.settings.values['stats_dir']=original;w.settings.save()
 if __name__=='__main__':unittest.main()

@@ -626,7 +626,10 @@ class Window(QMainWindow):
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
         self.app_tabs.currentChanged.connect(self.app_tab_changed)
         self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);self.app_tabs.setCornerWidget(self.exit_button,Qt.TopRightCorner)
-        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs();QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity)
+        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs()
+        try:self._autofill_stats_dir()
+        except Exception:pass
+        QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity)
         if self.tab_prototype:
             for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
@@ -3051,9 +3054,28 @@ class Window(QMainWindow):
         if path:edit.setText(path)
     def reset_media_dirs(self):
         self.screenshots_dir_edit.setText('');self.videos_dir_edit.setText('')
+    def _effective_stats_dir(self):
+        """Resolved CODMunity stats folder: a valid saved override, else the auto-discovered user folder. Returns '' when nothing is resolvable yet."""
+        try:override=self.stats_dir.text().strip() if hasattr(self,'stats_dir') else ''
+        except (AttributeError,RuntimeError):override=''
+        if override:
+            try:
+                if (Path(override)/'matches.json').is_file():return override
+            except (OSError,RuntimeError):pass
+        try:return str(E.legacy().find_stats_dir({}))
+        except Exception:return override
+    def _autofill_stats_dir(self):
+        """Fill an empty stats folder field with the auto-discovered one so the user is never asked for the path."""
+        try:
+            if hasattr(self,'stats_dir') and not self.stats_dir.text().strip():
+                found=self._effective_stats_dir()
+                if found and Path(found).is_dir():
+                    self.stats_dir.setText(found);self.settings.values['stats_dir']=found;self.settings.save()
+        except (AttributeError,OSError,RuntimeError):pass
     def pick_stats(self):
 
-        path=QFileDialog.getExistingDirectory(self,'Choose folder containing matches.json')
+        start=self._effective_stats_dir() or str(E.DATA)
+        path=QFileDialog.getExistingDirectory(self,'Choose folder containing matches.json',start)
         if path:self.stats_dir.setText(path)
     def test_data(self):
         values={**self.settings.values,'stats_dir':self.stats_dir.text().strip()}
@@ -3833,7 +3855,8 @@ class Window(QMainWindow):
         indicator.setStyleSheet('color:'+color+';')
     def refresh_dashboard_status(self):
         if not hasattr(self,'dashboard_health'):return
-        folder=Path(self.stats_dir.text().strip()) if hasattr(self,'stats_dir') and self.stats_dir.text().strip() else None
+        resolved=self._effective_stats_dir() if hasattr(self,'stats_dir') else ''
+        folder=Path(resolved) if resolved else None
         folder_ready=bool(folder and folder.is_dir())
         self._set_dashboard_health('codmunity','FOLDER READY' if folder_ready else 'FOLDER NOT FOUND',folder_ready)
         auto=self.tracking and self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked()

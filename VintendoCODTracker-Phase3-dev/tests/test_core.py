@@ -338,6 +338,44 @@ class LegacyRegressionTests(unittest.TestCase):
             state=root/'state.json';E.atomic_json(state,{'posted_ids':[],'feed_cutoff_ms':0,'matches_since_career':0})
             with patch.object(m,'STATE',state),patch.object(m,'OUT',root/'reports'),patch.object(m,'ACHIEVEMENT_HISTORY',root/'achievements.json'),patch.object(m,'read_json',read),patch.object(sys_module(),'argv',['tracker','--watch']),patch('urllib.request.urlopen',lambda req,**kwargs:(calls.append(req) or Response())):
                 m.main(Stop());self.assertEqual(len(calls),1);self.assertIn(b'WIN',calls[0].data);self.assertIn(MP['matchId'],E.read_json(state)['posted_ids']);m.main(Stop());self.assertEqual(len(calls),1)
+    def test_stats_dir_resolves_lone_user_folder_without_asking(self):
+        m=E.legacy()
+        with fixture_dir() as tmp:
+            root=Path(tmp);fake=root/'Local'/'CODMunity'
+            user=fake/'stats'/'u-friend123';user.mkdir(parents=True);(user/'matches.json').write_text('[]')
+            with patch.object(m,'APP',fake):
+                self.assertEqual(m.find_stats_dir({}),user)
+                self.assertEqual(m.find_stats_dir({'stats_dir':''}),user)
+    def test_stats_dir_ignores_stale_override_from_another_pc(self):
+        m=E.legacy()
+        with fixture_dir() as tmp:
+            root=Path(tmp);fake=root/'Local'/'CODMunity'
+            user=fake/'stats'/'u-friend123';user.mkdir(parents=True);(user/'matches.json').write_text('[]')
+            stale=str(fake/'stats'/'u-olduser999')
+            with patch.object(m,'APP',fake):
+                self.assertEqual(m.find_stats_dir({'stats_dir':stale}),user)
+    def test_stats_dir_honors_valid_override(self):
+        m=E.legacy()
+        with fixture_dir() as tmp:
+            root=Path(tmp);fake=root/'Local'/'CODMunity'
+            user=fake/'stats'/'u-friend123';user.mkdir(parents=True);(user/'matches.json').write_text('[]')
+            custom=root/'custom-stats';custom.mkdir();(custom/'matches.json').write_text('[]')
+            with patch.object(m,'APP',fake):
+                self.assertEqual(m.find_stats_dir({'stats_dir':str(custom)}),custom)
+    def test_stats_dir_missing_folder_raises(self):
+        m=E.legacy()
+        with fixture_dir() as tmp:
+            with patch.object(m,'APP',Path(tmp)/'Nobody'/'Here'):
+                self.assertRaises(FileNotFoundError,m.find_stats_dir,{})
+    def test_stats_dir_multiple_folders_picks_newest(self):
+        m=E.legacy()
+        with fixture_dir() as tmp:
+            root=Path(tmp);fake=root/'Local'/'CODMunity'
+            old=fake/'stats'/'u-old';new=fake/'stats'/'u-new'
+            for folder in (old,new):folder.mkdir(parents=True);(folder/'matches.json').write_text('[]')
+            os.utime(old/'matches.json',(1000000000,1000000000));os.utime(new/'matches.json',(1800000000,1800000000))
+            with patch.object(m,'APP',fake):
+                self.assertEqual(m.find_stats_dir({}),new)
 def sys_module():
     import sys
     return sys

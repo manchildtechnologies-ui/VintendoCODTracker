@@ -48,13 +48,22 @@ def write_json(path, data):
 
 
 def find_stats_dir(config):
+    # A saved override wins only while it still holds matches.json (a copied
+    # settings file points at another PC's user folder). Otherwise resolve
+    # %LOCALAPPDATA%/CODMunity/stats on this machine: each CODMunity user gets
+    # their own folder in there, so the single folder containing matches.json
+    # is the stats folder — no need to ask the user for the path.
     override = config.get('stats_dir')
     if override:
-        return Path(override).expanduser()
+        candidate = Path(override).expanduser()
+        if (candidate / 'matches.json').is_file():
+            return candidate
     root = APP / 'stats'
     dirs = [p for p in root.iterdir() if p.is_dir() and (p / 'matches.json').exists()] if root.exists() else []
     if not dirs:
         raise FileNotFoundError(f'No matches.json found under {root}')
+    if len(dirs) == 1:
+        return dirs[0]
     return max(dirs, key=lambda p: (p / 'matches.json').stat().st_mtime)
 
 

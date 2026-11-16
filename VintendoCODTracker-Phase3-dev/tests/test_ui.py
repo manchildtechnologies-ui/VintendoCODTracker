@@ -2147,4 +2147,61 @@ class UITests(unittest.TestCase):
             result=captured['fn']()
         self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
         self.addCleanup(setattr,w,'_inapp_poster_active',None)
+    def test_hotkey_edit_click_arms_prompt_but_popup_return_keeps_saved_value(self):
+        from PySide6.QtGui import QFocusEvent
+        from PySide6.QtCore import QEvent
+        edit=app.HotkeyEdit(0x26,0,confirm=False)
+        try:
+            self.assertEqual(edit.text(),'Up')
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.MouseFocusReason))
+            self.assertIn('Press the new keys',edit.text())
+            edit.focusOutEvent(QFocusEvent(QEvent.FocusOut))
+            self.assertEqual(edit.text(),'Up')
+            edit.set_hotkey(0x28,0);edit.clearFocus()
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.PopupFocusReason))
+            self.assertEqual(edit.text(),'Down')
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.ActiveWindowFocusReason))
+            self.assertEqual(edit.text(),'Down')
+        finally:edit.deleteLater()
+    def test_hotkey_edit_keypress_clears_focus_so_ok_does_not_reprompt(self):
+        from PySide6.QtGui import QFocusEvent,QKeyEvent
+        from PySide6.QtCore import QEvent
+        edit=app.HotkeyEdit(0x26,0,confirm=False)
+        try:
+            edit.show();self.qt.processEvents()
+            edit.setFocus(Qt.MouseFocusReason);self.qt.processEvents()
+            self.assertTrue(edit.hasFocus())
+            event=QKeyEvent(QEvent.KeyPress,Qt.Key_Down,Qt.NoModifier,0,0x28,0)
+            edit.keyPressEvent(event)
+            self.assertEqual(edit.text(),'Down')
+            self.assertFalse(edit.hasFocus())
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.PopupFocusReason))
+            self.assertEqual(edit.text(),'Down')
+        finally:edit.deleteLater()
+    def test_save_buttons_flash_confirmation_and_restore(self):
+        w=self.window
+        for button,base in ((w.save_capture_button,'Save info'),(w.roster_save_button,'Save Player'),(w.save_settings_button,'Save all settings')):
+            self.assertIsNotNone(button)
+            self.assertTrue(w.flash_save_button(button,base))
+            self.assertEqual(button.text(),'✓ Saved!')
+            self.assertIn('2ea36b',button.styleSheet())
+            self.assertTrue(w.restore_save_button(button))
+            self.assertEqual(button.text(),base)
+            self.assertEqual(button.styleSheet(),'')
+            self.assertFalse(w.restore_save_button(button))
+    def test_save_player_success_flashes_roster_save_button(self):
+        w=self.window
+        w.roster_name.setText('Flash Test Player '+uuid.uuid4().hex[:8])
+        w.roster_display_name.setText('');w.roster_aliases.setText('');w.codmunity_username.setText('')
+        w.roster_profile_url.setText('');w.photo_path.setText('');w.current_player=None
+        w.save_player()
+        try:
+            self.assertIsNotNone(w.current_player)
+            self.assertEqual(w.roster_save_button.text(),'✓ Saved!')
+            saved_names=[str(p.get('name')) for p in w.store.roster()]
+            self.assertIn(w.roster_name.text(),saved_names)
+        finally:
+            try:w.store.delete_player(w.current_player)
+            except Exception:pass
+            w.restore_save_button(w.roster_save_button)
 if __name__=='__main__':unittest.main()

@@ -100,6 +100,9 @@ class CaptureEngine:
                     self.camera=None;self.camera_id=None
                 elif previous!=identity:self._select_camera(previous)
     def recognize(self,frame):
+        text,lines,tokens=self.recognize_with_tokens(frame)
+        return text,lines,[box for _,box in tokens]
+    def recognize_with_tokens(self,frame):
         with self.lock:
             if self.ocr is None:
                 from rapidocr_onnxruntime import RapidOCR
@@ -107,8 +110,7 @@ class CaptureEngine:
                 # cap ONNX threads so background monitoring cannot saturate CPU.
                 self.ocr=RapidOCR(use_cls=False,intra_op_num_threads=2,inter_op_num_threads=1)
             result,_=self.ocr(frame)
-            text,lines,boxes=capture_utils.group_ocr_lines(result)
-            return text,lines,boxes
+            return capture_utils.group_ocr_lines_detailed(result)
     def close(self):
         with self.lock:
             if self.camera:self.camera.release()

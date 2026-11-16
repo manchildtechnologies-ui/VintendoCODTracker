@@ -43,6 +43,7 @@ browser-e2e-work/
 release-keys/
 *.pem
 *.key
+collaboration/relay.sqlite3*
 
 # ---- snapshots and backups stay local ----
 backups/

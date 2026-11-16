@@ -34,6 +34,11 @@ def get_outputs() -> list[dict]:
 
 def group_ocr_lines(result) -> tuple[str, list[str], list[tuple]]:
     """Turn RapidOCR boxes into readable lines, preserving box coordinates."""
+    text,lines,tokens=group_ocr_lines_detailed(result)
+    return text,lines,[box for _,box in tokens]
+
+def group_ocr_lines_detailed(result) -> tuple[str, list[str], list[tuple]]:
+    """Return OCR text, grouped lines, and each recognized word with its bounds."""
     if not result:
         return "", [], []
     items = []
@@ -66,13 +71,14 @@ def group_ocr_lines(result) -> tuple[str, list[str], list[tuple]]:
             target[0]["y"] = sum(v["y"] for v in target) / len(target)
     groups.sort(key=lambda g: g[0]["y"])
     lines = ["  ".join(v["text"] for v in sorted(g, key=lambda v: v["x"])) for g in groups]
-    boxes = [v["box"] for v in items]
-    return "\n".join(lines), lines, boxes
+    tokens=[(v["text"],v["box"]) for v in items]
+    return "\n".join(lines), lines, tokens
 
 def looks_like_scoreboard(lines: list[str]) -> bool:
-    """Conservative gate: require several stat headings and four numeric rows."""
+    """Only arm auto-capture when OCR sees a player column and several stats."""
     text = " ".join(lines).casefold()
-    headings = ("kill", "damage", "assist", "score", "elimination", "revive", "placement")
-    heading_hits = sum(1 for word in headings if word in text)
+    headings = ("kill", "damage", "assist", "score", "elimination", "revive", "placement", "death")
+    heading_hits = sum(1 for word in headings if re.search(r"\b"+word+r"s?\b", text))
+    has_player_column = any(re.search(r"\b"+word+r"\b", text) for word in ("player", "players", "username", "gamertag", "operator"))
     numeric_rows = sum(1 for line in lines if re.search(r"\d", line))
-    return heading_hits >= 2 and numeric_rows >= 4 and len(lines) >= 5
+    return has_player_column and heading_hits >= 2 and numeric_rows >= 4 and len(lines) >= 5

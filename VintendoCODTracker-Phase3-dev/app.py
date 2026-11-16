@@ -530,8 +530,21 @@ class HotkeyEdit(QLineEdit):
         self._waiting=bool(on)
         if self._waiting:self.setText('Press the new keys…');self.setStyleSheet('border:2px solid #f97316;border-radius:6px;')
         else:self.setStyleSheet('');self.setText(format_hotkey(self.vk,self.mod))
+    @staticmethod
+    def _focus_arms_waiting(reason):
+        # Only an explicit user gesture (click or Tab) arms the
+        # "press the new keys" prompt. Dialog-open auto-focus and focus
+        # returning from a popup (e.g. the "Hotkeys Set" confirmation) must
+        # leave the just-saved hotkey text alone, or the box looks like it is
+        # asking for the hotkey again right after OK.
+        return reason in (Qt.MouseFocusReason,Qt.TabFocusReason,Qt.BacktabFocusReason,Qt.ShortcutFocusReason)
     def focusInEvent(self,event):
-        super().focusInEvent(event);self._set_waiting(True)
+        super().focusInEvent(event)
+        try:reason=event.reason()
+        except (AttributeError,RuntimeError):reason=Qt.OtherFocusReason
+        if self._focus_arms_waiting(reason):self._set_waiting(True)
+    def mousePressEvent(self,event):
+        super().mousePressEvent(event);self._set_waiting(True)
     def focusOutEvent(self,event):
         super().focusOutEvent(event);self._set_waiting(False)
     def keyPressEvent(self,event):
@@ -549,7 +562,7 @@ class HotkeyEdit(QLineEdit):
         elif Qt.Key_F1<=key<=Qt.Key_F24:vk=0x70+(key-Qt.Key_F1)
         elif 0x30<=key<=0x39 or 0x41<=key<=0x5A:vk=key
         elif key in (Qt.Key_Up,Qt.Key_Down,Qt.Key_Left,Qt.Key_Right):vk={Qt.Key_Up:0x26,Qt.Key_Down:0x28,Qt.Key_Left:0x25,Qt.Key_Right:0x27}[key]
-        if vk:self.set_hotkey(vk,mod);self._set_waiting(False)
+        if vk:self.set_hotkey(vk,mod);self._set_waiting(False);self.clearFocus()
         if vk and self._confirm:QMessageBox.information(self,'Hotkeys Set','Hotkey updated to '+format_hotkey(self.vk,self.mod)+'.')
 class Window(QMainWindow):
 
@@ -805,6 +818,35 @@ class Window(QMainWindow):
         row=QHBoxLayout()
         for w in widgets:row.addWidget(w)
         layout.addLayout(row);return row
+    SAVE_FLASH_MS=1600
+    SAVE_FLASH_OK_STYLE='background:#0d2318;border:1px solid #2ea36b;color:#7bf0a8;font-weight:800;'
+    SAVE_FLASH_FAIL_STYLE='background:#2a1215;border:1px solid #ed2938;color:#ff8b93;font-weight:800;'
+    def flash_save_button(self,button,base_text=None,ok=True):
+        """Briefly swap a save button to a confirmation state so a click has visible feedback."""
+        try:
+            if button is None:return False
+            base=base_text if base_text is not None else str(button.text() or '')
+            if base and '✓' not in base and '✕' not in base:button.setProperty('saveBaseText',base)
+            else:base=str(button.property('saveBaseText') or base)
+            flash_text='✓ Saved!' if ok else '✕ Save failed'
+            button.setProperty('saveFlashText',flash_text)
+            button.setText(flash_text);button.setStyleSheet(self.SAVE_FLASH_OK_STYLE if ok else self.SAVE_FLASH_FAIL_STYLE)
+            button.setProperty('saveFlashActive',True)
+            QTimer.singleShot(self.SAVE_FLASH_MS,lambda:self.restore_save_button(button))
+            return True
+        except (AttributeError,RuntimeError):return False
+    def restore_save_button(self,button):
+        """Revert a flashed save button to its label. Safe to call when no flash is active."""
+        try:
+            if button is None:return False
+            if not button.property('saveFlashActive'):return False
+            button.setProperty('saveFlashActive',False)
+            if button.text()==str(button.property('saveFlashText') or ''):
+                base=str(button.property('saveBaseText') or '')
+                if base:button.setText(base)
+            button.setStyleSheet('')
+            return True
+        except (AttributeError,RuntimeError):return False
     def active_mode_label(self):
         return 'BOTH SOURCES' if self.track_both_startup else self.mode.currentText().upper()
     def edit(self,value=''):return QLineEdit(str(value))
@@ -999,7 +1041,7 @@ class Window(QMainWindow):
         results_panel=QWidget();results_layout=QVBoxLayout(results_panel);results_layout.setContentsMargins(0,0,0,0);results_layout.setSpacing(8);results_layout.addWidget(self.ocr_review_status);results_layout.addWidget(self.ocr_table,1)
         self.capture_review_split.addWidget(results_panel);self.capture_review_split.setStretchFactor(0,2);self.capture_review_split.setStretchFactor(1,5);self.capture_review_split.setSizes([620,1550]);l.addWidget(self.capture_review_split,1)
         self.verified=QCheckBox('I checked these names and numbers against the captured scoreboard');self.verified.setChecked(True);self.verified.hide()
-        actions_row=QHBoxLayout();actions_row.addWidget(self.button('Save info',self.save_capture,True),1);actions_row.addWidget(self.button('Post Screenshot as is to Discord',self.post_capture_only),1);l.addLayout(actions_row)
+        actions_row=QHBoxLayout();self.save_capture_button=self.button('Save info',self.save_capture,True);actions_row.addWidget(self.save_capture_button,1);actions_row.addWidget(self.button('Post Screenshot as is to Discord',self.post_capture_only),1);l.addLayout(actions_row)
         self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');self.ocr_text.setToolTip('Automatically read from the captured scoreboard crop. Edit this only to correct an OCR mistake.')
         self.ocr_advanced=QWidget();advanced_layout=QVBoxLayout(self.ocr_advanced);advanced_layout.setContentsMargins(0,2,0,0);advanced_layout.addWidget(self.ocr_text)
         self.row(advanced_layout,self.button('Re-parse OCR Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove Row',self.remove_ocr_row),self.button('Keep matched only',self.keep_matched_ocr_rows))
@@ -2141,7 +2183,7 @@ class Window(QMainWindow):
         hotkeys_layout.addStretch()
         self.settings_tabs.addTab(hotkeys_tab,'Hotkeys & Folders')
 
-        self.row(l,self.button('Save all settings',self.save_settings,True))
+        self.save_settings_button=self.button('Save all settings',self.save_settings,True);self.row(l,self.save_settings_button)
         self.update_version_label=QLabel(f'Installed version {APP_VERSION}. Updates come from GitHub Releases.');self.update_version_label.setStyleSheet('color:#99a8bc')
         self.row(l,self.update_version_label,self.button('Check for Updates',lambda:self.check_for_app_update(manual=True)))
 
@@ -2968,6 +3010,7 @@ class Window(QMainWindow):
             self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),full_auto=self.full_auto.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
             self.settings.values.update(scoreboard_hotkey_vk=self.scoreboard_hotkey_edit.vk,scoreboard_hotkey_mod=self.scoreboard_hotkey_edit.mod,screenshot_hotkey_vk=self.screenshot_hotkey_edit.vk,screenshot_hotkey_mod=self.screenshot_hotkey_edit.mod,screenshots_dir=self.screenshots_dir_edit.text().strip(),videos_dir=self.videos_dir_edit.text().strip(),webhook_channel=self.webhook_channel.text().strip(),cinematic_webhook_channel=self.cinematic_webhook_channel.text().strip());self.settings.set_webhook(self.webhook.text());self.settings.set_cinematic_webhook(self.cinematic_webhook.text());self.settings.save();self.log('Settings saved with DPAPI-protected webhook. Restart tracking to apply integration changes.');self.refresh_dashboard_status()
             self.unregister_global_hotkeys();self.register_global_hotkeys();self.refresh_hotkey_labels()
+            self.flash_save_button(getattr(self,'save_settings_button',None),'Save all settings')
             if hasattr(self,'cod_ai_screenshots'):self.refresh_cod_ai_screenshots()
             if hasattr(self,'cod_ai_screenshots'):self.update_screenshot_grid()
             if hasattr(self,'cinematic_results'):self.update_cinematic_grid()
@@ -3370,6 +3413,7 @@ class Window(QMainWindow):
         auto_eligible=(context.get('result') in ('Victory','Defeat') and bool(context.get('game_mode')) and
                        not str(context['game_mode']).startswith('Not shown') and 1<=len(players)<=4)
         self.store.update(mid,payload=payload,capture=str(path),ocr=self.ocr_text.toPlainText(),players=json.dumps(players),status='needs_review',gen_state='queued' if auto_eligible else 'idle',prompt='',theme=None);self.active_id=mid;self.last_capture=str(path);self.refresh_history();self.load_studio(mid)
+        self.flash_save_button(getattr(self,'save_capture_button',None),'Save info')
         self.log('Verified scoreboard saved. A Meta AI creative brief was prepared from the reviewed names and performance ranks.')
         self._pump_full_auto()
     def ask_match_result(self):
@@ -3632,7 +3676,7 @@ class Window(QMainWindow):
             for key in ('codmunity_uid','codmunity_display_name','codmunity_identity_updated_at'):
                 saved_player.pop(key,None)
         saved_player.update(dict(id=pid,name=name,display_name=display_name,aliases=[v.strip() for v in self.roster_aliases.text().split(';') if v.strip()],profile_url=self.roster_profile_url.text().strip(),photo=photo,enabled=self.roster_enabled.isChecked(),consent_meta=self.photo_consent.isChecked(),codmunity_username=codmunity_username))
-        self.store.save_player(saved_player);self.current_player=pid;self.set_roster_dirty(False);self.refresh_roster();self.roster_status.setText('Saved '+name+'.');self.load_roster_player(pid);self.refresh_talent_friends();self.refresh_squad_intel();self.log('Player saved: '+name+' (poster name: '+display_name+')')
+        self.store.save_player(saved_player);self.current_player=pid;self.set_roster_dirty(False);self.refresh_roster();self.roster_status.setText('Saved '+name+'.');self.load_roster_player(pid);self.refresh_talent_friends();self.refresh_squad_intel();self.flash_save_button(getattr(self,'roster_save_button',None),'Save Player');self.log('Player saved: '+name+' (poster name: '+display_name+')')
     def delete_player(self):
         if not self.current_player:return
         player=next((p for p in self.roster_rows if str(p.get('id'))==str(self.current_player)),None)

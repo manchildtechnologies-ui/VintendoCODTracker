@@ -159,7 +159,7 @@ class UITests(unittest.TestCase):
         from PySide6.QtGui import QFocusEvent,QKeyEvent
         from PySide6.QtWidgets import QMessageBox
         edit=self.window.scoreboard_hotkey_edit
-        edit.focusInEvent(QFocusEvent(QEvent.FocusIn))
+        edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.MouseFocusReason))
         self.assertIn('Press the new keys',edit.text())
         event=QKeyEvent(QEvent.KeyPress,Qt.Key_F9,Qt.ControlModifier|Qt.ShiftModifier,'',False,1)
         with patch.object(QMessageBox,'information',return_value=QMessageBox.Ok) as confirm:
@@ -366,7 +366,10 @@ class UITests(unittest.TestCase):
         w.refresh_history();w.last_frame=np.array(Image.new('RGB',(1200,500),'navy'))
         w.ocr_text.setPlainText('PLAYER  KILLS  DAMAGE  SCORE\nVintendo  12  3400  4500\nConcha  8  2000  3200');w.parse_ocr();w.verified.setChecked(True);w.save_capture()
         job=w.store.get(mid);self.assertTrue(job['capture']);self.assertEqual(len(json.loads(job['players'])),2);self.assertIn('16:9',job['prompt'])
-        background=app.E.DATA/('fixture-art-'+uuid.uuid4().hex+'.png');Image.new('RGB',(1600,900),'navy').save(background);w.received_art(mid,str(background));w.render_overlay();self.wait_until(lambda:w.store.get(mid)['status']=='ready')
+        background=app.E.DATA/('fixture-art-'+uuid.uuid4().hex+'.png');Image.new('RGB',(1600,900),'navy').save(background);w.received_art(mid,str(background))
+        from unittest.mock import patch as _patch
+        with _patch.object(app.QDialog,'exec',return_value=app.QDialog.Rejected):
+            w.render_overlay();self.wait_until(lambda:w.store.get(mid)['status']=='ready')
         calls=[];w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.notice=lambda _:None;w.ask=lambda _:True
         with patch('engine.send_discord',side_effect=lambda *args:(calls.append(args) or 'fixture-message')):
             w.deliver(mid);self.wait_until(lambda:w.store.get(mid)['status']=='delivered');w.deliver(mid)
@@ -1945,7 +1948,7 @@ class UITests(unittest.TestCase):
         w=self.window
         page,_layout=w.pages['AI Studio']
         texts=[label.text() for label in page.findChildren(QLabel)]
-        for expected in ('MATCH INPUT','MATCH OPTIONS','AUTOMATION','PLAYERS IDENTIFIED FROM SCREENSHOTS','AI PREVIEW','SQUAD TOTALS'):
+        for expected in ('MATCH INPUT','MATCH OPTIONS','PLAYERS IDENTIFIED FROM SCREENSHOTS','AI PREVIEW','SQUAD TOTALS'):
             self.assertIn(expected,texts)
         buttons=[b.text() for b in page.findChildren(QPushButton)]
         for expected in ('Generate AI End Game Picture','APPROVE & POST','Cancel','Retry / review selected job'):
@@ -1964,6 +1967,68 @@ class UITests(unittest.TestCase):
         self.assertIn('Resurgence',w.opt_game_mode.text())
         self.assertIn('Victory',w.opt_result.text())
         self.assertIn('2nd place',w.opt_placement.text())
+    def test_ai_studio_hidden_from_nav_but_page_kept(self):
+        w=self.window
+        rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
+        self.assertEqual(len(rows),1)
+        self.assertTrue(w.nav.item(rows[0]).isHidden())
+        self.assertIn('AI Studio',w.pages)
+    def test_poster_automation_lives_in_settings(self):
+        w=self.window
+        titles=[w.settings_tabs.tabText(i) for i in range(w.settings_tabs.count())]
+        self.assertIn('Poster Automation',titles)
+        tab=w.settings_tabs.widget(titles.index('Poster Automation'))
+        for checkbox in (w.include_stats_checkbox,w.auto_post,w.full_auto):
+            self.assertIs(checkbox.parent(),tab)
+        self.assertEqual(w.generate_sidebar_button.text(),'Generate AI End Game Picture')
+    def test_generate_button_notices_when_nothing_actionable(self):
+        import tempfile as _tf
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        notes=[];w.notice=lambda msg:notes.append(msg)
+        w.generate_and_approve()
+        self.assertTrue(notes)
+    def test_generate_button_offers_ready_poster(self):
+        import tempfile as _tf
+        from PIL import Image
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        mid,_=w.store.add({'matchId':'ready-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        art=_tmpdir/'ready.png';Image.new('RGB',(640,360),'navy').save(art)
+        w.store.note_poster(mid,str(art))
+        offered=[];w.offer_approve_post=lambda job_id:offered.append(job_id)
+        w.generate_and_approve()
+        self.assertEqual(offered,[mid])
+    def test_approve_popup_posts_finished_poster(self):
+        import tempfile as _tf
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        mid,_=w.store.add({'matchId':'approve-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':9})]))
+        art=_tmpdir/'approve.png';Image.new('RGB',(640,360),'navy').save(art)
+        w.store.note_poster(mid,str(art))
+        w.webhook.setText('https://discord.com/api/webhooks/123/fixture')
+        w.auto_post.setChecked(False)
+        calls=[]
+        with patch('engine.send_discord',side_effect=lambda *args:(calls.append(args) or 'popup-message')):
+            with patch.object(app.QDialog,'exec',return_value=app.QDialog.Accepted):
+                w.offer_approve_post(mid)
+            self.wait_until(lambda:w.store.get(mid)['status']=='delivered')
+        self.assertEqual(len(calls),1)
+    def test_approve_popup_cancel_keeps_match(self):
+        import tempfile as _tf
+        from PIL import Image
+        from unittest.mock import patch
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        mid,_=w.store.add({'matchId':'cancel-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+        art=_tmpdir/'cancel.png';Image.new('RGB',(640,360),'navy').save(art)
+        w.store.note_poster(mid,str(art))
+        with patch.object(app.QDialog,'exec',return_value=app.QDialog.Rejected):
+            w.offer_approve_post(mid)
+        self.assertNotEqual(w.store.get(mid)['status'],'delivered')
     def test_record_auto_browser_embeds_fresh_window(self):
         from unittest.mock import patch
         w=self.window
@@ -2271,11 +2336,16 @@ class UITests(unittest.TestCase):
         self.assertIn('3.2.9',shown.get('text',''))
         self.assertEqual(shown.get('notes'),'notes here')
     def test_packaged_build_bundles_all_banner_and_brand_assets(self):
-        build_text=(app.E.ROOT/'build.py').read_text(encoding='utf-8')
+        import sys
         names=list(app.PAGE_BANNERS.values())+['vintendo-cod-tracker-logo.png','loading.png','loading_animated_transparent.webp']
-        for filename in names:
-            self.assertIn(filename,build_text,filename)
-            self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
+        if getattr(sys,'frozen',False):
+            for filename in names:
+                self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
+        else:
+            build_text=(app.E.ROOT/'build.py').read_text(encoding='utf-8')
+            for filename in names:
+                self.assertIn(filename,build_text,filename)
+                self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
     def test_combined_tracking_is_default_unless_explicitly_disabled(self):
         import os
         from unittest.mock import patch

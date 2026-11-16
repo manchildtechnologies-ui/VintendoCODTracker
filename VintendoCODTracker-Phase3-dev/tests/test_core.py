@@ -192,7 +192,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual([m['status'] for m in maps],['ready','ambiguous','missing_photo'])
         self.assertEqual(maps[0]['rosterName'],'Alpha');self.assertEqual(maps[1]['photoPath'],'')
     def test_recap_only_verified_ocr(self):
-        text=E.recap(WZ,[dict(name='bad',stats={'kills':900},verified=False)]);self.assertNotIn('bad',text);self.assertIn('CODMunity local player: kills: 12',text)
+        text=E.recap(WZ,[dict(name='bad',stats={'kills':900},verified=False)]);self.assertNotIn('bad',text);self.assertNotIn('CODMunity local player',text)
+        verified=E.recap(WZ,[dict(name='good',stats={'kills':12},verified=True)]);self.assertIn('good',verified);self.assertIn('kills: 12',verified)
     def test_deterministic_overlay_16_9(self):
         from PIL import Image
         source=self.root/'source.png';target=self.root/'out.jpg';Image.new('RGB',(800,800),'navy').save(source)

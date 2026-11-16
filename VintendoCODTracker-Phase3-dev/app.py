@@ -606,6 +606,7 @@ class Window(QMainWindow):
             side.addWidget(self.brand_mark);side.addWidget(self.brand_name);side.addWidget(self.brand_sub)
         side.addSpacing(20)
         self.nav=QListWidget();self.nav.setSpacing(3);self.nav.setMinimumWidth(0);self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.nav.setTextElideMode(Qt.ElideRight);self.nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.nav,1)
+        self.generate_sidebar_button=self.button('Generate AI End Game Picture',self.generate_and_approve,True);self.generate_sidebar_button.setMinimumHeight(44);self.generate_sidebar_button.setToolTip('Generate the AI End Game picture for the newest finished match, then approve the post.');side.addWidget(self.generate_sidebar_button)
 
         self.stack=QStackedWidget();tracker_shell_layout.addWidget(self.sidebar);tracker_shell_layout.addWidget(self.stack,1)
         self.codmunity_host=WindowsWindowHost();self.codmunity_process=None;self.codmunity_hwnd=None
@@ -634,7 +635,7 @@ class Window(QMainWindow):
         except Exception:pass
         QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity)
         if self.tab_prototype:
-            for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button):control.setEnabled(False)
+            for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button,self.generate_sidebar_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
             self.full_auto.setChecked(False)
         if self.track_both_startup:
@@ -647,7 +648,7 @@ class Window(QMainWindow):
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)=='Squad Night':self.nav.item(row).setHidden(True)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex);self.nav.currentRowChanged.connect(self.on_nav_row_changed);self.nav.setCurrentRow(0)
-        for hidden_page in ('Solo Ops','Discord Settings','Match History'):
+        for hidden_page in ('Solo Ops','Discord Settings','Match History','AI Studio'):
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)==hidden_page:self.nav.item(row).setHidden(True)
         self.tray=QSystemTrayIcon(self.windowIcon(),self);menu=QMenu();menu.addAction('Open Vintendo COD Tracker',self.showNormal);menu.addAction('Pause tracking',self.pause);menu.addAction('Quit',self.shutdown);self.tray.setContextMenu(menu);self.tray.activated.connect(lambda reason:self.showNormal() if reason==QSystemTrayIcon.DoubleClick else None)
@@ -902,7 +903,7 @@ class Window(QMainWindow):
         self.latest_stats=QLabel('');self.latest_stats.setWordWrap(True);self.latest_stats.setStyleSheet('color:#cbd3df;');latest_layout.addWidget(self.latest_stats)
         self.latest_status=QLabel('');self.latest_status.setWordWrap(True);self.latest_status.setStyleSheet('font-size:11px;color:#aab4c3;');latest_layout.addWidget(self.latest_status)
         latest_layout.addStretch(1)
-        self.latest_review=self.button('REVIEW IN AI STUDIO',self.open_latest_match,True);self.latest_review.setEnabled(False);latest_layout.addWidget(self.latest_review)
+        self.latest_review=self.button('REVIEW POSTER',self.open_latest_match,True);self.latest_review.setEnabled(False);latest_layout.addWidget(self.latest_review)
         center_layout.addWidget(self.latest_card,1);body.addWidget(center,0,0,2,2)
 
         health=QFrame();health.setObjectName('dashboardPanel');health_layout=QVBoxLayout(health);health_layout.setContentsMargins(13,12,13,13);health_layout.setSpacing(10)
@@ -914,7 +915,7 @@ class Window(QMainWindow):
 
         tools=QFrame();tools.setObjectName('dashboardPanel');tools_layout=QVBoxLayout(tools);tools_layout.setContentsMargins(13,12,13,13);tools_layout.setSpacing(8)
         tools_title=QLabel('⚡  QUICK TOOLS');tools_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');tools_layout.addWidget(tools_title)
-        review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   OPEN AI STUDIO',lambda:self.nav.setCurrentRow(5))
+        review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   GENERATE AI END GAME PICTURE',self.generate_and_approve,True)
         tools_layout.addWidget(review);tools_layout.addWidget(capture);tools_layout.addWidget(poster);body.addWidget(tools,1,2)
         self.hotkey_hint=QLabel('At match end, press Up while the scoreboard is visible.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
         body.setColumnStretch(0,1);body.setColumnStretch(1,1);body.setColumnStretch(2,0);body.setRowStretch(0,3);body.setRowStretch(1,2);l.addLayout(body,1)
@@ -1579,13 +1580,6 @@ class Window(QMainWindow):
             opts_layout.addLayout(option_row)
         opts_layout.addStretch(1)
         top.addWidget(opts_panel,3)
-        auto_panel=QFrame();auto_panel.setObjectName('dashboardPanel');auto_layout=QVBoxLayout(auto_panel);auto_layout.setContentsMargins(12,10,12,10);auto_layout.setSpacing(8)
-        auto_title=QLabel('AUTOMATION');auto_title.setObjectName('codPanelTitle');auto_layout.addWidget(auto_title)
-        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');auto_layout.addWidget(self.include_stats_checkbox)
-        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');auto_layout.addWidget(self.auto_post)
-        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');auto_layout.addWidget(self.full_auto)
-        auto_layout.addStretch(1)
-        top.addWidget(auto_panel,3)
         l.addLayout(top)
         self.generate_poster_button=self.button('Generate AI End Game Picture',self.prepare_artwork,True);self.generate_poster_button.setEnabled(False);self.generate_poster_button.setMinimumHeight(44);l.addWidget(self.generate_poster_button)
         bottom=QHBoxLayout();bottom.setSpacing(10)
@@ -2173,6 +2167,13 @@ class Window(QMainWindow):
         browser_mode_note=QLabel('Tracker Chrome profile: the dedicated profile keeps the Meta AI login isolated from your own Chrome; attaching reuses a Meta AI tab you already have open in your own Chrome.');browser_mode_note.setWordWrap(True);automation_layout.addWidget(browser_mode_note)
         self.browser_mode_combo=QComboBox();self.browser_mode_combo.addItems(['Dedicated tracker profile (recommended)','Use my already-open Chrome']);self.browser_mode_combo.setCurrentIndex(1 if self.tracker_browser_mode()=='attach' else 0);browser_mode_form=QFormLayout();browser_mode_form.addRow('Tracker Chrome profile',self.browser_mode_combo);automation_layout.addLayout(browser_mode_form)
         automation_layout.addStretch()
+        poster_tab=QWidget();poster_layout=QVBoxLayout(poster_tab);poster_layout.setContentsMargins(12,12,12,12);poster_layout.setSpacing(12)
+        poster_note=QLabel('Poster automation runs in the background. These switches apply to every finished match.');poster_note.setWordWrap(True);poster_note.setStyleSheet('color:#99a8bc');poster_layout.addWidget(poster_note)
+        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.include_stats_checkbox)
+        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.auto_post)
+        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.full_auto)
+        poster_layout.addStretch(1)
+        self.settings_tabs.addTab(poster_tab,'Poster Automation')
         self.settings_tabs.addTab(self.discord_settings_panel,'Discord')
         hotkeys_tab=QWidget();hotkeys_layout=QVBoxLayout(hotkeys_tab);hotkeys_layout.setContentsMargins(12,12,12,12);hotkeys_layout.setSpacing(12)
         hotkeys_note=QLabel('Global hotkeys work while the tracker is minimized. Click a box, then press the new keys (a modifier plus another key, or a bare key).');hotkeys_note.setWordWrap(True);hotkeys_layout.addWidget(hotkeys_note)
@@ -4368,11 +4369,49 @@ class Window(QMainWindow):
         def done(path):
             self.store.note_poster(job['id'],path);self.show_image(self.art_preview,path,800,300);self.refresh_history();self.log('Meta AI artwork prepared at 1600×900; no statistics were painted over it.')
             if post_after:self.deliver(job['id'])
+            else:self.offer_approve_post(job['id'])
         self.async_task(lambda:E.render_poster(background,target,match,players),done)
     def show_image(self,label,path,width,height):
         pix=QPixmap(path) if path else QPixmap()
         if not pix.isNull():label.setPixmap(pix.scaled(width,height,Qt.KeepAspectRatio,Qt.SmoothTransformation))
         else:label.setText('No image available')
+    def generate_and_approve(self):
+        """One-click End Game post: newest finished match, then an approve popup."""
+        if getattr(self,'tab_prototype',False):self.notice('Discord posting is disabled in the CODMunity tab preview.');return
+        try:rows=self.store.history()
+        except Exception:rows=[]
+        actionable=[row for row in rows or [] if row.get('status') not in ('baseline','solo_delivered','delivered')]
+        if not actionable:self.notice('All tracked matches are already posted. Capture a new scoreboard for the next one.');return
+        top=sorted(actionable,key=lambda row:row.get('created') or 0,reverse=True)[0]
+        if top.get('poster') or top.get('image'):
+            self.active_id=top['id']
+            try:self.load_studio(top['id'])
+            except (AttributeError,RuntimeError):pass
+            self.offer_approve_post(top['id']);return
+        self.prepare_artwork()
+    def offer_approve_post(self,mid):
+        """Ask for one-tap approval of the finished poster, then post it."""
+        job=self.store.get(mid)
+        if not job:return
+        if job.get('status') in ('delivered','solo_delivered'):return
+        image=job.get('poster') or job.get('image')
+        if not image:return
+        self.active_id=mid
+        dialog=QDialog(self);dialog.setWindowTitle('Approve End Game Post');dialog.setModal(True)
+        layout=QVBoxLayout(dialog);layout.setContentsMargins(18,18,18,18);layout.setSpacing(12)
+        question=QLabel('Do you approve this post?');question.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');question.setAlignment(Qt.AlignCenter);layout.addWidget(question)
+        preview=QLabel();preview.setAlignment(Qt.AlignCenter);preview.setMinimumSize(640,360)
+        pix=QPixmap(image)
+        if not pix.isNull():preview.setPixmap(pix.scaled(640,360,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+        else:preview.setText('Preview unavailable')
+        layout.addWidget(preview)
+        buttons=QDialogButtonBox()
+        approve=buttons.addButton('Approve & Post',QDialogButtonBox.AcceptRole)
+        cancel=buttons.addButton('Cancel',QDialogButtonBox.RejectRole)
+        approve.clicked.connect(dialog.accept);cancel.clicked.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec()!=QDialog.Accepted:return
+        self.deliver(mid)
     def post_active(self):
         if self.tab_prototype:self.notice('Discord posting is disabled in the CODMunity tab preview.');return
         job=self.active_job()

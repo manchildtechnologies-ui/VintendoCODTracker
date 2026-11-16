@@ -99,14 +99,19 @@ class CodmunityStatsTests(unittest.TestCase):
         self.assertEqual(hits[0]['leaderboard'], 'warzone_battle_royale')
         self.assertEqual(hits[0]['rank'], 42)
 
-    def test_recap_gains_benchmark_context_but_poster_omits_it(self):
+    def test_recap_omits_benchmark_context_and_local_row_but_poster_omits_it(self):
         match = {'game': 'warzone', 'mode': 'resurgence', 'playedAt': '2026-11-07T12:00:00Z',
-                 'result': 'loss', 'stats': {'kills': 17, 'placement': 2}}
+                 'result': 'loss', 'stats': {'kills': 17, 'placement': 2, 'score': 5070}}
         plain = E.recap(match, [])
         self.assertNotIn('CODMunity benchmark', plain)
+        self.assertNotIn('CODMunity local player', plain)
         enriched = E.recap(match, [], snapshot=self.snapshot)
-        self.assertIn('CODMunity benchmark', enriched)
-        self.assertIn('median', enriched.lower())
+        self.assertNotIn('CODMunity benchmark', enriched)
+        self.assertNotIn('median', enriched.lower())
+        self.assertNotIn('CODMunity local player', enriched)
+        self.assertNotIn('Personal bests', enriched)
+        self.assertNotIn('Leaderboard', enriched)
+        self.assertNotIn('Your cached', enriched)
         poster = E.match_poster_prompt(
             [dict(name='Alpha', stats={'kills': 12}, verified=True)], match, snapshot=self.snapshot)
         self.assertNotIn('benchmark', poster.lower())

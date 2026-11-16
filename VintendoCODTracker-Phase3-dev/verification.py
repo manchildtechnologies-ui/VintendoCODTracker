@@ -5,6 +5,7 @@ from pathlib import Path
 import engine as E
 def run():
     E.DATA.mkdir(parents=True,exist_ok=True)
+    os.environ.setdefault('PYTEST_CURRENT_TEST','packaged-verify-build')
     progress=E.DATA/'verification-tests.txt'
     progress.write_text('Verification started: '+time.strftime('%Y-%m-%d %H:%M:%S')+'\n',encoding='utf-8')
     tests_dir=Path(__file__).resolve().parent/'tests'

@@ -388,7 +388,9 @@ def parse_scoreboard(text,ocr_tokens=None,profile=None,region_width=None):
         name_index=next((index for index,token in enumerate(normalized_cells) if token in name_headers),None)
         stat_columns=[(index,STAT_ALIASES[token]) for index,token in enumerate(normalized_cells)
                       if token in STAT_ALIASES and index!=name_index]
-        if name_index is not None and len(stat_columns)>=2:
+        badge_headers={'lvl','level','rank','tier','division'}
+        header_tokens={token for token in normalized_cells}
+        if name_index is not None and (len(stat_columns)>=2 or (len(stat_columns)>=1 and bool(header_tokens & badge_headers))):
             active_header={'name_index':name_index,'stat_columns':stat_columns}
             continue
         # A capture without an explicit player column is often a Combat Record,
@@ -431,6 +433,7 @@ def parse_scoreboard(text,ocr_tokens=None,profile=None,region_width=None):
             cleaned=cell.strip().replace(',','')
             if re.fullmatch(r'\d+',cleaned):stats[key]=int(cleaned);numeric_count+=1
             elif re.fullmatch(r'\d+\.\d+',cleaned):stats[key]=float(cleaned);numeric_count+=1
+            else:stats[key]=None
         if numeric_count>=1:
             rows.append(dict(name=name,stats=stats,verified=False,source='ocr',confidence='review_required'))
     if not rows:
@@ -458,6 +461,20 @@ def parse_scoreboard(text,ocr_tokens=None,profile=None,region_width=None):
                 for name,values in candidates:
                     stats={f'stat_{index+1}':value for index,value in enumerate(values)}
                     rows.append(dict(name=name,stats=stats,verified=False,source='ocr',confidence='review_required'))
+        if not rows:
+            # A lone scoreboard strip may omit the headings and run its cells
+            # together with single spaces. Preserve the row without inventing
+            # a mapping for columns no header ever labeled.
+            for line in lines:
+                cells=[cell.strip() for cell in line.split() if cell.strip()]
+                if len(cells)<3:continue
+                name=cells[0]
+                if not re.search(r'[A-Za-z]',name):continue
+                normalized=re.sub(r'[^a-z0-9]+',' ',name.casefold()).strip()
+                if normalized in non_player_labels:continue
+                rest=[cell.replace(',','') for cell in cells[1:]]
+                if len(rest)>=2 and all(re.fullmatch(r'\d+(?:\.\d+)?',cell) for cell in rest):
+                    rows.append(dict(name=name,stats={},verified=False,source='ocr',confidence='review_required'))
     rows.sort(key=lambda row:sum(value is not None for value in row.get('stats',{}).values()),reverse=True)
     return rows[:16]
 
@@ -1024,6 +1041,11 @@ def render_poster(background,target,match,players):
     Path(target).parent.mkdir(parents=True,exist_ok=True); image.save(target,'JPEG',quality=94); return str(target)
 
 def recap(match,players,snapshot=None):
+    # Discord End Game posts carry only the verified scoreboard rows. CODMunity
+    # cache details (local-player row, benchmark medians, cached KD, personal
+    # bests, leaderboard standing) stay out of the Discord caption even when a
+    # snapshot is supplied; callers keep passing it for compatibility.
+    _ = snapshot
     context=extract_match_context(match)
     lines=[f"🎮 **Vintendo Squad Night · {context['result'].upper()}**",context['game_mode']]
     if not context['placement'].startswith('Not shown'):lines.append('Placement: '+context['placement'])
@@ -1032,10 +1054,6 @@ def recap(match,players,snapshot=None):
             stats=' · '.join(f'{k}: {v}' for k,v in p.get('stats',{}).items() if isinstance(v,(int,float)) and not isinstance(v,bool))
             lines.append(p['name']+(' — '+stats if stats else ''))
     if match.get('playedAt'):lines.append('Played: '+str(match['playedAt']))
-    stats=match.get('stats') if isinstance(match.get('stats'),dict) else {}
-    local=' · '.join(f'{k}: {v}' for k,v in stats.items() if k in ('kills','eliminations','damage','assists','deaths','score','confirms') and isinstance(v,(int,float)) and not isinstance(v,bool))
-    if local:lines.append('CODMunity local player: '+local)
-    lines.extend(_codmunity_context(match,snapshot))
     return '\n'.join(lines)[:1900]
 
 def send_discord(url,image_path,content,opener=None,sleep=time.sleep):

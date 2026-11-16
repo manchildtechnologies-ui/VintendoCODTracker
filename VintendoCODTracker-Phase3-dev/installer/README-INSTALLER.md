@@ -33,3 +33,6 @@ Tracker Browser.
   nothing and embeds an existing window.
 - The installer never touches `HKLM`, `Program Files`, or anyone's real
   Chrome profile. Uninstall removes the app; user data is left in place.
+- The installed app starts in combined CODMunity + scoreboard tracking mode
+  (the same menu as the local launcher). Set `VINTENDO_TRACK_BOTH=0` before
+  launching to restore the Solo Ops / Squad Night selector.

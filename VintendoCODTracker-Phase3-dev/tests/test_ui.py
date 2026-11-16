@@ -2270,4 +2270,29 @@ class UITests(unittest.TestCase):
         self.assertIn('4.0.1',shown.get('text',''))
         self.assertIn('3.2.9',shown.get('text',''))
         self.assertEqual(shown.get('notes'),'notes here')
+    def test_packaged_build_bundles_all_banner_and_brand_assets(self):
+        build_text=(app.E.ROOT/'build.py').read_text(encoding='utf-8')
+        names=list(app.PAGE_BANNERS.values())+['vintendo-cod-tracker-logo.png','loading.png','loading_animated_transparent.webp']
+        for filename in names:
+            self.assertIn(filename,build_text,filename)
+            self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
+    def test_combined_tracking_is_default_unless_explicitly_disabled(self):
+        import os
+        from unittest.mock import patch
+        env=dict(os.environ);env.pop('VINTENDO_TRACK_BOTH',None)
+        with patch.dict(os.environ,env,clear=True):
+            default_window=app.Window()
+        try:
+            self.assertTrue(default_window.track_both_startup)
+            self.assertEqual(default_window.mode.currentText(),'Squad Night')
+            hidden=[default_window.nav.item(row).data(Qt.UserRole) for row in range(default_window.nav.count()) if default_window.nav.item(row).isHidden()]
+            self.assertIn('Squad Night',hidden)
+            self.assertTrue(default_window.mode.isHidden())
+        finally:default_window.shutdown();default_window.deleteLater();self.qt.processEvents()
+        with patch.dict(os.environ,{**os.environ,'VINTENDO_TRACK_BOTH':'0'}):
+            solo_window=app.Window()
+        try:
+            self.assertFalse(solo_window.track_both_startup)
+            self.assertFalse(solo_window.mode.isHidden())
+        finally:solo_window.shutdown();solo_window.deleteLater();self.qt.processEvents()
 if __name__=='__main__':unittest.main()

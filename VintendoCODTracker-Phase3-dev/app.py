@@ -570,7 +570,10 @@ class Window(QMainWindow):
         super().__init__();self.settings=E.Settings();self.store=E.Store();self.pool=QThreadPool.globalInstance();self.tasks=set();self.session_started=time.time()
         self.tracking=False;self.paused=False;self.solo=None;self.capture=None;self.capture_busy=False;self.screenshot_busy=False;self.poll_busy=False;self.active_id=None;self.last_capture=None;self.last_frame=None;self.outputs=[];self.browser=None;self.closing=False
         self.tab_prototype=os.environ.get('VINTENDO_TAB_PROTOTYPE')=='1'
-        self.track_both_startup=os.environ.get('VINTENDO_TRACK_BOTH')=='1'
+        # Combined CODMunity + scoreboard tracking is the standard behavior every
+        # install gets (the local launcher runs this way); set
+        # VINTENDO_TRACK_BOTH=0 to opt out and restore the mode selector.
+        self.track_both_startup=os.environ.get('VINTENDO_TRACK_BOTH','1')=='1'
         self.setWindowTitle('Vintendo COD Tracker — CODMunity Tab Preview' if self.tab_prototype else 'Vintendo COD Tracker'+self._build_tag());self._fit_to_screen();self.setMinimumSize(1100,730);self.setWindowIcon(QIcon(str(E.ROOT/'tracker.ico')))
     def _build_tag(self):
         try:

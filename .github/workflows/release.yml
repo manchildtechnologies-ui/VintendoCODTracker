@@ -60,3 +60,12 @@ jobs:
             VintendoCODTracker-Phase3-dev/VintendoCODTracker.exe
             VintendoCODTracker-Phase3-dev/dist-installer/Setup-*.exe
           generate_release_notes: true
+
+      # GITHUB_TOKEN-created releases do not trigger another release workflow.
+      - name: Announce release in Discord
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python .github/scripts/discord_release.py

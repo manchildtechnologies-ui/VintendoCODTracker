@@ -89,7 +89,10 @@ def prepare_poster_job(store,data_dir,mid,*,solo_player_name='',on_log=None):
                 players=[{'name':str(solo_name).strip(),'stats':stats,'verified':True,'source':'CODMunity'}]
         else:raise ValueError('No identified match participants with verified statistics are available.')
     players=[p for p in players if isinstance(p,dict) and p.get('verified') and str(p.get('name','')).strip()]
-    if not 1<=len(players)<=4:raise ValueError('Automatic poster jobs require one to four identified players.')
+    # Photo staging caps reference images at four and reports the rest as
+    # limit_reached, so larger verified squads proceed with generic portrayal
+    # for the players beyond the fourth staged headshot.
+    if not players:raise ValueError('Automatic poster jobs require at least one identified player.')
     match=with_scoreboard_context(match,row.get('ocr',''))
     context=extract_match_context(match,row.get('ocr',''))
     if context['result'] not in ('Victory','Defeat'):
@@ -979,8 +982,8 @@ def automatic_match_prompt(players, game_mode, outcome, assignments, snapshot=No
     if outcome not in ('Victory','Defeat'):
         raise ValueError('Match outcome is unknown; automation will not guess win or loss.')
     identified=[p for p in players or [] if isinstance(p,dict) and p.get('verified') and str(p.get('name','')).strip()]
-    if not 1<=len(identified)<=4:
-        raise ValueError('Automatic poster jobs require one to four identified players.')
+    if not identified:
+        raise ValueError('Automatic poster jobs require at least one identified player.')
     if not game_mode or str(game_mode).startswith('Not shown'):
         raise ValueError('Game mode is unknown; automation will not invent a mode.')
     by_name={str(item.get('username','')):item for item in assignments or [] if isinstance(item,dict)}

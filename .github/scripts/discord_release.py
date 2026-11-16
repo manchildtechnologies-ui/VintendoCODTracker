@@ -28,8 +28,8 @@ def build_payload(release, notes):
     return {
         'username': 'Vintendo • Release Updates',
         'avatar_url': 'https://github.com/manchildtechnologies-ui.png',
-        'content': '@everyone 🚀 **A new VintendoCODTracker update is available!**',
-        'allowed_mentions': {'parse': ['everyone']},
+        'content': '🚀 **A new VintendoCODTracker update is available!**',
+        'allowed_mentions': {'parse': []},
         'embeds': [{
             'title': ('🎮 VintendoCODTracker — ' + release['tag_name'])[:256],
             'url': url, 'color': 0x8B5CF6,

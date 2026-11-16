@@ -1,6 +1,9 @@
 name: Discord release announcement
 
 on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
   release:
     types: [published]
   workflow_dispatch:
@@ -15,6 +18,11 @@ permissions:
 
 jobs:
   announce:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,5 +32,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.workflow_run.head_branch || inputs.tag }}
         run: python .github/scripts/discord_release.py

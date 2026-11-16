@@ -2975,7 +2975,12 @@ class Window(QMainWindow):
             QTimer.singleShot(0,lambda:self.prompt_app_update(status,manual))
         elif manual:QTimer.singleShot(0,lambda:self.notice('You are on the latest version.' if status else 'Could not reach the update server.'))
     def prompt_app_update(self,status,manual=False):
-        if not status:return
+        if not status:
+            if manual:self.notice('Could not reach the update server.')
+            return
+        if not status.get('update_available'):
+            if manual:self.notice('You are on the latest version.')
+            return
         box=QMessageBox(self);box.setWindowTitle('Tracker update');box.setText(f"Version {status.get('latest')} is available (you have {status.get('current')}).")
         notes=(status.get('notes') or '').strip()
         if notes:box.setInformativeText(notes[:800])

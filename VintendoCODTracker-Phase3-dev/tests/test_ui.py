@@ -2237,4 +2237,37 @@ class UITests(unittest.TestCase):
         finally:
             w.stats_dir.setText(original)
             w.settings.values['stats_dir']=original;w.settings.save()
+    def test_manual_update_check_reports_latest_or_unreachable(self):
+        w=self.window
+        seen=[]
+        w.notice=lambda text:seen.append(text)
+        try:
+            w.prompt_app_update({'current':'4.0.1','latest':'4.0.1','update_available':False,'download_url':'','size':0,'notes':''},manual=True)
+            self.assertEqual(seen,['You are on the latest version.'])
+            w.prompt_app_update(None,manual=True)
+            self.assertEqual(seen,['You are on the latest version.','Could not reach the update server.'])
+            w.prompt_app_update({'current':'4.0.1','latest':'4.0.1','update_available':False,'download_url':'','size':0,'notes':''},manual=False)
+            self.assertEqual(len(seen),2)
+        finally:del w.notice
+    def test_update_prompt_offers_update_and_later_dismisses(self):
+        from unittest.mock import patch
+        w=self.window
+        shown={}
+        class FakeBox:
+            AcceptRole=0;RejectRole=1;DestructiveRole=2
+            def __init__(self,*args,**kwargs):self.buttons=[]
+            def setWindowTitle(self,text):shown['title']=text
+            def setText(self,text):shown['text']=text
+            def setInformativeText(self,text):shown['notes']=text
+            def addButton(self,text,role):
+                marker=object();self.buttons.append((text,marker));return marker
+            def setDefaultButton(self,button):shown['default']=button
+            def clickedButton(self):return self.buttons[1][1] if len(self.buttons)>1 else None
+            def exec(self):shown['exec']=True;return 0
+        with patch.object(app,'QMessageBox',FakeBox):
+            w.prompt_app_update({'current':'3.2.9','latest':'4.0.1','update_available':True,'download_url':'https://example.invalid/x.exe','size':1,'notes':'notes here'},manual=True)
+        self.assertTrue(shown.get('exec'))
+        self.assertIn('4.0.1',shown.get('text',''))
+        self.assertIn('3.2.9',shown.get('text',''))
+        self.assertEqual(shown.get('notes'),'notes here')
 if __name__=='__main__':unittest.main()

@@ -11,7 +11,9 @@
 ; %LOCALAPPDATA%\Vintendo COD Tracker and survives uninstall/reinstall.
 
 #define MyAppName "Vintendo COD Tracker"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+#define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "Vintendo"
 
 [Setup]
@@ -40,10 +42,7 @@ Source: "..\tracker.ico"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\Vintendo COD Tracker"; Filename: "{app}\VintendoCODTracker.exe"; IconFilename: "{app}\tracker.ico"
 Name: "{group}\Uninstall Vintendo COD Tracker"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Vintendo COD Tracker"; Filename: "{app}\VintendoCODTracker.exe"; IconFilename: "{app}\tracker.ico"; Tasks: desktopicon
-
-[Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "{autodesktop}\Vintendo COD Tracker"; Filename: "{app}\VintendoCODTracker.exe"; IconFilename: "{app}\tracker.ico"
 
 [Run]
 Filename: "{app}\VintendoCODTracker.exe"; Description: "Launch Vintendo COD Tracker"; Flags: nowait postinstall skipifsilent unchecked

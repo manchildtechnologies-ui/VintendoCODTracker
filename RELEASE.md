@@ -27,9 +27,9 @@ git tag v3.2.0
 git push origin main --tags
 ```
 
-3. The `release` workflow builds the exe and the extension zip and
-   publishes them on the tag. The workflow refuses to publish when the
-   tag and `version.py` disagree.
+3. The `release` workflow builds the exe and the Setup installer (which
+   places a desktop shortcut) and publishes them on the tag. The workflow
+   refuses to publish when the tag and `version.py` disagree.
 4. Friends get an "Update available" popup in the app on next start
    (or via Settings → Check for Updates). One click downloads,
    restarts, and they are on the new build.

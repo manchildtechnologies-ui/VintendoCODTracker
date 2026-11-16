@@ -1,6 +1,8 @@
 # ---- build outputs (CI rebuilds these) ----
 *.exe
 dist/
+dist-installer/
+installer/stage/
 build/
 *.spec
 

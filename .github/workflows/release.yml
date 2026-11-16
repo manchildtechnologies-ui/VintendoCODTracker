@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+      - 'v*.*'
 
 permissions:
   contents: write
@@ -43,9 +44,19 @@ jobs:
           $env:VINTENDO_NO_AUTO_START = "1"
           ./VintendoCODTracker.exe --verify-build
 
+      - name: Build installer (with desktop shortcut)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $ver = (Select-String -Pattern "APP_VERSION\s*=\s*'([^']+)'" -Path version.py).Matches[0].Groups[1].Value
+          New-Item -ItemType Directory -Force installer/stage | Out-Null
+          Copy-Item VintendoCODTracker.exe installer/stage/VintendoCODTracker.exe -Force
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="$ver" installer/VintendoCODTracker.iss
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             VintendoCODTracker-Phase3-dev/VintendoCODTracker.exe
+            VintendoCODTracker-Phase3-dev/dist-installer/Setup-*.exe
           generate_release_notes: true

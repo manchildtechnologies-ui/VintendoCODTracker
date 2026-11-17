@@ -4,8 +4,6 @@ on:
   workflow_run:
     workflows: [release]
     types: [completed]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:

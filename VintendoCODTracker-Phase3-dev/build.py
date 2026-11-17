@@ -50,7 +50,7 @@ for mod in ('torch','torchvision','torchaudio','transformers','diffusers','gradi
     arguments+=['--exclude-module',mod]
 # Every image the UI loads from the assets folder must ship inside the
 # one-file exe, or installed copies silently fall back to text titles.
-bundled_assets=[('vintendo-cod-tracker-logo.png','assets'),('loading.png','assets'),('loading_animated_transparent.webp','assets')]+[('banners/'+name,'assets/banners') for name in ('dashboard.png','scoreboard.png','match-history.png','roster.png','ai-studio.png','screenshots.png','browser.png','settings.png')]
+bundled_assets=[('vintendo-cod-tracker-logo.png','assets'),('loading.png','assets'),('loading_animated_transparent.webp','assets'),('codmunity_username_example.png','assets')]+[('banners/'+name,'assets/banners') for name in ('dashboard.png','scoreboard.png','match-history.png','roster.png','ai-studio.png','screenshots.png','browser.png','settings.png')]
 for asset_name,asset_dest in bundled_assets:
     asset_path=ROOT/'assets'/asset_name
     if asset_path.is_file():arguments+=['--add-data',str(asset_path)+os.pathsep+asset_dest]

@@ -427,6 +427,7 @@ QCheckBox {spacing:9px;padding:5px;} QScrollArea {border:none;} QSplitter::handl
 QTabWidget::pane {border:1px solid #303642;border-radius:6px;top:-1px;background:#10131a;}
 QTabWidget#appTabs::pane {border:none;border-radius:0;background:#0b0d12;}
 QTabWidget#appTabs QTabBar {background:transparent;border:none;}
+QTabWidget#appTabs QTabBar::tab:last {background:#123d68;color:#bde0ff;border-color:#398bd4;}
 QTabWidget#appTabs QTabBar::tab:last:selected {background:#123d68;color:#ffffff;border-color:#398bd4;border-bottom-color:#123d68;}
 QTabBar::tab {background:#151922;color:#aab3c1;border:1px solid #303642;padding:10px 20px;margin-right:4px;border-top-left-radius:5px;border-top-right-radius:5px;}
 QTabBar::tab:selected {background:#37151b;color:#ffffff;border-color:#d72837;border-bottom-color:#37151b;}
@@ -1129,7 +1130,7 @@ class Window(QMainWindow):
         self.scoreboard_profile.setMaximumWidth(300)
 
         self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
-        self.result_override=QComboBox();self.result_override.addItem('Result: auto (CODMunity link, then scoreboard)','auto');self.result_override.addItem('Victory — I won this match','win');self.result_override.addItem('Defeat — I lost this match','loss');self.result_override.setToolTip('Win/loss comes from the linked CODMunity match first, then the scoreboard placement. Use this only when both are missing or wrong.');self.result_override.setMaximumWidth(460)
+        self.result_override=QComboBox();self.result_override.addItem('Auto','auto');self.result_override.addItem('Win','win');self.result_override.addItem('Loss','loss');self.result_override.setToolTip('Auto uses the linked CODMunity match first, then scoreboard placement. Choose Win or Loss only when both sources are missing or wrong.');self.result_override.setMaximumWidth(300)
         controls_row=QFormLayout();controls_row.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow);controls_row.addRow('Scoreboard type',self.scoreboard_profile);controls_row.addRow('Match result',self.result_override);l.addLayout(controls_row)
         self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(320,200)
         self.ocr_review_status=QLabel('Capture the final match scoreboard to read player rows.');self.ocr_review_status.setWordWrap(True);self.ocr_review_status.setStyleSheet('font-size:11px;color:#aab4c3;padding:2px;')

@@ -402,7 +402,7 @@ QPushButton:pressed {background:#51131d;border-color:#ff3342;}
 QPushButton:checked {background:#39161d;border:1px solid #ed2938;color:#ffffff;}
 QPushButton:disabled {color:#717986;background:#171a20;border-color:#282c34;}
 QPushButton#accent {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ff3947,stop:1 #bd101f);color:#ffffff;border:1px solid #ff6570;}
-QPushButton#exitButton {background:#3a1116;color:#ff8b93;border:1px solid #ff6570;font-weight:800;padding:4px 14px;}
+QPushButton#exitButton {background:#3a1116;color:#ff8b93;border:1px solid #ff6570;font-weight:800;padding:5px 20px;min-width:78px;min-height:28px;border-radius:15px;margin-right:14px;}
 QPushButton#exitButton:hover {background:#ff3947;color:#ffffff;}
 QPushButton#accent:hover {background:#ff4854;border-color:#ffa0a5;}
 QPushButton#metaLoginButton {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2785e8,stop:1 #1454ad);color:#ffffff;border:1px solid #69afff;font-weight:800;}
@@ -807,7 +807,7 @@ class Window(QMainWindow):
     def page(self,name,subtitle):
         page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(30,25,30,25);layout.setSpacing(14)
 
-        banner_file=PAGE_BANNERS.get(name);banner_path=(E.ROOT/'assets'/'banners'/banner_file) if banner_file else None
+        banner_file=PAGE_BANNERS.get(name) if name=='Dashboard' else None;banner_path=(E.ROOT/'assets'/'banners'/banner_file) if banner_file else None
         banner_pix=QPixmap(str(banner_path)) if banner_path and banner_path.is_file() else QPixmap()
         title=QLabel()
         if not banner_pix.isNull():title.setObjectName('pageBanner');title.setPixmap(banner_pix.scaled(QSize(520,170),Qt.KeepAspectRatio,Qt.SmoothTransformation));title.setProperty('bannerFile',banner_file)
@@ -1620,34 +1620,35 @@ class Window(QMainWindow):
         self.cod_ai_capture_status=QLabel('Screenshots will be saved as lossless PNG files in the tracker data folder. Press Down in game to capture.')
         self.cod_ai_capture_status.setWordWrap(True);self.cod_ai_capture_status.setStyleSheet('color:#99a8bc');l.addWidget(self.cod_ai_capture_status)
         media_panel=QFrame();media_panel.setObjectName('dashboardPanel');media_layout=QVBoxLayout(media_panel);media_layout.setContentsMargins(12,12,12,12);media_layout.setSpacing(8)
-        media_head=QHBoxLayout();media_title=QLabel('Screenshots');media_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');media_head.addWidget(media_title);media_head.addStretch(1)
-        self.media_count=QLabel('0 screenshots');self.media_count.setStyleSheet('color:#99a8bc;font-weight:700;');media_head.addWidget(self.media_count)
+        media_head=QHBoxLayout();media_title=QLabel('MEDIA LIBRARY');media_title.setObjectName('codPanelTitle');media_head.addWidget(media_title);media_head.addStretch(1)
         media_head.addWidget(self.button('Open Cinematics Folder',self.open_cinematics_folder));media_layout.addLayout(media_head)
-        self.preview_tabs=QTabWidget();self.preview_tabs.setObjectName('mediaTabs');self.preview_tabs.currentChanged.connect(lambda _index:(self.update_screenshot_grid(),self.update_cinematic_grid()))
+        self.media_tabs=QTabWidget();self.media_tabs.setObjectName('mediaTabs');self.media_tabs.currentChanged.connect(lambda _index:(self.update_screenshot_grid(),self.update_cinematic_grid()))
 
+        screenshots_tab=QWidget();screenshots_layout=QVBoxLayout(screenshots_tab);screenshots_layout.setContentsMargins(6,6,6,6);screenshots_layout.setSpacing(8)
         self.screenshot_tiles={}
-        self.cod_ai_screenshots=QListWidget();self.cod_ai_screenshots.setObjectName('cinematicGallery');self.cod_ai_screenshots.setViewMode(QListWidget.IconMode);self.cod_ai_screenshots.setFlow(QListWidget.LeftToRight);self.cod_ai_screenshots.setMovement(QListWidget.Static);self.cod_ai_screenshots.setResizeMode(QListWidget.Adjust);self.cod_ai_screenshots.setWrapping(True);self.cod_ai_screenshots.setSpacing(6);self.cod_ai_screenshots.setMinimumHeight(220);self.cod_ai_screenshots.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cod_ai_screenshots.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cod_ai_screenshots.currentItemChanged.connect(self.preview_cod_ai_screenshot);media_layout.addWidget(self.cod_ai_screenshots,1)
-        self.cod_ai_empty=QLabel('No screenshots yet\nCapture a screenshot or open your folder.');self.cod_ai_empty.setObjectName('codEmpty');self.cod_ai_empty.setAlignment(Qt.AlignCenter);self.cod_ai_empty.setWordWrap(True);self.cod_ai_empty.hide();media_layout.addWidget(self.cod_ai_empty,1)
+        self.cod_ai_screenshots=QListWidget();self.cod_ai_screenshots.setObjectName('cinematicGallery');self.cod_ai_screenshots.setViewMode(QListWidget.IconMode);self.cod_ai_screenshots.setFlow(QListWidget.LeftToRight);self.cod_ai_screenshots.setMovement(QListWidget.Static);self.cod_ai_screenshots.setResizeMode(QListWidget.Adjust);self.cod_ai_screenshots.setWrapping(True);self.cod_ai_screenshots.setSpacing(6);self.cod_ai_screenshots.setMinimumHeight(220);self.cod_ai_screenshots.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cod_ai_screenshots.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cod_ai_screenshots.currentItemChanged.connect(self.preview_cod_ai_screenshot);screenshots_layout.addWidget(self.cod_ai_screenshots,1)
+        self.cod_ai_empty=QLabel('No screenshots yet\nCapture a screenshot or open your folder.');self.cod_ai_empty.setObjectName('codEmpty');self.cod_ai_empty.setAlignment(Qt.AlignCenter);self.cod_ai_empty.setWordWrap(True);self.cod_ai_empty.hide();screenshots_layout.addWidget(self.cod_ai_empty,1)
+        self.media_tabs.addTab(screenshots_tab,'Screenshots')
 
         videos_tab=QWidget();videos_layout=QVBoxLayout(videos_tab);videos_layout.setContentsMargins(6,6,6,6);videos_layout.setSpacing(8)
         self.cinematic_tiles={};self.cinematic_duration_cache={}
-        self.cinematic_results=QListWidget();self.cinematic_results.setObjectName('cinematicGallery');self.cinematic_results.setViewMode(QListWidget.IconMode);self.cinematic_results.setFlow(QListWidget.LeftToRight);self.cinematic_results.setMovement(QListWidget.Static);self.cinematic_results.setResizeMode(QListWidget.Adjust);self.cinematic_results.setWrapping(True);self.cinematic_results.setSpacing(6);self.cinematic_results.setMinimumHeight(300);self.cinematic_results.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cinematic_results.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cinematic_results.currentItemChanged.connect(self.preview_cinematic_video);videos_layout.addWidget(self.cinematic_results,1)
-        self.cinematic_empty=QLabel('No videos yet\nSend a screenshot to Meta AI to make a cinematic.');self.cinematic_empty.setObjectName('codEmpty');self.cinematic_empty.setAlignment(Qt.AlignCenter);self.cinematic_empty.setWordWrap(True);self.cinematic_empty.hide();videos_layout.addWidget(self.cinematic_empty,1)
-        self.preview_tabs.addTab(videos_tab,'Videos')
+        self.cinematic_results=QListWidget();self.cinematic_results.setObjectName('cinematicGallery');self.cinematic_results.setViewMode(QListWidget.IconMode);self.cinematic_results.setFlow(QListWidget.LeftToRight);self.cinematic_results.setMovement(QListWidget.Static);self.cinematic_results.setResizeMode(QListWidget.Adjust);self.cinematic_results.setWrapping(True);self.cinematic_results.setSpacing(6);self.cinematic_results.setMinimumHeight(220);self.cinematic_results.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.cinematic_results.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);self.cinematic_results.currentItemChanged.connect(self.preview_cinematic_video);videos_layout.addWidget(self.cinematic_results,1)
+        self.cinematic_empty=QLabel('No finished videos yet\nSend a screenshot to Meta AI to make a cinematic.');self.cinematic_empty.setObjectName('codEmpty');self.cinematic_empty.setAlignment(Qt.AlignCenter);self.cinematic_empty.setWordWrap(True);self.cinematic_empty.hide();videos_layout.addWidget(self.cinematic_empty,1)
+        self.media_tabs.addTab(videos_tab,'Finished Videos');media_layout.addWidget(self.media_tabs,1)
 
         self.cinematic_status=QLabel('Choose an existing gameplay screenshot to test Meta AI Frame to Video. Nothing posts automatically.')
         self.cinematic_status.setWordWrap(True);self.cinematic_status.setStyleSheet('color:#99a8bc')
         main_split=QSplitter(Qt.Horizontal);main_split.setHandleWidth(10);main_split.setChildrenCollapsible(False)
         main_split.addWidget(media_panel)
         preview_panel=QFrame();preview_panel.setObjectName('dashboardPanel');right_layout=QVBoxLayout(preview_panel);right_layout.setContentsMargins(12,12,12,12);right_layout.setSpacing(8)
-        preview_tab=QWidget();preview_layout=QVBoxLayout(preview_tab);preview_layout.setContentsMargins(12,12,12,12);preview_layout.setSpacing(8)
-        preview_sub=QLabel('Watch the selected video.');preview_sub.setStyleSheet('color:#99a8bc');preview_layout.addWidget(preview_sub)
+        preview_title=QLabel('PREVIEW');preview_title.setObjectName('codPanelTitle');right_layout.addWidget(preview_title)
+        preview_sub=QLabel('Select a screenshot or finished video to preview it here.');preview_sub.setStyleSheet('color:#99a8bc');right_layout.addWidget(preview_sub)
         self.preview_sub=preview_sub
-        self.preview_image=QLabel('Select a screenshot to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(180);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');preview_layout.addWidget(self.preview_image,1)
+        self.preview_image=QLabel('Select a screenshot or finished video to preview it here');self.preview_image.setAlignment(Qt.AlignCenter);self.preview_image.setWordWrap(True);self.preview_image.setMinimumHeight(180);self.preview_image.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;color:#77818f;');right_layout.addWidget(self.preview_image,1)
         self.cinematic_video_widget=QVideoWidget();self.cinematic_fullscreen_filter=FullscreenExitFilter(lambda:bool(getattr(self,'cinematic_video_widget',None) and self.cinematic_video_widget.isFullScreen()),self.exit_cinematic_fullscreen,self.toggle_cinematic_fullscreen)
         app_instance=QApplication.instance()
         if app_instance is not None:app_instance.installEventFilter(self.cinematic_fullscreen_filter)
-        self.cinematic_video_widget.setMinimumHeight(180);self.cinematic_video_widget.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;');preview_layout.addWidget(self.cinematic_video_widget,1);self.cinematic_video_widget.hide()
+        self.cinematic_video_widget.setMinimumHeight(180);self.cinematic_video_widget.setStyleSheet('background:#050609;border:1px solid #343a46;border-radius:6px;');right_layout.addWidget(self.cinematic_video_widget,1);self.cinematic_video_widget.hide()
         self.cinematic_player=QMediaPlayer(self);self.cinematic_audio=QAudioOutput(self);self.cinematic_audio.setVolume(.8);self.cinematic_player.setAudioOutput(self.cinematic_audio);self.cinematic_player.setVideoOutput(self.cinematic_video_widget);self.cinematic_player.errorOccurred.connect(lambda error,message:self.cinematic_status.setText('Video preview error: '+str(message)[:200]) if error else None)
         self.cinematic_seek=QSlider(Qt.Horizontal);self.cinematic_seek.setRange(0,0)
         self.cinematic_time=QLabel('0:00 / 0:00');self.cinematic_time.setStyleSheet('color:#c4ccd8;font-weight:700;')
@@ -1662,8 +1663,7 @@ class Window(QMainWindow):
         self.cinematic_fullscreen_button=self.button('Fullscreen',self.toggle_cinematic_fullscreen);self.cinematic_fullscreen_button.setToolTip('Fullscreen - press Esc or double-click the video to exit');self.cinematic_fullscreen_button.setEnabled(False)
         self.refresh_cinematic_button=self.button('Refresh',self.refresh_cinematic_results)
         preview_actions=QHBoxLayout();preview_actions.addStretch(1);preview_actions.addWidget(self.cinematic_fullscreen_button);preview_actions.addWidget(self.refresh_cinematic_button);controls_layout.addLayout(preview_actions)
-        preview_layout.addWidget(self.video_controls);self.video_controls.hide()
-        self.preview_tabs.addTab(preview_tab,'Preview');right_layout.addWidget(self.preview_tabs,1)
+        right_layout.addWidget(self.video_controls);self.video_controls.hide()
         main_split.addWidget(preview_panel);main_split.setStretchFactor(0,5);main_split.setStretchFactor(1,6);main_split.setSizes([740,860]);l.addWidget(main_split,1)
         action_bar=QHBoxLayout();action_bar.setSpacing(10);action_bar.addWidget(self.cinematic_status,1)
         self.test_cinematic_button=None
@@ -2528,7 +2528,10 @@ class Window(QMainWindow):
             if item:item.setSizeHint(QSize(tile_w,tile_h))
     def update_media_count(self):
         shots=len(getattr(self,'_shot_paths',[]) or [])
-        if hasattr(self,'media_count'):self.media_count.setText(f"{shots} screenshot{'s' if shots!=1 else ''}")
+        videos=len(getattr(self,'_video_rows',[]) or [])
+        if hasattr(self,'media_tabs'):
+            self.media_tabs.setTabText(0,f"Screenshots ({shots})")
+            self.media_tabs.setTabText(1,f"Finished Videos ({videos})")
     def _sync_screenshot_tiles(self):
         if not hasattr(self,'cod_ai_screenshots'):return
         current=self.cod_ai_screenshots.currentItem()
@@ -2607,7 +2610,6 @@ class Window(QMainWindow):
         self.cinematic_results.blockSignals(False)
         self.update_cinematic_grid();self._sync_cinematic_tiles()
         self._video_rows=list(rows);self.update_media_count();self.cinematic_results.setVisible(bool(rows));self.cinematic_empty.setVisible(not rows)
-        if hasattr(self,'preview_tabs'):self.preview_tabs.setTabText(0,f'Videos ({len(rows)})')
         self.ensure_cinematic_thumbs()
         selected=self.cinematic_results.currentItem();selected_video=selected.data(Qt.UserRole+1) if selected else ''
         pending=getattr(self,'cinematic_auto_post_pending',False)
@@ -2627,9 +2629,8 @@ class Window(QMainWindow):
         self.cinematic_player.stop()
         if path and Path(path).is_file():self.cinematic_player.setSource(QUrl.fromLocalFile(path));self.cinematic_player.play();self.cinematic_play_button.setText('Pause')
         else:self.cinematic_player.setSource(QUrl());self.cinematic_play_button.setText('Play')
-        has_video=bool(path and Path(path).is_file());self.preview_image.setVisible(not has_video);self.cinematic_video_widget.setVisible(has_video);self.video_controls.setVisible(has_video);self.preview_sub.setText(Path(path).name if has_video else 'Watch the selected video.')
+        has_video=bool(path and Path(path).is_file());self.preview_image.setVisible(not has_video);self.cinematic_video_widget.setVisible(has_video);self.video_controls.setVisible(has_video);self.preview_sub.setText(Path(path).name if has_video else 'Select a screenshot or finished video to preview it here.');self.preview_image.setText('Select a screenshot or finished video to preview it here.')
         self.post_cinematic_button.setEnabled(has_video)
-        if has_video and hasattr(self,'preview_tabs'):self.preview_tabs.setCurrentIndex(1)
         if hasattr(self,'cinematic_play_button'):self.cinematic_play_button.setEnabled(has_video)
         if hasattr(self,'cinematic_fullscreen_button'):self.cinematic_fullscreen_button.setEnabled(has_video)
         self._sync_cinematic_tiles()
@@ -2857,7 +2858,7 @@ class Window(QMainWindow):
         if self.cod_ai_screenshots.count():
             if not self.cod_ai_screenshots.currentItem():self.cod_ai_screenshots.setCurrentRow(0)
         else:
-            self.preview_image.show();self.cinematic_video_widget.hide();self.video_controls.hide();self.preview_image.setText('Select a screenshot to preview it here');self.preview_sub.setText('Watch the selected video.')
+            self.preview_image.show();self.cinematic_video_widget.hide();self.video_controls.hide();self.preview_image.setText('Select a screenshot or finished video to preview it here');self.preview_sub.setText('Select a screenshot or finished video to preview it here.')
         self.maybe_offer_screenshot_cleanup()
     def ask_screenshot_cleanup(self,used_count,total_count):
         box=QMessageBox(self);box.setWindowTitle('Many screenshots');box.setText('You seem to have a bunch of screenshots. Would you like to delete the ones you have already used in videos?');box.setInformativeText(f'{used_count} used of {total_count} screenshots would be deleted. Queue entries stay for history.');yes_button=box.addButton('Yes',QMessageBox.YesRole);box.addButton('No',QMessageBox.NoRole);box.setDefaultButton(yes_button);box.exec();return box.clickedButton() is yes_button

@@ -19,6 +19,7 @@ from version import APP_VERSION
 SCOREBOARD_HOTKEY_ID=0x5638
 COD_AI_SCREENSHOT_HOTKEY_ID=0x5639
 AUTO_OCR_INTERVAL_SECONDS=30
+NO_CONSOLE_FLAG=getattr(subprocess,'CREATE_NO_WINDOW',0)
 # Pixel bounds of the scoreboard in the supplied 2560×1440 reference image.
 # Other supported resolutions scale these same bounds proportionally.
 SCOREBOARD_REFERENCE_SIZE=(2560,1440)
@@ -103,7 +104,7 @@ def probe_cinematic_duration(path):
         import shutil,subprocess
         exe=shutil.which('ffprobe')
         if not exe or not Path(path).is_file():return None
-        out=subprocess.run([exe,'-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(path)],capture_output=True,text=True,timeout=3)
+        out=subprocess.run([exe,'-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',str(path)],capture_output=True,text=True,timeout=3,creationflags=NO_CONSOLE_FLAG)
         value=float((out.stdout or '').strip())
         return value if value>0 else None
     except Exception:return None
@@ -228,7 +229,7 @@ class WindowsWindowHost:
         user32.MoveWindow.argtypes=(hwnd,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.BOOL);user32.MoveWindow.restype=wintypes.BOOL
         user32.GetWindowRect.argtypes=(hwnd,ctypes.POINTER(wintypes.RECT));user32.GetWindowRect.restype=wintypes.BOOL
         return user32,get_style,set_style
-    def attach(self,hwnd,parent_hwnd):
+    def attach(self,hwnd,parent_hwnd,activate=True):
         user32,get_style,set_style=self._apis()
         self.old_parent=user32.GetParent(hwnd);self.old_style=get_style(hwnd,self.GWL_STYLE);rect=wintypes.RECT()
         self.old_rect=(rect.left,rect.top,rect.right-rect.left,rect.bottom-rect.top) if user32.GetWindowRect(hwnd,ctypes.byref(rect)) else (100,100,1000,700)
@@ -241,8 +242,9 @@ class WindowsWindowHost:
         user32.SetWindowPos(hwnd,0,0,0,0,0,self.SWP_FRAMECHANGED|self.SWP_SHOWWINDOW)
         if int(user32.GetParent(hwnd) or 0)!=int(parent_hwnd):
             self.detach();raise OSError(set_parent_error or ctypes.get_last_error(),'Windows did not attach the CODMunity window to the tab.')
-        try:user32.SetForegroundWindow(hwnd);user32.SetFocus(hwnd)
-        except Exception:pass
+        if activate:
+            try:user32.SetForegroundWindow(hwnd);user32.SetFocus(hwnd)
+            except Exception:pass
     def focus_embedded(self):
         if not self.hwnd:return False
         try:
@@ -402,6 +404,10 @@ QPushButton:pressed {background:#51131d;border-color:#ff3342;}
 QPushButton:checked {background:#39161d;border:1px solid #ed2938;color:#ffffff;}
 QPushButton:disabled {color:#717986;background:#171a20;border-color:#282c34;}
 QPushButton#accent {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ff3947,stop:1 #bd101f);color:#ffffff;border:1px solid #ff6570;}
+QPushButton#latestAutoJobButton[jobRunning="true"][pulsePhase="true"] {background:#38b766;color:#ffffff;border:2px solid #9cffb9;}
+QPushButton#latestAutoJobButton[jobRunning="true"][pulsePhase="false"] {background:#176d3a;color:#ffffff;border:2px solid #53ec82;}
+QPushButton[guideTarget="true"] {border:2px solid #4aa3ff;background:#123258;color:#ffffff;}
+QPushButton#guideButton {background:#10243a;color:#72b8ff;border:1px solid #347bc2;border-radius:18px;font-weight:900;}
 QPushButton#exitButton {background:#3a1116;color:#ff8b93;border:1px solid #ff6570;font-weight:800;padding:5px 20px;min-width:78px;min-height:28px;border-radius:15px;margin-right:14px;}
 QPushButton#exitButton:hover {background:#ff3947;color:#ffffff;}
 QPushButton#accent:hover {background:#ff4854;border-color:#ffa0a5;}
@@ -611,6 +617,7 @@ class Window(QMainWindow):
         self.meta_login_button=self.button('Log into Meta AI',self.open_login_window);self.meta_login_button.setObjectName('metaLoginButton');self.meta_login_button.setMinimumHeight(40);self.meta_login_button.setToolTip('Open Meta AI so you can sign in for background poster and video jobs.');side.addWidget(self.meta_login_button)
         self.meta_verify_button=self.button('Verify Meta AI login',self.verify_login);self.meta_verify_button.setMinimumHeight(36);self.meta_verify_button.hide();side.addWidget(self.meta_verify_button)
         self.generate_sidebar_button=self.button('Generate AI End Game Picture',self.generate_and_approve,True);self.generate_sidebar_button.setMinimumHeight(44);self.generate_sidebar_button.setToolTip('Generate the AI End Game picture for the newest finished match, then approve the post.');side.addWidget(self.generate_sidebar_button)
+        self.guide_button=self.button('?  Guide',self.show_sidebar_guide);self.guide_button.setObjectName('guideButton');self.guide_button.setMinimumHeight(36);self.guide_button.setMinimumWidth(90);self.guide_button.setToolTip('Walk through the sidebar and learn what each button does.')
 
         self.stack=QStackedWidget();tracker_shell_layout.addWidget(self.sidebar);tracker_shell_layout.addWidget(self.stack,1)
         self.codmunity_host=WindowsWindowHost();self.codmunity_process=None;self.codmunity_hwnd=None
@@ -633,7 +640,8 @@ class Window(QMainWindow):
         self.codmunity_poll=QTimer(self);self.codmunity_poll.setInterval(500);self.codmunity_poll.timeout.connect(self.try_attach_codmunity)
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
         self.app_tabs.currentChanged.connect(self.app_tab_changed)
-        self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);self.app_tabs.setCornerWidget(self.exit_button,Qt.TopRightCorner)
+        self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit)
+        corner_controls=QWidget();corner_layout=QHBoxLayout(corner_controls);corner_layout.setContentsMargins(0,0,12,0);corner_layout.setSpacing(7);corner_layout.addWidget(self.guide_button);corner_layout.addWidget(self.exit_button);self.app_tabs.setCornerWidget(corner_controls,Qt.TopRightCorner)
         self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs()
         try:self._autofill_stats_dir()
         except Exception:pass
@@ -792,9 +800,11 @@ class Window(QMainWindow):
         super().resizeEvent(event)
         browser_page=self.pages.get('Tracker Browser',(None,None))[0] if hasattr(self,'pages') else None
         try:
-            if (hasattr(self,'auto_browser_host') and self.auto_browser_host.hwnd and browser_page is not None
-                    and self.stack.currentWidget() is browser_page):
-                self.auto_browser_host.resize(self.browser_surface.width(),self.browser_surface.height())
+            if hasattr(self,'auto_browser_panel'):self._position_auto_browser_panel()
+            if hasattr(self,'auto_browser_host') and self.auto_browser_host.hwnd and hasattr(self,'auto_browser_surface'):
+                # Keep a normal browser viewport for Meta's responsive UI and automation,
+                # while the sidebar clips the embedded window down to the requested 1×1 pixel.
+                self.auto_browser_host.resize(max(800,self.auto_browser_surface.width()),max(600,self.auto_browser_surface.height()))
         except (AttributeError,RuntimeError):pass
         if (hasattr(self,'browser_host') and self.browser_host.hwnd and browser_page is not None
                 and self.stack.currentWidget() is browser_page and hasattr(self,'browser_surface')):
@@ -804,6 +814,13 @@ class Window(QMainWindow):
         if hasattr(self,'cinematic_results'):self.update_cinematic_grid()
         if hasattr(self,'cod_ai_screenshots'):self.update_screenshot_grid()
         if hasattr(self,'cod_ai_screenshots') and self.cod_ai_screenshots.currentItem():self.preview_cod_ai_screenshot(self.cod_ai_screenshots.currentItem())
+    def _position_auto_browser_panel(self):
+        panel=getattr(self,'auto_browser_panel',None)
+        if panel is None:return
+        # The panel is part of the sidebar layout, directly above the Meta login button.
+        # Activating the layout lets Qt recalculate the embedded browser surface size.
+        layout=getattr(getattr(self,'sidebar',None),'layout',lambda:None)()
+        if layout is not None:layout.activate()
     def page(self,name,subtitle):
         page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(30,25,30,25);layout.setSpacing(14)
 
@@ -857,6 +874,59 @@ class Window(QMainWindow):
     def edit(self,value=''):return QLineEdit(str(value))
     def notice(self,text):QMessageBox.information(self,'Vintendo COD Tracker',text)
     def ask(self,text):return QMessageBox.question(self,'Vintendo COD Tracker',text)==QMessageBox.Yes
+    def show_sidebar_guide(self):
+        descriptions={
+            'Dashboard':'See your latest match, tracker status, and quick actions. Start a full automatic poster job from Match Center.',
+            'Solo Ops':'Configure and review solo match tracking from CODMunity data.',
+            'Squad Night':'Track squad matches and manage squad-specific match settings.',
+            'Scoreboard Capture':'Capture a scoreboard, check the OCR results, and save verified match details.',
+            'Player Roster':'Manage player names, aliases, headshots, and Meta AI photo consent.',
+            'AI Studio':'Review a match, its verified player data, and its generated poster.',
+            'ScreenShots and Videos':'Capture gameplay screenshots and manage Meta AI videos.',
+            'Discord Settings':'Set or test the Discord webhook used for match posts.',
+            'Match History':'Browse saved matches and resolve failed or uncertain posts.',
+            'Settings':'Adjust tracking, automation, browser, and application preferences.',
+            'Tracker Browser':'The Meta AI browser appears here while an automated job is running.'}
+        steps=[]
+        for row in range(self.nav.count()):
+            item=self.nav.item(row);name=str(item.data(Qt.UserRole) or '')
+            if item.isHidden():continue
+            steps.append(('nav',row,name,descriptions.get(name,'Open the '+name+' section.')))
+        steps.append(('button',self.meta_login_button,'Log into Meta AI','Sign into Meta AI once. The tracker reuses this session for automatic poster and video jobs.'))
+        if self.meta_verify_button.isVisible():steps.append(('button',self.meta_verify_button,'Verify Meta AI login','Confirm the Meta AI session is signed in and ready for automation.'))
+        steps.append(('button',self.generate_sidebar_button,'Generate AI End Game Picture','Start a poster for the newest eligible match, then follow the approval and posting flow.'))
+        if not steps:return
+        original_row=self.nav.currentRow();index=[0];active=[None]
+        dialog=QDialog(self);dialog.setWindowTitle('Sidebar Guide');dialog.setModal(True);dialog.setMinimumWidth(490)
+        layout=QVBoxLayout(dialog);layout.setContentsMargins(22,20,22,18);layout.setSpacing(12)
+        progress=QLabel();progress.setStyleSheet('color:#78baff;font-weight:800;');layout.addWidget(progress)
+        heading=QLabel();heading.setStyleSheet('font-size:20px;font-weight:900;color:#ffffff;');layout.addWidget(heading)
+        copy=QLabel();copy.setWordWrap(True);copy.setMinimumHeight(64);copy.setStyleSheet('font-size:14px;color:#cbd3df;');layout.addWidget(copy)
+        controls=QHBoxLayout();controls.addStretch(1);back=self.button('Back',lambda:None);next_step=self.button('Next',lambda:None,True);close=self.button('Close Guide',dialog.reject);controls.addWidget(back);controls.addWidget(next_step);controls.addWidget(close);layout.addLayout(controls)
+        def clear_highlight():
+            kind,target=active[0] if active[0] else (None,None)
+            if kind=='button' and target:
+                target.setProperty('guideTarget',False);target.style().unpolish(target);target.style().polish(target)
+            active[0]=None
+        def show_step():
+            clear_highlight();kind,target,title,description=steps[index[0]]
+            progress.setText(f'STEP {index[0]+1} OF {len(steps)}')
+            heading.setText(title);copy.setText(description)
+            if kind=='nav':self.nav.setCurrentRow(target)
+            else:
+                active[0]=(kind,target);target.setProperty('guideTarget',True);target.style().unpolish(target);target.style().polish(target)
+            back.setEnabled(index[0]>0);next_step.setText('Finish' if index[0]==len(steps)-1 else 'Next')
+        def go_back():
+            if index[0]>0:index[0]-=1;show_step()
+        def go_next():
+            if index[0]>=len(steps)-1:dialog.accept();return
+            index[0]+=1;show_step()
+        back.clicked.connect(go_back);next_step.clicked.connect(go_next)
+        show_step()
+        try:dialog.exec()
+        finally:
+            clear_highlight()
+            if 0<=original_row<self.nav.count():self.nav.setCurrentRow(original_row)
     def request_exit(self):
         if self.ask('Exit Vintendo COD Tracker?\n\nTracking stops and all windows close.'):self.shutdown()
     def async_task(self,fn,done=None,failed=None):
@@ -901,13 +971,14 @@ class Window(QMainWindow):
         self.latest_stats=QLabel('');self.latest_stats.setWordWrap(True);self.latest_stats.setStyleSheet('color:#cbd3df;');latest_layout.addWidget(self.latest_stats)
         self.latest_status=QLabel('');self.latest_status.setWordWrap(True);self.latest_status.setStyleSheet('font-size:11px;color:#aab4c3;');latest_layout.addWidget(self.latest_status)
         latest_layout.addStretch(1)
-        self.latest_review=self.button('REVIEW POSTER',self.open_latest_match,True);self.latest_review.setEnabled(False);latest_layout.addWidget(self.latest_review)
+        self.latest_review=self.button('START FULL AUTO JOB',self.start_latest_auto_job,True);self.latest_review.setObjectName('latestAutoJobButton');self.latest_review.setEnabled(False);latest_layout.addWidget(self.latest_review)
+        self.latest_auto_pulse_timer=QTimer(self);self.latest_auto_pulse_timer.setInterval(360);self.latest_auto_pulse_timer.timeout.connect(self._pulse_latest_auto_button);self._latest_auto_job_id=None;self._latest_auto_no_discord=False
         center_layout.addWidget(self.latest_card,1);body.addWidget(center,0,0,2,2)
 
         health=QFrame();health.setObjectName('dashboardPanel');health_layout=QVBoxLayout(health);health_layout.setContentsMargins(13,12,13,13);health_layout.setSpacing(10)
         health_title=QLabel('▮  SYSTEM STATUS');health_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');health_layout.addWidget(health_title)
         self.dashboard_health={}
-        for key,label in (('codmunity','CODMunity data'),('ocr','Scoreboard OCR'),('discord','Discord webhook')):
+        for key,label in (('codmunity','CODMunity data'),('ocr','Screenshot'),('discord','Discord')):
             line=QFrame();line.setObjectName('healthRow');row=QHBoxLayout(line);row.setContentsMargins(9,7,9,7);indicator=QLabel('●');indicator.setObjectName('healthDot');name=QLabel(label);value=QLabel('Checking');value.setObjectName('healthValue');row.addWidget(indicator);row.addWidget(name,1);row.addWidget(value);health_layout.addWidget(line);self.dashboard_health[key]=(indicator,value)
         body.addWidget(health,0,2)
 
@@ -1697,12 +1768,20 @@ class Window(QMainWindow):
         QTimer.singleShot(0,self.update_screenshot_grid);QTimer.singleShot(0,self.update_cinematic_grid)
         self.refresh_cinematic_results()
     def build_tracker_browser(self):
-        l=self.page('Tracker Browser','The Meta AI browser docks in this tab while a poster or video job runs - watch it work here. Nothing here needs clicking while a job runs.')
+        l=self.page('Tracker Browser','Meta AI automation runs in a small in-app browser panel while a poster or video job is active.')
         for row in range(self.nav.count()):
             if self.nav.item(row).data(Qt.UserRole)=='Tracker Browser':self.nav.item(row).setHidden(True);break
         self.browser_status=QLabel('Tracker browser: checking…');self.browser_status.setWordWrap(True);l.addWidget(self.browser_status)
         self.browser_queue=QLabel('');self.browser_queue.setWordWrap(True);self.browser_queue.setStyleSheet('color:#99a8bc');l.addWidget(self.browser_queue)
         self.browser_surface=QFrame();self.browser_surface.setObjectName('dashboardPanel');self.browser_surface.setMinimumSize(800,450);l.addWidget(self.browser_surface,1)
+        self.auto_browser_panel=QFrame(self.sidebar);self.auto_browser_panel.setObjectName('dashboardPanel');self.auto_browser_panel.setFixedSize(1,1)
+        mini_layout=QVBoxLayout(self.auto_browser_panel);mini_layout.setContentsMargins(7,7,7,7);mini_layout.setSpacing(5)
+        mini_head=QHBoxLayout();self.auto_mini_title=QLabel('META AI  ·  RUNNING');self.auto_mini_title.setObjectName('codPanelTitle');mini_head.addWidget(self.auto_mini_title);mini_head.addStretch(1)
+        self.auto_browser_hide_button=self.button('×',self.auto_browser_panel.hide);self.auto_browser_hide_button.setObjectName('codSecondary');self.auto_browser_hide_button.setFixedSize(26,24);self.auto_browser_hide_button.setToolTip('Hide the mini browser while the Meta AI job continues.');mini_head.addWidget(self.auto_browser_hide_button);mini_layout.addLayout(mini_head)
+        self.auto_browser_surface=QFrame();self.auto_browser_surface.setObjectName('dashboardPanel');self.auto_browser_surface.setMinimumSize(1,1);mini_layout.addWidget(self.auto_browser_surface,1)
+        sidebar_layout=self.sidebar.layout()
+        sidebar_layout.insertWidget(sidebar_layout.indexOf(self.meta_login_button),self.auto_browser_panel)
+        self.auto_browser_panel.hide()
         self.row(l,self.button('Log into Meta AI',self.open_login_window),self.button('Show / hide browser',self.toggle_auto_browser),self.button('Refresh queue',self.refresh_auto_queue))
         self._init_mission_panel()
         self.refresh_tracker_browser()
@@ -1718,7 +1797,7 @@ class Window(QMainWindow):
             self.login_card=QFrame();self.login_card.setObjectName('dashboardPanel')
             login_layout=QVBoxLayout(self.login_card);login_layout.setContentsMargins(14,12,14,12);login_layout.setSpacing(8)
             login_title=QLabel('META AI NEEDS YOU TO LOG IN');login_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');login_layout.addWidget(login_title)
-            login_hint=QLabel('Log in once in the Meta AI window, then use Verify Meta AI login in the sidebar. Poster and video jobs run minimized in the background.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
+            login_hint=QLabel('Log in once in the visible Meta AI window, then verify your session. Poster and video jobs use a small in-app browser panel.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
             self.row(login_layout,self.button('Open login window',self.open_login_window,True),self.button("I've logged in — verify",self.verify_login))
             self.login_card.hide();layout.addWidget(self.login_card)
             layout.addStretch(1)
@@ -1732,9 +1811,15 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         pass
         try:
+            if self.auto_stage in ('submitting','generating','collecting'):
+                self._position_auto_browser_panel();self.auto_browser_panel.show();self.auto_browser_panel.raise_()
+                self.auto_mini_title.setText('META AI  ·  '+self.auto_stage.upper())
+            else:self.auto_browser_panel.hide()
+        except (AttributeError,RuntimeError):pass
+        try:
             if self.auto_stage=='failed':self.browser_status.setText('Automation stopped: '+self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('color:#ef6b77;font-weight:700;')
             elif self.auto_stage_detail:self.browser_status.setText(self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('')
-            elif self.auto_stage=='ready':self.browser_status.setText('Meta AI poster and video jobs run minimized in the background.');self.browser_status.setStyleSheet('')
+            elif self.auto_stage=='ready':self.browser_status.setText('Meta AI poster and video jobs run in the small in-app panel.');self.browser_status.setStyleSheet('')
         except (AttributeError,RuntimeError):pass
         try:
             if self.auto_stage in ('submitting','generating','collecting'):
@@ -1908,7 +1993,7 @@ class Window(QMainWindow):
                     self.auto_browser_host.hwnd=None
                     return
             except Exception:return
-            try:self.browser_surface.winId()
+            try:self.auto_browser_surface.winId()
             except (AttributeError,RuntimeError):return
             try:
                 if getattr(self.auto_browser_host,'hwnd',None):self.auto_browser_host.detach()
@@ -1922,10 +2007,11 @@ class Window(QMainWindow):
                         else:_bh.hwnd=None
                     except Exception:pass
             except (AttributeError,RuntimeError):pass
-            self.auto_browser_host.attach(hwnd,int(self.browser_surface.winId()))
+            self.auto_browser_host.attach(hwnd,int(self.auto_browser_surface.winId()),activate=False)
             self.auto_browser_hwnd=self.auto_browser_host.hwnd
-            self.auto_browser_host.resize(self.browser_surface.width(),self.browser_surface.height())
-            try:self.browser_status.setText('Meta AI browser is running in this tab. Watch it work - nothing here needs clicking while a job runs.')
+            self.auto_browser_host.resize(max(800,self.auto_browser_surface.width()),max(600,self.auto_browser_surface.height()))
+            self._position_auto_browser_panel();self.auto_browser_panel.show();self.auto_browser_panel.raise_()
+            try:self.browser_status.setText('Meta AI browser is running in the small in-app panel.')
             except (AttributeError,RuntimeError):pass
         except Exception as exc:
             try:self.browser_status.setText('Browser embedding failed, showing the window instead: '+str(exc)[:160])
@@ -2170,7 +2256,7 @@ class Window(QMainWindow):
         self.browser_retries=QSpinBox();self.browser_retries.setRange(0,3);self.browser_retries.setValue(int(self.settings.values.get('browser_retries',1)))
         f=QFormLayout();f.addRow('Polling interval (seconds)',self.poll);f.addRow('Meta page navigation timeout',self.browser_timeout);f.addRow('Wait for image download',self.download_timeout);f.addRow('Browser/navigation retries',self.browser_retries);f.addRow('Application data',QLabel(str(E.DATA)));automation_layout.addLayout(f)
         self.row(automation_layout,self.button('Open data folder',lambda:os.startfile(str(E.DATA))),self.button('Open logs folder',lambda:os.startfile(str(E.DATA))))
-        automation_layout.addWidget(QLabel('Meta video jobs run in the background using the tracker browser profile. Sign in once with Log into Meta AI in the sidebar; no extension install or pairing token is needed.'))
+        automation_layout.addWidget(QLabel('Meta poster and video jobs run in a small in-app browser using the tracker profile. Sign in once with Log into Meta AI in the sidebar; no extension install or pairing token is needed.'))
         browser_mode_note=QLabel('Tracker Chrome profile: the dedicated profile keeps the Meta AI login isolated from your own Chrome; attaching reuses a Meta AI tab you already have open in your own Chrome.');browser_mode_note.setWordWrap(True);automation_layout.addWidget(browser_mode_note)
         self.browser_mode_combo=QComboBox();self.browser_mode_combo.addItems(['Dedicated tracker profile (recommended)','Use my already-open Chrome']);self.browser_mode_combo.setCurrentIndex(1 if self.tracker_browser_mode()=='attach' else 0);browser_mode_form=QFormLayout();browser_mode_form.addRow('Tracker Chrome profile',self.browser_mode_combo);automation_layout.addLayout(browser_mode_form)
         automation_layout.addStretch()
@@ -2506,7 +2592,7 @@ class Window(QMainWindow):
             made=[]
             for video,thumb,cid in jobs:
                 try:
-                    subprocess.run([exe,'-y','-v','error','-ss','1','-i',video,'-frames:v','1','-vf','scale=336:-2',thumb],timeout=120)
+                    subprocess.run([exe,'-y','-v','error','-ss','1','-i',video,'-frames:v','1','-vf','scale=336:-2',thumb],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=120,creationflags=NO_CONSOLE_FLAG)
                     if Path(thumb).is_file():made.append(cid)
                 except Exception:pass
                 finally:pending.discard(cid)
@@ -2682,6 +2768,7 @@ class Window(QMainWindow):
         except Exception:pass
         try:self.store.update_cinematic(job_id,status='awaiting_generation')
         except Exception:pass
+        self._start_embed_poll()
         thread=threading.Thread(target=self._run_inapp_cinematic,args=(job_id,),daemon=True);thread.start()
     def _run_inapp_cinematic(self,job_id):
         try:row=self.store.get_cinematic(job_id)
@@ -2726,13 +2813,14 @@ class Window(QMainWindow):
         except Exception as exc:
             detail=str(getattr(exc,'detail',None) or exc)
             step=str(getattr(exc,'step','error'))
-            if 'login' in step.lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then requeue the video.'
+            if 'login' in step.lower():message='Meta AI is signed out. Click Log into Meta AI in the sidebar, verify your session, then requeue the video.'
             else:message=(f'Meta automation stopped at {step}: {detail}')[:300]
             self._fail_inapp_cinematic(job_id,message);return
         try:self.store.update_cinematic(job_id,status='completed',video=str(video),error='')
         except Exception:pass
         try:self.on_log('In-app cinematic completed: '+job_id)
         except Exception:pass
+        QTimer.singleShot(0,lambda:self.set_automation_stage('collected',job_id))
         self._inapp_active=None
         try:self._inapp_started=None
         except Exception:pass
@@ -3869,10 +3957,81 @@ class Window(QMainWindow):
         status=str(job.get('status','-')).replace('_',' ').upper();attempts=job.get('attempts',0)
         hint=' · last post failed, review to retry' if job.get('status')=='failed' else ''
         self.latest_status.setText(f"Status: {status} · {attempts} attempt(s){hint}")
-        self.latest_review.setEnabled(True)
+        actionable=job.get('status') not in ('baseline','uncertain')
+        self.latest_review.setEnabled(actionable)
+        self.latest_review.setToolTip('Starts Meta AI generation. A match already delivered to Discord will not be posted twice.' if actionable else 'This match cannot be started automatically.')
+    def start_latest_auto_job(self):
+        """Start the latest match in the no-click Meta AI poster flow."""
+        mid=getattr(self,'latest_job_id',None)
+        job=self.store.get(mid) if mid else None
+        if not job:
+            self.notice('There is no match ready for an automatic poster job yet.')
+            return
+        if job.get('status') in ('baseline','uncertain'):
+            self.notice('This match cannot be started automatically. Resolve it in Match History or capture a new scoreboard.')
+            return
+        if self._latest_auto_job_id:
+            self.statusBar().showMessage('An automatic poster job is already running.',5000)
+            return
+        no_discord=job.get('status') in ('delivered','solo_delivered')
+        try:webhook= self.settings.webhook().strip()
+        except Exception:webhook=self.webhook.text().strip()
+        if not no_discord and not webhook:
+            self.notice('Add a Discord webhook in Settings before starting the full automatic job.')
+            return
+        if not no_discord:
+            self.auto_post.setChecked(True)
+            self.settings.values['auto_post']=True
+            try:self.settings.save()
+            except Exception:pass
+        self._latest_auto_job_id=mid;self._latest_auto_no_discord=no_discord
+        self._set_latest_auto_busy(True,'STARTING AI JOB')
+        QTimer.singleShot(0,lambda mid=mid:self._launch_latest_auto_job(mid))
+    def _launch_latest_auto_job(self,mid):
+        try:
+            launched=self._prepare_and_launch(mid,manual=False)
+        except Exception as exc:
+            self._latest_auto_job_id=None
+            self._set_latest_auto_busy(False,'JOB FAILED')
+            self.notice('Could not start the automatic poster job: '+str(exc)[:220])
+            self.log('Dashboard auto job failed for '+str(mid)+': '+str(exc)[:220])
+            return
+        if launched:
+            self.nav.setCurrentRow(5)
+            self.job_status.setText('Meta AI poster job started.' if self._latest_auto_no_discord else 'Full auto started: Meta AI will generate the poster, then the tracker will deliver it to Discord.')
+            self._set_latest_auto_busy(True,'META AI WORKING')
+        else:
+            self._latest_auto_job_id=None
+            self._set_latest_auto_busy(False,'START FULL AUTO JOB')
+            self.notice('The Meta AI browser automation could not start. Verify the Meta AI login and try again.')
+    def _pulse_latest_auto_button(self):
+        button=getattr(self,'latest_review',None)
+        if button is None:return
+        button.setProperty('pulsePhase',not bool(button.property('pulsePhase')))
+        button.style().unpolish(button);button.style().polish(button);button.update()
+    def _set_latest_auto_busy(self,busy,label='START FULL AUTO JOB'):
+        button=getattr(self,'latest_review',None)
+        if button is None:return
+        button.setText(label);button.setProperty('jobRunning',bool(busy))
+        if busy:
+            button.setProperty('pulsePhase',True);button.setEnabled(False)
+            if not self.latest_auto_pulse_timer.isActive():self.latest_auto_pulse_timer.start()
+        else:
+            self.latest_auto_pulse_timer.stop();button.setProperty('pulsePhase',False)
+            current=self.store.get(self.latest_job_id) if self.latest_job_id else None
+            button.setEnabled(bool(current and current.get('status') not in ('baseline','uncertain')))
+            if label in ('JOB COMPLETE','POSTER READY','JOB FAILED'):
+                QTimer.singleShot(2600,lambda:self._set_latest_auto_busy(False,'START FULL AUTO JOB'))
+        button.style().unpolish(button);button.style().polish(button);button.update()
+    def _finish_latest_auto_job(self,mid,label):
+        if getattr(self,'_latest_auto_job_id',None)!=mid:return
+        self._latest_auto_job_id=None;self._latest_auto_no_discord=False
+        self._set_latest_auto_busy(False,label)
     def _set_dashboard_health(self,key,value,good=None):
-        indicator,label=self.dashboard_health[key];label.setText(value)
-        color='#56e99a' if good else '#ff626d' if good is False else '#bbc4d0'
+        indicator,label=self.dashboard_health[key]
+        online=bool(good) if good is not None else str(value).casefold() in ('online','ready','true')
+        label.setText('Online' if online else 'Offline')
+        color='#56e99a' if online else '#ff626d'
         label.setStyleSheet('color:'+color+';font-size:11px;font-weight:800;')
         indicator.setStyleSheet('color:'+color+';')
     def refresh_dashboard_status(self):
@@ -3880,12 +4039,11 @@ class Window(QMainWindow):
         resolved=self._effective_stats_dir() if hasattr(self,'stats_dir') else ''
         folder=Path(resolved) if resolved else None
         folder_ready=bool(folder and folder.is_dir())
-        self._set_dashboard_health('codmunity','FOLDER READY' if folder_ready else 'FOLDER NOT FOUND',folder_ready)
-        auto=self.tracking and self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked()
-        ocr_state='AUTO SCAN' if auto else 'FULL-SCREEN READY'
-        self._set_dashboard_health('ocr',ocr_state,True)
-        discord_ready=bool(hasattr(self,'webhook') and self.webhook.text().strip())
-        self._set_dashboard_health('discord','WEBHOOK SAVED' if discord_ready else 'NOT CONFIGURED',discord_ready)
+        self._set_dashboard_health('codmunity','Online' if folder_ready else 'Offline',folder_ready)
+        self._set_dashboard_health('ocr','Online',True)
+        try:discord_ready=bool(self.settings.webhook().strip())
+        except Exception:discord_ready=bool(hasattr(self,'webhook') and self.webhook.text().strip())
+        self._set_dashboard_health('discord','Online' if discord_ready else 'Offline',discord_ready)
         if self.tracking and self.paused:tracking='PAUSED';color='#e3b95e'
         elif self.tracking:tracking='LIVE TRACKING';color='#56e99a'
         else:tracking='STANDBY';color='#a7b0bd'
@@ -4232,6 +4390,7 @@ class Window(QMainWindow):
         except Exception:pass
         try:self.generate_poster_button.setEnabled(False)
         except (AttributeError,RuntimeError):pass
+        self._start_embed_poll()
         self.async_task(lambda:self._run_poster_job(job_id,sync_playwright,folder,list(filenames or []),prompt_text),lambda result:self._deliver_poster_result(job_id,result))
         return True
     def _run_poster_job(self,job_id,playwright_factory,folder,filenames,prompt_text):
@@ -4299,7 +4458,7 @@ class Window(QMainWindow):
             except OSError:pass
         except Exception as exc:
             message='Meta AI returned an unusable image: '+str(exc)
-            self.job_status.setText(message[:300]);self.log('In-app poster failed for '+job_id+': '+str(exc)[:160]);return
+            self.job_status.setText(message[:300]);self.log('In-app poster failed for '+job_id+': '+str(exc)[:160]);self._finish_latest_auto_job(job_id,'JOB FAILED');return
         self.active_id=job_id
         try:self.load_studio(job_id)
         except Exception:pass
@@ -4315,6 +4474,7 @@ class Window(QMainWindow):
             self.log('Poster held for manual download: '+str(job_id))
             self.job_status.setText('Browser screenshot linked for review, not posted: only a real Meta download goes to Discord. Right-click save the clean picture in the Meta window, then press Import Artwork.')
             self.set_automation_stage('collected',job_id)
+            self._finish_latest_auto_job(job_id,'IMAGE NEEDS REVIEW')
             self._drain_poster_queue();return
         self.received_art(job_id,str(target))
         self.job_status.setText('Poster submitted and finished image collected automatically.')
@@ -4336,11 +4496,12 @@ class Window(QMainWindow):
                 self._drain_poster_queue();return
         try:self.store.update(job_id,gen_state='idle',error=(str(step)+': '+str(detail))[:300])
         except Exception:pass
-        if 'login' in str(step).lower():message='The automation browser opened signed out. Log into Meta AI in that window (restore it from the taskbar if it opened minimized), then press Generate AI End Game Picture again.'
+        if 'login' in str(step).lower():message='Meta AI is signed out. Click Log into Meta AI in the sidebar, verify your session, then retry the picture.'
         else:message=(f'Automatic submission stopped at {step}: {detail}')[:300]
         self.job_status.setText(message);self.log('In-app poster failed for '+job_id+': '+str(step)+' — '+str(detail)[:160])
         if 'login' in str(step).lower():self._show_login_card(message)
         else:self.set_automation_stage('failed',message)
+        self._finish_latest_auto_job(job_id,'JOB FAILED')
         if getattr(self,'_poster_manual',True):
             self.notice(message)
             try:
@@ -4357,7 +4518,9 @@ class Window(QMainWindow):
         if self.active_id==mid:self.show_image(self.art_preview,path,800,300)
         job=self.store.get(mid)
         if job and json.loads(job['players']):
-            self.active_id=mid;self.render_overlay(post_after=self.auto_post.isChecked())
+            self.active_id=mid
+            skip_repeat_post=(mid==getattr(self,'_latest_auto_job_id',None) and getattr(self,'_latest_auto_no_discord',False))
+            self.render_overlay(post_after=self.auto_post.isChecked() and not skip_repeat_post)
     def import_art(self):
         job=self.active_job()
         if not job:return
@@ -4379,6 +4542,9 @@ class Window(QMainWindow):
         def done(path):
             self.store.note_poster(job['id'],path);self.show_image(self.art_preview,path,800,300);self.refresh_history();self.log('Meta AI artwork prepared at 1600×900; no statistics were painted over it.')
             if post_after:self.deliver(job['id'])
+            elif job['id']==getattr(self,'_latest_auto_job_id',None) and getattr(self,'_latest_auto_no_discord',False):
+                self.job_status.setText('Poster generated. This match was already delivered to Discord, so it was not posted again.')
+                self._finish_latest_auto_job(job['id'],'POSTER READY')
             else:self.offer_approve_post(job['id'])
         self.async_task(lambda:E.render_poster(background,target,match,players),done)
     def show_image(self,label,path,width,height):
@@ -4443,9 +4609,10 @@ class Window(QMainWindow):
             self.store.update(mid,status='delivered',message_id=message_id,error='');E.reserve_legacy_match(match);self.refresh_history();self.log('Discord poster delivered: '+mid)
             try:self._clear_studio_for_next('Posted to Discord. Ready for the next match — capture a new scoreboard.')
             except (AttributeError,RuntimeError):pass
+            self._finish_latest_auto_job(mid,'JOB COMPLETE')
             QTimer.singleShot(0,lambda:self.set_automation_stage('posted',mid))
         def failed(error):
-            self.store.update(mid,status='uncertain' if 'uncertain' in error.lower() else 'failed',error=error);self.refresh_history()
+            self.store.update(mid,status='uncertain' if 'uncertain' in error.lower() else 'failed',error=error);self.refresh_history();self._finish_latest_auto_job(mid,'JOB FAILED')
         self.async_task(lambda:E.send_discord(url,poster,content),done,failed);self.refresh_history()
     def test_discord(self):
         if self.tab_prototype:self.notice('Discord posting is disabled in the CODMunity tab preview.');return

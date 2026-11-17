@@ -1,5 +1,5 @@
 """Reproducible Windows one-file build. Run inside the pinned build environment."""
-import os,importlib.util
+import os,importlib.util,shutil
 from pathlib import Path
 import PyInstaller.__main__
 ROOT=Path(__file__).resolve().parent
@@ -7,9 +7,25 @@ WORK=Path(os.environ.get('VINTENDO_BUILD_DIR',str(ROOT/'build-work')))
 DIST=Path(os.environ.get('VINTENDO_DIST_DIR',str(ROOT)))
 WORK.mkdir(parents=True,exist_ok=True)
 DIST.mkdir(parents=True,exist_ok=True)
+# charset-normalizer ships optional mypyc extensions in the global site-packages
+# used by this machine. Package its equivalent Python sources instead, so the
+# one-file bootloader does not need to extract the hashed native helper module.
+charset_spec=importlib.util.find_spec('charset_normalizer')
+if charset_spec is None or not charset_spec.origin:raise RuntimeError('charset-normalizer is required for the build.')
+pure_root=(WORK/'pure-python-deps').resolve();pure_package=pure_root/'charset_normalizer'
+if pure_package.exists():
+    if pure_package.resolve().parent!=pure_root:raise RuntimeError('Refusing to replace an unexpected pure-Python package path.')
+    shutil.rmtree(pure_package)
+pure_package.mkdir(parents=True,exist_ok=True)
+for source in Path(charset_spec.origin).parent.rglob('*'):
+    if source.is_file() and source.suffix=='.py':
+        target=pure_package/source.relative_to(Path(charset_spec.origin).parent)
+        target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
 # The host's media tooling adds old MSVC DLLs to PATH. Bundle Qt's matching
 # runtime explicitly so dependency discovery cannot choose those unrelated DLLs.
-os.environ['PATH']=os.pathsep.join(p for p in os.environ.get('PATH','').split(os.pathsep) if 'codex-runtimes' not in p.lower())
+os.environ['PATH']=os.pathsep.join(
+    p for p in os.environ.get('PATH','').split(os.pathsep)
+    if 'codex-runtimes' not in p.lower() and 'openai.codexprimaryruntime' not in p.lower())
 qt=Path(importlib.util.find_spec('PySide6').origin).parent
 runtime=[]
 for name in ('MSVCP140.dll','MSVCP140_1.dll','MSVCP140_2.dll','VCRUNTIME140.dll','VCRUNTIME140_1.dll'):
@@ -17,6 +33,7 @@ for name in ('MSVCP140.dll','MSVCP140_1.dll','MSVCP140_2.dll','VCRUNTIME140.dll'
 arguments=[
     str(ROOT/'launcher.py'),'--noconfirm','--onefile','--windowed','--name','VintendoCODTracker',
     '--distpath',str(DIST),'--workpath',str(WORK/'pyinstaller'),'--specpath',str(WORK),
+    '--paths',str(pure_root),'--additional-hooks-dir',str(ROOT/'build_support'/'hooks'),
     '--icon',str(ROOT/'tracker.ico'),
     '--paths',str(ROOT/'core'/'legacy'),'--paths',str(ROOT/'tests'),
     '--hidden-import','vintendo_tracker','--hidden-import','achievements','--hidden-import','graphics',

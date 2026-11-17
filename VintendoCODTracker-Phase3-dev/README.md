@@ -2,7 +2,7 @@
 
 ## Phase 3 development copy
 
-This copy includes the automatic match-to-Meta AI queue through the in-app Tracker Browser; no extension install or pairing is needed. Current behavior is covered in [PHASE3_AUTOMATION.md](PHASE3_AUTOMATION.md); Phase 3 verification and limitations are recorded in [PHASE3_TEST_RESULTS.md](PHASE3_TEST_RESULTS.md). The manual import flow described later remains available as a fallback.
+This copy submits poster and video jobs to Meta AI through a minimized background browser after the user signs in once with **Log into Meta AI** in the sidebar. No Tracker Browser page or extension pairing is needed. Current behavior is covered in [PHASE3_AUTOMATION.md](PHASE3_AUTOMATION.md); Phase 3 verification and limitations are recorded in [PHASE3_TEST_RESULTS.md](PHASE3_TEST_RESULTS.md). The manual import flow described later remains available as a fallback.
 
 The dashboard uses the existing PySide6 interface with a red-and-black tactical theme. The sidebar brand uses `assets/vintendo-cod-tracker-logo.png`; the build script includes it in packaged builds. Optional decorative backgrounds can be placed in `assets/dashboard-operator.png`, `assets/dashboard-operator.webp`, `assets/dashboard-atmosphere.png`, or `assets/dashboard-atmosphere.webp`; when none is present, the dashboard draws a lightweight gradient placeholder. Artwork is decorative and never replaces live UI controls or match data.
 
@@ -76,7 +76,7 @@ If the browser download event is unavailable, use **Import downloaded Meta AI im
 
 ## Vintendo Squad AI Chrome extension (retired)
 
-The extension and its loopback pairing bridge were removed. Meta videos and posters are made in the in-app Tracker Browser: the prompt is copied to the clipboard and the staged reference photos open in a folder for manual upload to Meta AI. No extension install or pairing token is needed. Website prompt import, photo upload, submission and image download remain visible user actions. The app then applies the verified-stat poster overlay, duplicate protection and Discord delivery.
+The extension and its loopback pairing bridge were removed. The blue **Log into Meta AI** sidebar button opens a visible sign-in window; after verification, poster and video jobs use the same persistent browser profile minimized in the background. The app submits prompts and consent-filtered photos, collects the generated image, applies the verified-stat overlay, and returns it to the review flow. No extension install or pairing token is needed.
 
 ## Delivery reliability and controls
 

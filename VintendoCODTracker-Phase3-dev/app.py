@@ -405,6 +405,8 @@ QPushButton#accent {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ff394
 QPushButton#exitButton {background:#3a1116;color:#ff8b93;border:1px solid #ff6570;font-weight:800;padding:4px 14px;}
 QPushButton#exitButton:hover {background:#ff3947;color:#ffffff;}
 QPushButton#accent:hover {background:#ff4854;border-color:#ffa0a5;}
+QPushButton#metaLoginButton {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2785e8,stop:1 #1454ad);color:#ffffff;border:1px solid #69afff;font-weight:800;}
+QPushButton#metaLoginButton:hover {background:#3698ff;border-color:#a4d2ff;}
 QLineEdit,QComboBox,QSpinBox,QPlainTextEdit {background:#0a0d13;border:1px solid #353b47;padding:8px;border-radius:5px;selection-background-color:#8d1c2a;}
 QComboBox::drop-down {width:24px;border:none;}
 QTableWidget {background:#0d1016;alternate-background-color:#121720;gridline-color:#202630;border:1px solid #292f39;border-radius:6px;selection-background-color:#45151e;}
@@ -606,6 +608,8 @@ class Window(QMainWindow):
             side.addWidget(self.brand_mark);side.addWidget(self.brand_name);side.addWidget(self.brand_sub)
         side.addSpacing(20)
         self.nav=QListWidget();self.nav.setSpacing(3);self.nav.setMinimumWidth(0);self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.nav.setTextElideMode(Qt.ElideRight);self.nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.nav,1)
+        self.meta_login_button=self.button('Log into Meta AI',self.open_login_window);self.meta_login_button.setObjectName('metaLoginButton');self.meta_login_button.setMinimumHeight(40);self.meta_login_button.setToolTip('Open Meta AI so you can sign in for background poster and video jobs.');side.addWidget(self.meta_login_button)
+        self.meta_verify_button=self.button('Verify Meta AI login',self.verify_login);self.meta_verify_button.setMinimumHeight(36);self.meta_verify_button.hide();side.addWidget(self.meta_verify_button)
         self.generate_sidebar_button=self.button('Generate AI End Game Picture',self.generate_and_approve,True);self.generate_sidebar_button.setMinimumHeight(44);self.generate_sidebar_button.setToolTip('Generate the AI End Game picture for the newest finished match, then approve the post.');side.addWidget(self.generate_sidebar_button)
 
         self.stack=QStackedWidget();tracker_shell_layout.addWidget(self.sidebar);tracker_shell_layout.addWidget(self.stack,1)
@@ -665,12 +669,6 @@ class Window(QMainWindow):
         try:name=self.nav.item(row).data(Qt.UserRole)
         except (AttributeError,RuntimeError):return
         if name=='Scoreboard Capture':QTimer.singleShot(0,self.setup_scoreboard_display)
-        if name=='Tracker Browser':
-            self.browser_host.focus_embedded()
-            try:self.auto_browser_host.focus_embedded()
-            except (AttributeError,RuntimeError):pass
-            try:self._validate_auto_browser_attach()
-            except (AttributeError,RuntimeError):pass
         if name=='AI Studio':
             try:
                 current=getattr(self,'active_id',None)
@@ -987,7 +985,7 @@ class Window(QMainWindow):
                 card.setStyleSheet('background:#141923;border:1px solid #343a46;border-radius:6px;padding:8px;font-size:11px;color:#9da8b7;')
     def build_squad(self):
         l=self.page('Squad Night','CODMunity match context plus the captured scoreboard become one verified, match-bound poster job.')
-        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Generate AI End Game Picture submits the complete job to Meta AI automatically and collects the finished picture; if the automation browser needs a login, the staged folder opens for manual handoff.', '05  Paste the prompt into the Meta AI page and attach the staged reference photos. Prompt submission, reference upload and download remain visible user actions; the generated scene is prompted to include match results and verified statistics in-world.']:
+        for text in ['01  New CODMunity matches enter the queue with their recorded mode, result and placement.', '02  Capture the end-match scoreboard. OCR reads its visible columns; review names and values before marking them verified.', '03  AI Studio combines actual match context, verified player rows and conservative roster/photo matches. Ambiguous or unconsented photos are withheld.', '04  Use Log into Meta AI in the sidebar once to sign in. Verify the session; poster and video jobs then run minimized in the background.', '05  Generate AI End Game Picture submits the match prompt and consented reference photos, collects the result, and returns it to the review flow. The generated scene is prompted to include match results and verified statistics in-world.']:
             label=QLabel(text);label.setWordWrap(True);label.setStyleSheet('padding:15px;background:#1b2330;border-left:3px solid #ff9638');l.addWidget(label)
         self.row(l,self.button('Activate Squad Night',self.activate_squad_night,True))
         squad_title=QLabel('SQUAD LEADERBOARD');squad_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;letter-spacing:1px;');l.addWidget(squad_title)
@@ -1048,11 +1046,11 @@ class Window(QMainWindow):
         results_panel=QWidget();results_layout=QVBoxLayout(results_panel);results_layout.setContentsMargins(0,0,0,0);results_layout.setSpacing(8);results_layout.addWidget(self.ocr_review_status);results_layout.addWidget(self.ocr_table,1)
         self.capture_review_split.addWidget(results_panel);self.capture_review_split.setStretchFactor(0,2);self.capture_review_split.setStretchFactor(1,5);self.capture_review_split.setSizes([620,1550]);l.addWidget(self.capture_review_split,1)
         self.verified=QCheckBox('I checked these names and numbers against the captured scoreboard');self.verified.setChecked(True);self.verified.hide()
-        actions_row=QHBoxLayout();self.save_capture_button=self.button('Save info',self.save_capture,True);actions_row.addWidget(self.save_capture_button,1);actions_row.addWidget(self.button('Post Screenshot as is to Discord',self.post_capture_only),1);l.addLayout(actions_row)
         self.ocr_text=QPlainTextEdit();self.ocr_text.setPlaceholderText('Text From Screenshot');self.ocr_text.setToolTip('Automatically read from the captured scoreboard crop. Edit this only to correct an OCR mistake.')
         self.ocr_advanced=QWidget();advanced_layout=QVBoxLayout(self.ocr_advanced);advanced_layout.setContentsMargins(0,2,0,0);advanced_layout.addWidget(self.ocr_text)
         self.row(advanced_layout,self.button('Re-parse OCR Text',self.parse_ocr),self.button('Manual Player Add',self.add_ocr_row),self.button('Remove Row',self.remove_ocr_row),self.button('Keep matched only',self.keep_matched_ocr_rows))
-        self.ocr_advanced.hide();self.ocr_advanced_toggle=QPushButton('Show OCR corrections and manual row tools');self.ocr_advanced_toggle.setCheckable(True);self.ocr_advanced_toggle.toggled.connect(self.ocr_advanced.setVisible);l.addWidget(self.ocr_advanced_toggle);l.addWidget(self.ocr_advanced)
+        self.ocr_advanced.hide();self.ocr_advanced_toggle=QPushButton('Manual input');self.ocr_advanced_toggle.setCheckable(True);self.ocr_advanced_toggle.toggled.connect(self.ocr_advanced.setVisible);l.addWidget(self.ocr_advanced_toggle);l.addWidget(self.ocr_advanced)
+        self.save_capture_button=self.button('Save and Generate AI Picture',self.save_capture_and_generate,True);self.save_capture_button.setMinimumHeight(48);self.save_capture_button.setToolTip('Save the reviewed scoreboard, then submit it to Meta AI to generate the picture.');l.addWidget(self.save_capture_button)
     def build_roster(self):
         l=self.page('Player Roster','Manage your COD player roster, aliases, and headshots for Meta AI artwork.')
         split=QSplitter();split.setChildrenCollapsible(False)
@@ -1700,6 +1698,8 @@ class Window(QMainWindow):
         self.refresh_cinematic_results()
     def build_tracker_browser(self):
         l=self.page('Tracker Browser','The Meta AI browser docks in this tab while a poster or video job runs - watch it work here. Nothing here needs clicking while a job runs.')
+        for row in range(self.nav.count()):
+            if self.nav.item(row).data(Qt.UserRole)=='Tracker Browser':self.nav.item(row).setHidden(True);break
         self.browser_status=QLabel('Tracker browser: checking…');self.browser_status.setWordWrap(True);l.addWidget(self.browser_status)
         self.browser_queue=QLabel('');self.browser_queue.setWordWrap(True);self.browser_queue.setStyleSheet('color:#99a8bc');l.addWidget(self.browser_queue)
         self.browser_surface=QFrame();self.browser_surface.setObjectName('dashboardPanel');self.browser_surface.setMinimumSize(800,450);l.addWidget(self.browser_surface,1)
@@ -1718,7 +1718,7 @@ class Window(QMainWindow):
             self.login_card=QFrame();self.login_card.setObjectName('dashboardPanel')
             login_layout=QVBoxLayout(self.login_card);login_layout.setContentsMargins(14,12,14,12);login_layout.setSpacing(8)
             login_title=QLabel('META AI NEEDS YOU TO LOG IN');login_title.setStyleSheet('font-size:13px;font-weight:900;color:#f2f4f7;');login_layout.addWidget(login_title)
-            login_hint=QLabel('Log in once in the window that opens, then press Verify. The window stays visible while jobs run and closes itself when each job finishes.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
+            login_hint=QLabel('Log in once in the Meta AI window, then use Verify Meta AI login in the sidebar. Poster and video jobs run minimized in the background.');login_hint.setWordWrap(True);login_hint.setStyleSheet('color:#99a8bc;');login_layout.addWidget(login_hint)
             self.row(login_layout,self.button('Open login window',self.open_login_window,True),self.button("I've logged in — verify",self.verify_login))
             self.login_card.hide();layout.addWidget(self.login_card)
             layout.addStretch(1)
@@ -1734,7 +1734,7 @@ class Window(QMainWindow):
         try:
             if self.auto_stage=='failed':self.browser_status.setText('Automation stopped: '+self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('color:#ef6b77;font-weight:700;')
             elif self.auto_stage_detail:self.browser_status.setText(self.auto_stage_detail[:240]);self.browser_status.setStyleSheet('')
-            elif self.auto_stage=='ready':self.browser_status.setText('The Meta AI browser opens visibly while a job runs.');self.browser_status.setStyleSheet('')
+            elif self.auto_stage=='ready':self.browser_status.setText('Meta AI poster and video jobs run minimized in the background.');self.browser_status.setStyleSheet('')
         except (AttributeError,RuntimeError):pass
         try:
             if self.auto_stage in ('submitting','generating','collecting'):
@@ -1809,23 +1809,23 @@ class Window(QMainWindow):
         self._embed_auto_browser(hwnd)
     def open_login_window(self):
         if getattr(self,'_inapp_active',None) or getattr(self,'_inapp_poster_active',None):
-            try:self.browser_status.setText('A job is running right now — wait for it to finish, then log in.')
+            try:self.statusBar().showMessage('A Meta AI job is running. Wait for it to finish before opening the login window.',8000)
             except (AttributeError,RuntimeError):pass
             return
         if getattr(self,'_login_context',None) is not None:
-            if self._auto_browser_alive():self.toggle_auto_browser()
-            try:self.login_card.show()
+            try:self._show_auto_browser()
+            except (AttributeError,RuntimeError):pass
+            try:self.meta_verify_button.show()
             except (AttributeError,RuntimeError):pass
             return
         try:
             from playwright.sync_api import sync_playwright
         except Exception:
-            try:self.browser_status.setText('Playwright is not installed in the tracker environment.')
+            try:self.statusBar().showMessage('Meta AI login could not open: Playwright is not installed.',10000)
             except (AttributeError,RuntimeError):pass
             return
-        try:self.browser_status.setText('Opening the automation browser for Meta AI login…')
+        try:self.statusBar().showMessage('Opening Meta AI sign-in…',8000)
         except (AttributeError,RuntimeError):pass
-        self._start_embed_poll()
         def work():
             try:
                 playwright=sync_playwright().start()
@@ -1833,39 +1833,38 @@ class Window(QMainWindow):
                 page=context.new_page()
                 try:meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics').ensure_logged_in(page)
                 except Exception:pass
-                try:page.close()
-                except Exception:pass
-                self._login_context=context;self._login_playwright=playwright
+                self._login_context=context;self._login_playwright=playwright;self._login_page=page
             except Exception as exc:
-                QTimer.singleShot(0,lambda:self.browser_status.setText('Could not open the login window: '+str(exc)[:200]));return
+                detail=str(exc)[:180]
+                QTimer.singleShot(0,lambda detail=detail:self.statusBar().showMessage('Could not open the Meta AI login window: '+detail,12000));return
             QTimer.singleShot(0,self._login_opened)
         thread=threading.Thread(target=work,daemon=True);thread.start()
     def _login_opened(self):
+        try:self.meta_verify_button.show()
+        except (AttributeError,RuntimeError):pass
         try:self.login_card.show()
         except (AttributeError,RuntimeError):pass
-        try:self.browser_status.setText('Log into Meta AI in the opened window, then press Verify. You can watch every job work in that window; it closes itself when each job finishes.')
+        try:self.statusBar().showMessage('Log into Meta AI in the opened window, then click Verify Meta AI login in the sidebar.',15000)
         except (AttributeError,RuntimeError):pass
     def verify_login(self):
         context=getattr(self,'_login_context',None)
         if context is None:
-            try:self.browser_status.setText('Press Log into Meta AI first.')
+            try:self.statusBar().showMessage('Click Log into Meta AI first.',8000)
             except (AttributeError,RuntimeError):pass
             return
-        try:self.browser_status.setText('Checking the Meta AI login…')
+        try:self.statusBar().showMessage('Checking Meta AI login…',8000)
         except (AttributeError,RuntimeError):pass
         def work():
             try:
-                page=context.new_page()
-                try:meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics').ensure_logged_in(page)
-                finally:
-                    try:page.close()
-                    except Exception:pass
+                page=getattr(self,'_login_page',None)
+                if page is None:raise RuntimeError('The Meta AI login page is no longer available. Click Log into Meta AI to reopen it.')
+                meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics').ensure_logged_in(page)
             except Exception as exc:
                 QTimer.singleShot(0,lambda:self._login_failed(str(exc)));return
             QTimer.singleShot(0,self._login_verified)
         self.async_task(work)
     def _login_failed(self,detail):
-        try:self.browser_status.setText('Still signed out ('+detail+'). Log in, then verify again.')
+        try:self.statusBar().showMessage('Still signed out. Log into Meta AI, then verify again.',12000)
         except (AttributeError,RuntimeError):pass
     def _login_verified(self):
         try:
@@ -1878,13 +1877,17 @@ class Window(QMainWindow):
                 try:playwright.stop()
                 except Exception:pass
         except Exception:pass
-        self._login_context=None;self._login_playwright=None
+        self._login_context=None;self._login_playwright=None;self._login_page=None
+        try:self.meta_verify_button.hide()
+        except (AttributeError,RuntimeError):pass
+        try:self.meta_login_button.setText('Log into Meta AI')
+        except (AttributeError,RuntimeError):pass
         try:self.login_card.hide()
         except (AttributeError,RuntimeError):pass
         self.set_automation_stage('ready')
-        try:self.browser_status.setText('Logged in. The browser opens visibly each time a job runs.')
+        try:self.statusBar().showMessage('Meta AI login verified. Poster and video jobs will run in the background.',10000)
         except (AttributeError,RuntimeError):pass
-        self.log('Meta AI login verified; the automation browser now stays visible while jobs run.')
+        self.log('Meta AI login verified; poster and video jobs will run in the background.')
     def _record_auto_browser(self,known):
         try:current=set(self.find_tracker_chrome_windows())
         except Exception:return
@@ -1972,6 +1975,10 @@ class Window(QMainWindow):
                     self.nav.setCurrentRow(row);break
         except (AttributeError,RuntimeError,TypeError):pass
     def _show_login_card(self,message):
+        try:self.meta_login_button.setText('Log into Meta AI · login required')
+        except (AttributeError,RuntimeError):pass
+        try:self.cinematic_status.setText('Meta AI needs you to sign in. Use Log into Meta AI in the sidebar, then verify the login.')
+        except (AttributeError,RuntimeError):pass
         try:self.login_card.show()
         except (AttributeError,RuntimeError):pass
         try:self.browser_status.setText(message[:240]);self.browser_status.setStyleSheet('color:#fdba74;font-weight:700;')
@@ -2163,7 +2170,7 @@ class Window(QMainWindow):
         self.browser_retries=QSpinBox();self.browser_retries.setRange(0,3);self.browser_retries.setValue(int(self.settings.values.get('browser_retries',1)))
         f=QFormLayout();f.addRow('Polling interval (seconds)',self.poll);f.addRow('Meta page navigation timeout',self.browser_timeout);f.addRow('Wait for image download',self.download_timeout);f.addRow('Browser/navigation retries',self.browser_retries);f.addRow('Application data',QLabel(str(E.DATA)));automation_layout.addLayout(f)
         self.row(automation_layout,self.button('Open data folder',lambda:os.startfile(str(E.DATA))),self.button('Open logs folder',lambda:os.startfile(str(E.DATA))))
-        automation_layout.addWidget(QLabel('Meta videos are made in the in-app Tracker Browser. No extension install or pairing token is needed.'))
+        automation_layout.addWidget(QLabel('Meta video jobs run in the background using the tracker browser profile. Sign in once with Log into Meta AI in the sidebar; no extension install or pairing token is needed.'))
         browser_mode_note=QLabel('Tracker Chrome profile: the dedicated profile keeps the Meta AI login isolated from your own Chrome; attaching reuses a Meta AI tab you already have open in your own Chrome.');browser_mode_note.setWordWrap(True);automation_layout.addWidget(browser_mode_note)
         self.browser_mode_combo=QComboBox();self.browser_mode_combo.addItems(['Dedicated tracker profile (recommended)','Use my already-open Chrome']);self.browser_mode_combo.setCurrentIndex(1 if self.tracker_browser_mode()=='attach' else 0);browser_mode_form=QFormLayout();browser_mode_form.addRow('Tracker Chrome profile',self.browser_mode_combo);automation_layout.addLayout(browser_mode_form)
         automation_layout.addStretch()
@@ -2674,7 +2681,6 @@ class Window(QMainWindow):
         except Exception:pass
         try:self.store.update_cinematic(job_id,status='awaiting_generation')
         except Exception:pass
-        self._start_embed_poll()
         thread=threading.Thread(target=self._run_inapp_cinematic,args=(job_id,),daemon=True);thread.start()
     def _run_inapp_cinematic(self,job_id):
         try:row=self.store.get_cinematic(job_id)
@@ -2701,7 +2707,7 @@ class Window(QMainWindow):
         except Exception:pass
         try:
             with sync_playwright() as playwright:
-                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=True)
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
                 try:
@@ -2777,7 +2783,7 @@ class Window(QMainWindow):
                     else:prompt+=f' An attached image named {friend_target.name} is a reference photo of {poster}: give a visible operator that same face, headwear, and shirt.'
                 except OSError:continue
             if not self.store.create_cinematic(cid,source_path.name,target,prompt,talent_ids=friend_ids):raise RuntimeError('Could not create a unique cinematic job.')
-            self.cinematic_status.setText(f'Queued {cid}. The screenshot is stored locally; the in-app Tracker Browser will submit it. Discord posting is manual.'+(' Featuring '+', '.join(cast_names)+'.' if cast_names else ''))
+            self.cinematic_status.setText(f'Queued {cid}. The screenshot is stored locally; Meta AI will process it in the background. Discord posting is manual.'+(' Featuring '+', '.join(cast_names)+'.' if cast_names else ''))
             self.log('Cinematic test queued: '+cid);self.refresh_cinematic_results()
         except Exception as exc:
             self.cinematic_status.setText('Cinematic test could not be queued: '+str(exc)[:300]);self.log('Cinematic test failed: '+str(exc))
@@ -3408,14 +3414,14 @@ class Window(QMainWindow):
             if isinstance(payload,dict) and payload.get('integration_source')=='CODMunity':return job['id']
         return None
     def save_capture(self):
-        if self.last_frame is None:self.notice('Capture a scoreboard first.');return
-        if not self.verified.isChecked():self.notice('Review the scoreboard and confirm the verification checkbox.');return
+        if self.last_frame is None:self.notice('Capture a scoreboard first.');return False
+        if not self.verified.isChecked():self.notice('Review the scoreboard and confirm the verification checkbox.');return False
         try:players=self.verified_players()
-        except ValueError as exc:self.notice(str(exc));return
+        except ValueError as exc:self.notice(str(exc));return False
         mid=self._latest_codmunity_match()
         if mid:
             existing=self.store.get(mid)
-            if existing['status'] in ('delivered','solo_delivered') and not self.allow_both.isChecked():self.notice('This match was already delivered. Choose another record or explicitly enable an additional format in Discord Settings.');return
+            if existing['status'] in ('delivered','solo_delivered') and not self.allow_both.isChecked():self.notice('This match was already delivered. Choose another record or explicitly enable an additional format in Discord Settings.');return False
             base_payload=json.loads(existing['payload'])
         else:
             digest=__import__('hashlib').sha256(self.last_frame.tobytes()).hexdigest()[:24]
@@ -3436,7 +3442,7 @@ class Window(QMainWindow):
         if context.get('result') not in ('Victory','Defeat') and override=='auto':
             picked=self.ask_match_result()
             if picked in ('win','loss'):payload['result']=picked;payload['poster_context']=E.extract_match_context(payload,self.ocr_text.toPlainText());context=E.extract_match_context(payload,self.ocr_text.toPlainText())
-            else:self.log('Save cancelled: match result is still unknown. Set the Result selector, or answer the win/loss question.');return
+            else:self.log('Save cancelled: match result is still unknown. Set the Result selector, or answer the win/loss question.');return False
         if not mid:mid,_=self.store.add(dict(base_payload))
         folder=E.DATA/'captures';folder.mkdir(parents=True,exist_ok=True);path=folder/(E.disk_id(mid)+'.png')
         from PIL import Image
@@ -3444,9 +3450,15 @@ class Window(QMainWindow):
         auto_eligible=(context.get('result') in ('Victory','Defeat') and bool(context.get('game_mode')) and
                        not str(context['game_mode']).startswith('Not shown') and 1<=len(players)<=4)
         self.store.update(mid,payload=payload,capture=str(path),ocr=self.ocr_text.toPlainText(),players=json.dumps(players),status='needs_review',gen_state='queued' if auto_eligible else 'idle',prompt='',theme=None);self.active_id=mid;self.last_capture=str(path);self.refresh_history();self.load_studio(mid)
-        self.flash_save_button(getattr(self,'save_capture_button',None),'Save info')
+        self.flash_save_button(getattr(self,'save_capture_button',None),'Save and Generate AI Picture')
         self.log('Verified scoreboard saved. A Meta AI creative brief was prepared from the reviewed names and performance ranks.')
         self._pump_full_auto()
+        return True
+    def save_capture_and_generate(self):
+        if not self.save_capture():return
+        mid=getattr(self,'active_id',None)
+        if mid and getattr(self,'_inapp_poster_active',None)==mid:return
+        self.prepare_artwork()
     def ask_match_result(self):
         box=QMessageBox(self);box.setWindowTitle('Vintendo COD Tracker');box.setText('Did you win or lose?');box.setInformativeText('Neither the latest CODMunity match nor the scoreboard shows the result.');win_button=box.addButton('Win',QMessageBox.AcceptRole);lose_button=box.addButton('Lose',QMessageBox.AcceptRole);box.addButton('Cancel',QMessageBox.RejectRole);box.setDefaultButton(win_button);box.exec()
         if box.clickedButton() is win_button:return 'win'
@@ -4054,7 +4066,7 @@ class Window(QMainWindow):
                 self.job_status.setText('A poster is already running — this match is queued and starts automatically when it finishes.')
             else:
                 self.log(f"Match {job['id']} auto-submitted to Meta AI.")
-                self.job_status.setText('The Meta AI browser window is open and filling in the prompt and reference photos automatically.')
+                self.job_status.setText('Meta AI is generating your picture in the background. You can keep using the tracker.')
             return
         try:
             folder=E.DATA/'handoff'/E.disk_id(job['id'])
@@ -4079,15 +4091,12 @@ class Window(QMainWindow):
         except (AttributeError,RuntimeError):pass
         photo_names=[photo['filename'] for photo in prepared['photos'] if photo.get('filename')]
         self._poster_manual=manual
-        self._start_embed_poll()
         launched=bool(self._start_poster_automation(mid,prepared['folder'],photo_names,final_prompt))
         if launched:
             try:stage=str((self.store.get(mid) or {}).get('gen_state') or 'submitting')
             except Exception:stage='submitting'
             if stage not in ('queued','submitting'):stage='submitting'
             self.set_automation_stage(stage,mid)
-            try:self._show_tracker_browser_tab()
-            except (AttributeError,RuntimeError):pass
         return launched
     def _toggle_full_auto(self):
         try:on=bool(self.full_auto.isChecked())
@@ -4227,7 +4236,7 @@ class Window(QMainWindow):
     def _run_poster_job(self,job_id,playwright_factory,folder,filenames,prompt_text):
         try:
             with playwright_factory() as playwright:
-                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=False)
+                context=meta_automation.ensure_context(playwright,E.DATA/'TrackerChromeInApp',minimized=True)
                 driver=meta_automation.MetaDriver(context,E.DATA/'meta-diagnostics')
                 page=driver.new_job_page()
                 try:

@@ -1,10 +1,12 @@
 # Phase 3 Meta AI handoff
 
-This development copy queues matches for Meta AI generation and stages each job's prompt plus consent-filtered reference photos through the in-app Tracker Browser. It uses the existing CODMunity feed records for solo matches and verified OCR rows for squad matches.
+This development copy submits poster and video jobs to Meta AI through a minimized background browser. The user signs in once with **Log into Meta AI** in the sidebar and verifies the session. The Tracker Browser page is hidden; generation, reference upload, and result collection continue without showing the Meta page. Match jobs use CODMunity feed records for solo matches and verified OCR rows for squad matches.
 
-## Manual handoff (no extension)
+## Sign in and background jobs
 
-The legacy Vintendo COD Automation extension and its `127.0.0.1:8765` pairing bridge were removed. Preparing a match copies the prompt to the clipboard and opens the staged folder; paste the prompt into Meta AI, attach the numbered reference images, generate, download the result, and link it back to the match with the tracker Import action.
+Click **Log into Meta AI** in the sidebar, sign in in the visible browser window, then click **Verify Meta AI login**. Poster and video jobs then reuse that browser profile minimized in the background. A sign-in failure is shown in the tracker and can be fixed by signing in again.
+
+The legacy Vintendo COD Automation extension and its `127.0.0.1:8765` pairing bridge were removed. If automatic submission is unavailable, the staged prompt and reference photos remain available for manual handoff; imported results still go through the match-bound review and validation flow.
 
 ## Job rules
 

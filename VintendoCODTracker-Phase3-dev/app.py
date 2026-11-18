@@ -1123,13 +1123,10 @@ class Window(QMainWindow):
         self.capture_now_button=self.button('Capture Now',self.capture_once,True)
         hotkey_row=QHBoxLayout();hotkey_row.addStretch(1);hotkey_row.addWidget(self.hotkey_status);l.addLayout(hotkey_row)
         display_row=QHBoxLayout();display_row.addWidget(self.capture_display_status,3);display_row.addWidget(self.capture_setup_button,1);display_row.addWidget(self.capture_now_button,1);l.addLayout(display_row)
-        self.scoreboard_profile=QComboBox(l);self.scoreboard_profile.addItem('Auto-detect','auto');self.scoreboard_profile.hide()
-        self.scoreboard_profile.currentIndexChanged.connect(self.scoreboard_profile_changed)
         if str(self.settings.values.get('scoreboard_profile','auto'))!='auto':self.settings.values['scoreboard_profile']='auto';self.settings.save()
         self.capture_subtitle.setText(self._scoreboard_capture_instruction())
 
         self.auto_detect=QCheckBox();self.auto_detect.setChecked(False);self.auto_detect.hide()
-        self.result_override=QComboBox(l);self.result_override.addItem('Auto','auto');self.result_override.hide()
         self.capture_preview=QLabel('No capture yet');self.capture_preview.setAlignment(Qt.AlignCenter);self.capture_preview.setMinimumSize(320,200)
         self.ocr_review_status=QLabel('Capture the final match scoreboard to read player rows.');self.ocr_review_status.setWordWrap(True);self.ocr_review_status.setStyleSheet('font-size:11px;color:#aab4c3;padding:2px;')
         self.ocr_stat_keys=['kills','damage','score','assists','deaths'];self.ocr_table=QTableWidget(0,1+len(self.ocr_stat_keys));self.ocr_table.setHorizontalHeaderLabels(['Player','Kills','Damage','Score','Assists','Deaths']);self.ocr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -3577,7 +3574,7 @@ class Window(QMainWindow):
         team_place=E.placement_from_players(players)
         if team_place is not None and not str(payload_dict.get('placement') or '').strip() and not str((payload_dict.get('stats') if isinstance(payload_dict.get('stats'),dict) else {}).get('placement') or '').strip():payload_dict['placement']=team_place
         payload=E.with_scoreboard_context(payload_dict,self.ocr_text.toPlainText())
-        override=self.result_override.currentData() if hasattr(self,'result_override') else 'auto'
+        override='auto'
         if override in ('win','loss'):payload['result']=override;payload['poster_context']=E.extract_match_context(payload,self.ocr_text.toPlainText())
         context=E.extract_match_context(payload,self.ocr_text.toPlainText())
         if context.get('result') not in ('Victory','Defeat') and override=='auto':

@@ -323,9 +323,8 @@ DMZ_WEB_PAGES = (
     ('News', 'https://codmunity.gg/dmz/news'),
 )
 DMZ_NAV_SECTIONS = (
-    ('TOOLS', ('Map', 'Review pins', 'How the map works', 'Missions', 'Trait Planner', 'Loot Tracker', 'Meta')),
-    ('DATABASE', ('Traits', 'Items', 'Crafting', 'Bosses', 'Progression')),
-    ('GUIDES AND NEWS', ('Beginner guide', "What's New", 'News')),
+    (None, ('Map', 'Trait Planner', 'Loot Tracker')),
+    (None, ('Items', 'Crafting', 'Bosses', 'Progression')),
 )
 DMZ_ADBLOCK_SUFFIXES = (
     'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
@@ -444,6 +443,9 @@ QLabel#dashSection {font-size:12px;font-weight:900;color:#f2f4f7;letter-spacing:
 QLabel#dashStatGame {font-size:11px;font-weight:700;color:#8b95a3;}
 QPushButton#dashMini {background:#141922;border:1px solid #303642;border-radius:6px;color:#c4ccd8;font-size:11px;font-weight:800;padding:4px 10px;}
 QPushButton#dashMini:hover {border-color:#ed2938;color:#ffffff;}
+QPushButton#dashPagerArrow {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #2f8ff0,stop:1 #1663c7);border:1px solid #69afff;border-radius:8px;color:#ffffff;font-size:15px;font-weight:900;padding:8px 18px;min-width:64px;}
+QPushButton#dashPagerArrow:hover {background:#3698ff;border-color:#a4d2ff;}
+QPushButton#dashPagerArrow:pressed {background:#0f4fa5;border-color:#69afff;}
 QFrame#dashStat {border:1px solid #8e2631;border-radius:9px;background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2b1219,stop:1 #101218);}
 QFrame#dashStat:hover {border:1px solid #ed2938;}
 QLabel#dashStatIcon {font-size:20px;font-weight:900;color:#fa3544;}
@@ -574,6 +576,7 @@ QListWidget {background:#090b10;border:none;padding:10px 8px;font-size:14px;outl
 QListWidget::item {padding:14px 12px;border:1px solid #1e222b;border-radius:7px;margin:4px 2px;color:#dce1e9;}
 QListWidget::item:hover {background:#19151a;border-color:#70222b;color:#ffffff;}
 QListWidget::item:selected {background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #40141b,stop:1 #171217);color:#ffffff;border:1px solid #ed2938;border-left:4px solid #ff3443;}
+QListWidget#sideNav::item {padding:8px 14px;margin:3px 2px;border-radius:18px;}
 QPushButton {background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #20242d,stop:1 #14171e);border:1px solid #343945;padding:10px 15px;border-radius:7px;font-weight:700;color:#f0f2f5;}
 QPushButton:hover {background:#28171c;border-color:#ed2938;color:#ffffff;}
 QPushButton:pressed {background:#51131d;border-color:#ff3342;}
@@ -908,9 +911,14 @@ class Window(QMainWindow):
             self.brand_sub=QLabel('COD TRACKER');self.brand_sub.setObjectName('brandSub');self.brand_sub.setAlignment(Qt.AlignCenter)
             side.addWidget(self.brand_mark);side.addWidget(self.brand_name);side.addWidget(self.brand_sub)
         side.addSpacing(20)
-        self.nav=QListWidget();self.nav.setSpacing(3);self.nav.setMinimumWidth(0);self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.nav.setTextElideMode(Qt.ElideRight);self.nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.nav,1)
-        self.dmz_nav=QListWidget();self.dmz_nav.setSpacing(3);self.dmz_nav.setMinimumWidth(0);self.dmz_nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.dmz_nav.setTextElideMode(Qt.ElideRight);self.dmz_nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.dmz_nav,1);self.dmz_nav.hide()
-        self.dmz_back=self.button('< Back',self._dmz_exit_mode);self.dmz_back.setObjectName('dmzNavBack');self.dmz_back.setStyleSheet("background:#2563eb;color:#ffffff;font-weight:700;border:1px solid #60a5fa;border-radius:6px;padding:8px 6px;");side.insertWidget(side.indexOf(self.dmz_nav),self.dmz_back);self.dmz_back.hide()
+        self.nav=QListWidget();self.nav.setObjectName('sideNav');self.nav.setSpacing(3);self.nav.setMinimumWidth(0);self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.nav.setTextElideMode(Qt.ElideRight);self.nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.nav,1)
+        self.dmz_nav=QListWidget();self.dmz_nav.setObjectName('sideNav');self.dmz_nav.setSpacing(3);self.dmz_nav.setMinimumWidth(0);self.dmz_nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.dmz_nav.setTextElideMode(Qt.ElideRight);self.dmz_nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.dmz_nav,1);self.dmz_nav.hide()
+        self.dmz_nav.setViewportMargins(0,0,10,0)
+        self.dmz_nav.setStyleSheet("QScrollBar:vertical{width:12px;background:#141821;border-radius:6px;margin:2px 0px 2px 0px;}"
+            "QScrollBar::handle:vertical{background:#4b586e;min-height:36px;border-radius:6px;}"
+            "QScrollBar::handle:vertical:hover{background:#fdba74;}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0px;}"
+            "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:none;}")
         self._dmz_mode=False;self._dmz_return_row=0
         try:self.dmz_nav.currentRowChanged.connect(self._dmz_nav_changed)
         except (AttributeError,RuntimeError):pass
@@ -946,7 +954,7 @@ class Window(QMainWindow):
         self._blink_on=True;self.blink_timer=QTimer(self);self.blink_timer.setInterval(700);self.blink_timer.timeout.connect(self._blink_live_indicator)
         self.status.setCursor(Qt.PointingHandCursor);self.status.setToolTip('Tracking starts automatically on launch. Click to start now.');self.status.mousePressEvent=lambda _event:self.start();self.status.hide()
         side.insertWidget(side.indexOf(self.nav),self.status)
-        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_camo_tracker();self.build_leaderboards();self.build_stats();self.build_settings();self.build_logs();self.build_dmz_browser();self._add_dmz_nav_entry()
+        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_camo_tracker();self.build_leaderboards();self.build_stats();self._add_dmz_nav_entry();self.build_settings();self.build_logs();self.build_dmz_browser()
         try:self._autofill_stats_dir()
         except Exception:pass
         QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity);QTimer.singleShot(6000,self._boot_autostart);QTimer.singleShot(12000,self._maybe_auto_upload)
@@ -965,7 +973,7 @@ class Window(QMainWindow):
             self.auto_detect.setChecked(bool(self.settings.values.get('auto_detect',False)))
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)=='Squad Night':self.nav.item(row).setHidden(True)
-        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex);self.nav.currentRowChanged.connect(self.on_nav_row_changed);self.nav.setCurrentRow(0)
+        self.nav.currentRowChanged.connect(self.on_nav_row_changed);self.nav.setCurrentRow(0)
         for hidden_page in ('Solo Ops','Discord Settings','Match History','AI Studio','Stats','Leaderboards'):
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)==hidden_page:self.nav.item(row).setHidden(True)
@@ -988,9 +996,12 @@ class Window(QMainWindow):
             try:self._dmz_enter_mode()
             except (AttributeError,RuntimeError):pass
             return
+        try:
+            if name in self.pages:self.stack.setCurrentWidget(self.pages[name][0])
+        except (AttributeError,RuntimeError,KeyError,TypeError):pass
         if name=='Scoreboard Capture':QTimer.singleShot(0,self.setup_scoreboard_display)
         if name=='Camo Tracker':
-            try:self._maybe_refresh_camo()
+            try:self._maybe_refresh_camo(True)
             except (AttributeError,RuntimeError):pass
         if name=='AI Studio':
             try:
@@ -1057,12 +1068,12 @@ class Window(QMainWindow):
         account=QFrame();account.setObjectName('dashboardPanel');account_box=QVBoxLayout(account);account_box.setContentsMargins(14,12,14,12);account_box.setSpacing(8)
         account_box.addWidget(QLabel('LINKED ACCOUNT'))
         self.sync_account_label=QLabel('');self.sync_account_label.setWordWrap(True);account_box.addWidget(self.sync_account_label)
-        account_row=QHBoxLayout()
-        self.sync_pair_button=self.button('Pair new device',self.open_pair_page);account_row.addWidget(self.sync_pair_button)
-        self.sync_profile_button=self.button('Copy profile link',self.copy_profile_link);account_row.addWidget(self.sync_profile_button)
-        self.sync_site_button=self.button('Open CODMunity site',self.open_codmunity_site);account_row.addWidget(self.sync_site_button)
-        self.sync_verify_button=self.button('Verify email',self.send_verification_email);account_row.addWidget(self.sync_verify_button);account_row.addStretch()
-        account_box.addLayout(account_row);layout.addWidget(account)
+        account_list=QVBoxLayout();account_list.setSpacing(8)
+        self.sync_pair_button=self.button('Pair new device',self.open_pair_page);self.sync_pair_button.setMinimumHeight(34);account_list.addWidget(self.sync_pair_button)
+        self.sync_profile_button=self.button('Copy profile link',self.copy_profile_link);self.sync_profile_button.setMinimumHeight(34);account_list.addWidget(self.sync_profile_button)
+        self.sync_site_button=self.button('Open CODMunity site',self.open_codmunity_site);self.sync_site_button.setMinimumHeight(34);account_list.addWidget(self.sync_site_button)
+        self.sync_verify_button=self.button('Verify email',self.send_verification_email);self.sync_verify_button.setMinimumHeight(34);account_list.addWidget(self.sync_verify_button)
+        account_box.addLayout(account_list);layout.addWidget(account)
         sync=QFrame();sync.setObjectName('dashboardPanel');sync_box=QVBoxLayout(sync);sync_box.setContentsMargins(14,12,14,12);sync_box.setSpacing(8)
         sync_box.addWidget(QLabel('SYNC OUTBOX (LOCAL ONLY)'))
         self.sync_state_label=QLabel('');self.sync_state_label.setWordWrap(True);sync_box.addWidget(self.sync_state_label)
@@ -1358,7 +1369,7 @@ class Window(QMainWindow):
         else:title.setObjectName('title');title.setText(name)
         layout.addWidget(title,0,Qt.AlignHCenter if title.objectName()=='pageBanner' else Qt.Alignment());desc=QLabel(subtitle);desc.setWordWrap(True);desc.setStyleSheet('color:#99a8bc');layout.addWidget(desc)
         glyph={'Dashboard':'⌂','Solo Ops':'◎','Squad Night':'◈','Scoreboard Capture':'⊙','Player Roster':'♟','AI Studio':'▧','ScreenShots and Videos':'>','Discord Settings':'⚙','Match History':'☷','Settings':'⚙','Tracker Browser':'▣','Camo Tracker':'◍','Leaderboards':'♛','Stats':'◔'}.get(name,'›')
-        item=QListWidgetItem(glyph+'   '+name);item.setData(Qt.UserRole,name);self.nav.addItem(item);self.stack.addWidget(page);self.pages[name]=(page,layout);return layout
+        item=QListWidgetItem(glyph+'   '+name);item.setData(Qt.UserRole,name);item.setTextAlignment(Qt.AlignCenter);self.nav.addItem(item);self.stack.addWidget(page);self.pages[name]=(page,layout);return layout
     def button(self,text,fn,accent=False):
         b=QPushButton(text);b.clicked.connect(fn)
         if accent:b.setObjectName('accent')
@@ -1603,8 +1614,8 @@ class Window(QMainWindow):
         profile_layout.addWidget(self.dash_profile_pages)
         pager=QHBoxLayout();pager.setSpacing(8)
         pager.addStretch(1)
-        self.dash_profile_prev=self.button('\u2039',lambda:self._dash_profile_page(-1));self.dash_profile_prev.setObjectName('dashMini');pager.addWidget(self.dash_profile_prev)
-        self.dash_profile_next=self.button('\u203a',lambda:self._dash_profile_page(1));self.dash_profile_next.setObjectName('dashMini');pager.addWidget(self.dash_profile_next)
+        self.dash_profile_prev=self.button('\u2039',lambda:self._dash_profile_page(-1));self.dash_profile_prev.setObjectName('dashPagerArrow');pager.addWidget(self.dash_profile_prev)
+        self.dash_profile_next=self.button('\u203a',lambda:self._dash_profile_page(1));self.dash_profile_next.setObjectName('dashPagerArrow');pager.addWidget(self.dash_profile_next)
         pager.addStretch(1)
         profile_layout.addLayout(pager)
         refresh_row=QHBoxLayout();refresh_row.setSpacing(8);refresh_row.addStretch(1);refresh_row.addWidget(self.dash_refresh_button);profile_layout.addLayout(refresh_row)
@@ -1654,6 +1665,7 @@ class Window(QMainWindow):
     def build_dmz_browser(self):
         page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(30,25,30,25);layout.setSpacing(10)
         bar=QHBoxLayout();bar.setSpacing(8)
+        dmz_back=self.button('Back',self._dmz_exit_mode);dmz_back.setObjectName('dmzBrowserBack');bar.addWidget(dmz_back)
         hist_back=self.button('<',lambda:self._dmz_web_go(-1));hist_back.setObjectName('dmzBrowserHistBack');bar.addWidget(hist_back)
         hist_fwd=self.button('>',lambda:self._dmz_web_go(1));hist_fwd.setObjectName('dmzBrowserHistFwd');bar.addWidget(hist_fwd)
         reload_btn=self.button('Reload',self._dmz_web_reload);reload_btn.setObjectName('dmzBrowserReload');bar.addWidget(reload_btn)
@@ -1684,7 +1696,7 @@ class Window(QMainWindow):
             except Exception:pass
             view=QWebEngineView(page);view.setMinimumHeight(480)
             view.setPage(QWebEnginePage(profile,view))
-            try:view.page().loadFinished.connect(lambda _ok: self._dmz_hide_site_rail())
+            try:view.page().loadFinished.connect(self._dmz_page_loaded)
             except (AttributeError,RuntimeError):pass
             layout.addWidget(view,1);self.dmz_view=view
         except Exception:
@@ -1694,7 +1706,7 @@ class Window(QMainWindow):
         self.stack.addWidget(page);self.pages['DMZ Browser']=(page,layout)
     def _add_dmz_nav_entry(self):
         try:
-            item=QListWidgetItem('DMZ Command Center');item.setData(Qt.UserRole,'DMZ Command Center');self.nav.addItem(item)
+            item=QListWidgetItem('DMZ Command Center');item.setData(Qt.UserRole,'DMZ Command Center');item.setTextAlignment(Qt.AlignCenter);self.nav.addItem(item)
         except (AttributeError,RuntimeError):pass
     def _dmz_enter_mode(self):
         try:
@@ -1709,25 +1721,25 @@ class Window(QMainWindow):
             self._dmz_mode=True
             nav=self.dmz_nav;nav.blockSignals(True);nav.clear()
             pass
-            head=QListWidgetItem('DMZ');head.setData(Qt.UserRole,'__dmz_header');head.setFlags(head.flags()&~Qt.ItemIsEnabled&~Qt.ItemIsSelectable);nav.addItem(head)
-            over=QListWidgetItem('Overview');over.setData(Qt.UserRole,'Overview');nav.addItem(over)
+            over=QListWidgetItem('Overview');over.setData(Qt.UserRole,'Overview');over.setTextAlignment(Qt.AlignCenter);nav.addItem(over)
             for section,labels in DMZ_NAV_SECTIONS:
-                h=QListWidgetItem(section);h.setData(Qt.UserRole,'__dmz_header');h.setFlags(h.flags()&~Qt.ItemIsEnabled&~Qt.ItemIsSelectable);nav.addItem(h)
+                if not section:pass
+                else:h=QListWidgetItem(section);h.setData(Qt.UserRole,'__dmz_header');h.setFlags(h.flags()&~Qt.ItemIsEnabled&~Qt.ItemIsSelectable);nav.addItem(h)
                 for label in labels:
-                    it=QListWidgetItem(label);it.setData(Qt.UserRole,label);nav.addItem(it)
+                    it=QListWidgetItem(label);it.setData(Qt.UserRole,label);it.setTextAlignment(Qt.AlignCenter);nav.addItem(it)
             nav.blockSignals(False)
             for _row in range(nav.count()):
                 try:
                     if str(nav.item(_row).data(Qt.UserRole) or '')=='Overview':nav.setCurrentRow(_row);break
                 except (AttributeError,RuntimeError):continue
-            self.nav.hide();nav.show();self.dmz_back.show()
+            self.nav.hide();nav.show()
             self.stack.setCurrentWidget(self.pages['DMZ Browser'][0])
         except (AttributeError,RuntimeError,KeyError):pass
     def _dmz_exit_mode(self):
         try:
             if not getattr(self,'_dmz_mode',False):return
             self._dmz_mode=False
-            try:self.dmz_nav.hide();self.dmz_back.hide()
+            try:self.dmz_nav.hide()
             except (AttributeError,RuntimeError):pass
             try:self.nav.show()
             except (AttributeError,RuntimeError):pass
@@ -1749,13 +1761,25 @@ class Window(QMainWindow):
             if str(data)=='__dmz_back__':self._dmz_exit_mode()
             return
         self._dmz_open_page(str(data))
-    def _dmz_hide_site_rail(self):
-        try:page=self.dmz_view.page()
+    @staticmethod
+    def _dmz_chrome_js():
+        return "(function(){var scheduled=false;function hidePromo(){try{if((document.body.innerText||'').indexOf('much better on the app')<0)return;var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);var node;while(node=walker.nextNode()){if(node.nodeValue&&node.nodeValue.indexOf('much better on the app')>=0){var n=node.parentElement;for(var d=0;d<8&&n&&n!==document.body;d++){var p='';try{p=getComputedStyle(n).position;}catch(e){}var role='';try{role=n.getAttribute?n.getAttribute('role'):'';}catch(e){}var big=false;try{var r=n.getBoundingClientRect();big=r.height>=window.innerHeight*0.9&&r.width>=window.innerWidth*0.9;}catch(e){}if(role==='dialog'||(p==='fixed'&&!big)||(p==='sticky'&&!big)){try{n.style.setProperty('display','none','important');}catch(e){}}n=n.parentElement;}}}}catch(e){}}function hide(){var s=document.getElementById('vintendo-hide-rail');if(!s){try{s=document.createElement('style');s.id='vintendo-hide-rail';s.textContent='.cm-side-menu,.cm-rail,.cm-rail-space,.cm-rail-panel,.cm-header,.cm-gt--strip,.cm-ad-slot,.cm-publift-slot,.cm-download-banner,.cm-toggle-menu-container{display:none!important}';(document.documentElement||document.head||document.body).appendChild(s);}catch(e){}}var bars=document.querySelectorAll?document.querySelectorAll('.cm-side-menu,.cm-rail,.cm-rail-space,.cm-rail-panel,.cm-header,.cm-gt--strip,.cm-ad-slot,.cm-publift-slot,.cm-download-banner,.cm-toggle-menu-container'):[];for(var i=0;i<bars.length;i++){try{bars[i].style.setProperty('display','none','important');}catch(e){}try{bars[i].setAttribute('hidden','');}catch(e){}}hidePromo();}hide();if(window.MutationObserver&&document.documentElement){try{new MutationObserver(function(){if(scheduled)return;scheduled=true;setTimeout(function(){scheduled=false;hide();},500);}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});}catch(e){}}})()"
+    def _dmz_hide_site_rail(self,view=None):
+        try:page=(view if view is not None else self.dmz_view).page()
         except AttributeError:return
         if page is None:return
-        js="(function(){function hide(){var s=document.getElementById('vintendo-hide-rail');if(!s){try{s=document.createElement('style');s.id='vintendo-hide-rail';s.textContent='.cm-side-menu{display:none!important}';(document.documentElement||document.head||document.body).appendChild(s);}catch(e){}}var bars=document.querySelectorAll?document.querySelectorAll('.cm-side-menu'):[];for(var i=0;i<bars.length;i++){try{bars[i].style.setProperty('display','none','important');}catch(e){}try{bars[i].setAttribute('hidden','');}catch(e){}}}hide();if(window.MutationObserver&&document.documentElement){try{new MutationObserver(hide).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}})()"
-        try:page.runJavaScript(js)
+        try:page.runJavaScript(self._dmz_chrome_js())
         except (AttributeError,RuntimeError,TypeError):pass
+    def _dmz_page_loaded(self,ok,view=None):
+        try:page=(view if view is not None else self.dmz_view).page()
+        except AttributeError:page=None
+        if ok:
+            if page is not None:
+                try:page.runJavaScript(self._dmz_chrome_js())
+                except (AttributeError,RuntimeError,TypeError):pass
+            return
+        try:self.dmz_status.setText('The DMZ page failed to load. Check your connection, then press Reload.')
+        except (AttributeError,RuntimeError):pass
     def _dmz_open_page(self,label):
         try:url=self._dmz_web_url(label)
         except Exception:url=DMZ_WEB_HOME
@@ -1870,9 +1894,9 @@ class Window(QMainWindow):
         abox.addWidget(QLabel('CODMUNITY ACCOUNT'))
         cols=QHBoxLayout();cols.setSpacing(12)
         creds=QFormLayout();creds.setSpacing(8)
-        self.codmunity_email_edit=self.edit(self.settings.codmunity_email());self.codmunity_email_edit.setPlaceholderText('you@example.com');self.codmunity_email_edit.setFixedWidth(300)
-        self.codmunity_password_edit=self.edit('');self.codmunity_password_edit.setEchoMode(QLineEdit.Password);self.codmunity_password_edit.setPlaceholderText('Password (never stored)');self.codmunity_password_edit.setFixedWidth(300)
-        creds.addRow('CODMunity account email',self.codmunity_email_edit);creds.addRow('CODMunity password',self.codmunity_password_edit)
+        self.codmunity_email_edit=self.edit(self.settings.codmunity_email());self.codmunity_email_edit.setPlaceholderText('you@example.com');self.codmunity_email_edit.setFixedWidth(320)
+        self.codmunity_password_edit=self.edit('');self.codmunity_password_edit.setEchoMode(QLineEdit.Password);self.codmunity_password_edit.setPlaceholderText('Password (never stored)');self.codmunity_password_edit.setFixedWidth(320)
+        creds.addRow('CODMunity account email',self.codmunity_email_edit);creds.addRow('CODMunity password',self.codmunity_password_edit);creds.addRow('CODMunity Name',self.player)
         cols.addLayout(creds)
         actions=QVBoxLayout();actions.setSpacing(6)
         self.codmunity_signin_button=self.button('Sign in',self.codmunity_sign_in,True)
@@ -1883,6 +1907,8 @@ class Window(QMainWindow):
         cols.addLayout(actions);cols.addStretch(1)
         abox.addLayout(cols)
         self.codmunity_account_status=QLabel('');self.codmunity_account_status.setWordWrap(True);self.codmunity_account_status.setStyleSheet('color:#99a8bc');abox.addWidget(self.codmunity_account_status)
+        self.codmunity_logged_pill=QLabel('\u25cf  LOGGED IN');self.codmunity_logged_pill.setAlignment(Qt.AlignCenter);self.codmunity_logged_pill.setFixedHeight(34);self.codmunity_logged_pill.hide();abox.addWidget(self.codmunity_logged_pill)
+        self.codmunity_blink_timer=QTimer(self);self.codmunity_blink_timer.setInterval(700);self.codmunity_blink_timer.timeout.connect(self._blink_codmunity_pill)
         top.addWidget(account,1)
         l.addLayout(top)
         profile=QFrame();profile.setObjectName('dashboardPanel');pbox=QVBoxLayout(profile);pbox.setContentsMargins(14,12,14,12);pbox.setSpacing(6)
@@ -1891,19 +1917,21 @@ class Window(QMainWindow):
         self.codmunity_profile_name=QLabel('—');self.codmunity_profile_name.setObjectName('codmunityProfileName');pbox.addWidget(self.codmunity_profile_name)
         self.codmunity_profile_sub=QLabel('');self.codmunity_profile_sub.setWordWrap(True);self.codmunity_profile_sub.setObjectName('codmunityProfileSub');pbox.addWidget(self.codmunity_profile_sub)
         self.codmunity_profile_stats=QLabel('');self.codmunity_profile_stats.setWordWrap(True);self.codmunity_profile_stats.setObjectName('codmunityProfileStats');pbox.addWidget(self.codmunity_profile_stats)
-        l.addWidget(profile)
-        configbox=QFrame();configbox.setObjectName('dashboardPanel');cbox=QVBoxLayout(configbox);cbox.setContentsMargins(14,12,14,12);cbox.setSpacing(8)
+        l.addWidget(profile);profile.hide()
+        configbox=QFrame();configbox.setObjectName('configBox');cbox=QVBoxLayout(configbox);cbox.setContentsMargins(14,12,14,12);cbox.setSpacing(8)
         cform=QFormLayout();cform.setSpacing(8)
-        cform.addRow('CODMunity Name',self.player)
         cform.addRow('CODMunity stats folder',self.stats_dir)
         cform.addRow('',self.button('Browse stats folder',self.pick_stats))
         cbox.addLayout(cform);cbox.addStretch(1)
-        top.addWidget(configbox)
+        top.addWidget(configbox);configbox.hide()
         form=QFormLayout()
         self.settings.values['warzone_enabled']=True
         try:self.settings.save()
         except Exception:pass
         form.addRow('CODMunity Profile',self.profile);l.addLayout(form)
+        self.profile.hide()
+        try:form.labelForField(self.profile).hide()
+        except (AttributeError,RuntimeError):pass
         l.addStretch(1)
         self.refresh_codmunity_account_status()
     def squad_game_changed(self,*_):
@@ -2005,8 +2033,7 @@ class Window(QMainWindow):
         self.capture_setup_button=self.button('Pick Game Monitor',lambda:self.setup_scoreboard_display(force=True))
         self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');self.hotkey_status.setCursor(Qt.PointingHandCursor);self.hotkey_status.setToolTip('Click to set the scoreboard hotkey');self.hotkey_status.mousePressEvent=lambda _event:self.open_hotkey_dialog('scoreboard')
         self.capture_now_button=self.button('Capture Now',self.capture_once,True)
-        try:self.sidebar.layout().insertWidget(self.sidebar.layout().indexOf(self.nav)+1,self.hotkey_status)
-        except (AttributeError,RuntimeError):self.sidebar.layout().addWidget(self.hotkey_status)
+        self.hotkey_status.hide()
         display_row=QHBoxLayout();display_row.addWidget(self.capture_setup_button,2);display_row.addWidget(self.capture_now_button,1);l.addLayout(display_row)
         if str(self.settings.values.get('scoreboard_profile','auto'))!='auto':self.settings.values['scoreboard_profile']='auto';self.settings.save()
         self.capture_subtitle.setText(self._scoreboard_capture_instruction())
@@ -2123,7 +2150,8 @@ class Window(QMainWindow):
         self.codmunity_refresh_all_button=self.button('Refresh all verified data',self.refresh_all_distributions)
         codmunity_controls.addWidget(self.codmunity_resolve_button);codmunity_controls.addWidget(self.codmunity_stats_button);codmunity_controls.addWidget(self.codmunity_refresh_button);codmunity_controls.addWidget(self.codmunity_refresh_all_button);codmunity_layout.addLayout(codmunity_controls)
         self.codmunity_status=QLabel('Select a roster player to link CODMunity data.');self.codmunity_status.setObjectName('codmunityPlayerStatus');self.codmunity_status.setWordWrap(True);self.codmunity_status.setStyleSheet('font-size:12px;font-weight:800;color:#f0ad4e;padding:6px 8px;background:#171a20;border:1px solid #343a46;border-radius:5px;')
-        codmunity_layout.addWidget(self.codmunity_status)
+        info_form.addRow('CODMunity status',self.codmunity_status)
+        self.codmunity_refresh_single=self.button('Refresh CODMunity data',self.codmunity_resolve_and_refresh);info_form.addRow('',self.codmunity_refresh_single)
         self.codmunity_identity_label=QLabel('Username —  ·  Display name —  ·  UID —');self.codmunity_identity_label.setObjectName('codmunityIdentity');self.codmunity_identity_label.setWordWrap(True);self.codmunity_identity_label.setStyleSheet('font-size:11px;color:#d4dae4;')
         codmunity_layout.addWidget(self.codmunity_identity_label)
         self.codmunity_profile_label=QLabel('Profile link —');self.codmunity_profile_label.setObjectName('codmunityProfileLink');self.codmunity_profile_label.setWordWrap(True);self.codmunity_profile_label.setStyleSheet('font-size:11px;color:#9da8b7;')
@@ -2156,7 +2184,7 @@ class Window(QMainWindow):
         self.codmunity_client=codmunity_player_stats.CodmunityPublicClient()
         self.codmunity_auth=None
         self._rebuild_player_service()
-        self._codmunity_tab_index=self.roster_tabs.addTab(codmunity_tab,'CODMUNITY')
+        self._codmunity_hidden_tab=codmunity_tab;self._codmunity_tab_index=None
         self.codmunity_game.currentIndexChanged.connect(self.codmunity_game_changed)
         self.codmunity_mode.currentIndexChanged.connect(self._codmunity_comparison_changed)
         self.codmunity_scope.currentIndexChanged.connect(self._codmunity_comparison_changed)
@@ -2186,6 +2214,8 @@ class Window(QMainWindow):
             from PySide6.QtWebEngineWidgets import QWebEngineView
             self.profile_view=QWebEngineView(profile_tab);self.profile_view.setMinimumHeight(420)
             profile_layout.addWidget(self.profile_view,1)
+            try:self.profile_view.loadFinished.connect(lambda _ok: self._dmz_hide_site_rail(self.profile_view))
+            except (AttributeError,RuntimeError):pass
         except Exception:
             self.profile_view=None
         self._profile_loaded_url='';self._profile_tab_index=self.roster_tabs.addTab(profile_tab,'PROFILE')
@@ -2206,6 +2236,7 @@ class Window(QMainWindow):
         self.current_player=None;self.roster_rows=[];self.roster_visible_ids=[];self.roster_dirty=False;self._roster_loading=False;self.roster_photo_removed=False
         for widget in (self.roster_name,self.roster_display_name,self.codmunity_username):widget.textChanged.connect(lambda _:self.mark_roster_dirty())
         self.codmunity_username.textChanged.connect(self.update_codmunity_profile_link)
+        self.codmunity_username.editingFinished.connect(self._codmunity_username_finished)
         self.roster_profile_url.textChanged.connect(lambda _: (self.refresh_profile_tab(),self.mark_roster_dirty()))
         self.roster_enabled.toggled.connect(lambda _:self.mark_roster_dirty())
         self.photo_consent.toggled.connect(lambda _:self.mark_roster_dirty())
@@ -2241,6 +2272,18 @@ class Window(QMainWindow):
             if parsed.tzinfo is None:parsed=parsed.replace(tzinfo=timezone.utc)
             return parsed.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         except (TypeError,ValueError):return str(value or '—')
+    def _codmunity_username_finished(self):
+        try:
+            if self._codmunity_player_record() is None:return
+            if not self.codmunity_username.text().strip():return
+        except (AttributeError,RuntimeError):return
+        self.resolve_codmunity_identity()
+    def codmunity_resolve_and_refresh(self):
+        self.resolve_codmunity_identity()
+        try:self.refresh_codmunity_player_stats()
+        except (AttributeError,RuntimeError):pass
+        try:self.refresh_all_distributions()
+        except (AttributeError,RuntimeError):pass
     def resolve_codmunity_identity(self):
         player=self._codmunity_player_record()
         username=self.codmunity_username.text().strip()
@@ -2334,6 +2377,25 @@ class Window(QMainWindow):
         email=self.settings.codmunity_email()
         if signed_in:self.codmunity_account_status.setText(f"Signed in as {email or 'your CODMunity account'}. Live player stats use your account.")
         else:self.codmunity_account_status.setText('Not signed in. Live player stats stay unavailable until sign-in.')
+        try:
+            if signed_in:
+                self._codmunity_blink_on=True;self.codmunity_logged_pill.show();self._blink_codmunity_pill()
+                if not self.codmunity_blink_timer.isActive():self.codmunity_blink_timer.start()
+            else:
+                try:self.codmunity_blink_timer.stop()
+                except (AttributeError,RuntimeError):pass
+                self.codmunity_logged_pill.hide()
+        except (AttributeError,RuntimeError):pass
+    def _blink_codmunity_pill(self):
+        try:pill=self.codmunity_logged_pill
+        except (AttributeError,RuntimeError):return
+        try:
+            if pill.isHidden():return
+        except (AttributeError,RuntimeError):return
+        self._codmunity_blink_on=not getattr(self,'_codmunity_blink_on',True)
+        color='#56e99a' if self._codmunity_blink_on else '#1f6b44'
+        try:pill.setStyleSheet(f'background:#0d2318;border:1px solid {color};border-radius:17px;color:{color};font-size:13px;font-weight:900;')
+        except (AttributeError,RuntimeError):pass
     def startup_offline_requirements(self):
         issues=[]
         try:token=self.settings.codmunity_refresh_token()
@@ -2422,12 +2484,67 @@ class Window(QMainWindow):
         try:dialog.exec()
         except (AttributeError,RuntimeError):return False
         return True
+    def _set_button_busy(self,button,busy,base_text=None):
+        try:
+            if button is None:return
+            if busy:
+                if getattr(button,'_busy_timer',None) is not None:return
+                try:original=str(button.text())
+                except (AttributeError,RuntimeError):return
+                try:button._busy_original=original
+                except (AttributeError,RuntimeError):pass
+                label=base_text if isinstance(base_text,str) and base_text else original
+                try:button.setEnabled(False)
+                except (AttributeError,RuntimeError):return
+                state={'dots':0}
+                def _tick():
+                    try:
+                        if getattr(button,'_busy_timer',None) is None:return
+                        state['dots']=(state.get('dots',0)+1)%4
+                        button.setText(label+'.'*state['dots'])
+                    except (AttributeError,RuntimeError):pass
+                try:
+                    from PySide6.QtCore import QTimer as _QTimerBusy
+                    timer=_QTimerBusy(button)
+                except Exception:return
+                try:timer.timeout.connect(_tick)
+                except (AttributeError,RuntimeError):return
+                try:timer.start(350)
+                except (AttributeError,RuntimeError):return
+                try:button._busy_timer=timer
+                except (AttributeError,RuntimeError):pass
+                try:button.setText(label+'.')
+                except (AttributeError,RuntimeError):pass
+            else:
+                try:timer=getattr(button,'_busy_timer',None)
+                except (AttributeError,RuntimeError):timer=None
+                try:
+                    if timer is not None:timer.stop();timer.deleteLater()
+                except (AttributeError,RuntimeError):pass
+                try:button._busy_timer=None
+                except (AttributeError,RuntimeError):pass
+                try:original=getattr(button,'_busy_original',None)
+                except (AttributeError,RuntimeError):original=None
+                try:
+                    if original:button.setText(original)
+                except (AttributeError,RuntimeError):pass
+                try:button.setEnabled(True)
+                except (AttributeError,RuntimeError):pass
+        except (AttributeError,RuntimeError,TypeError):pass
     def codmunity_sign_in(self,email=None,password=None,on_signed_in=None,on_failed=None):
         if email is None or isinstance(email,bool):email=self.codmunity_email_edit.text().strip() if hasattr(self,'codmunity_email_edit') else ''
-        if password is None or isinstance(password,bool):password=self.codmity_password_edit.text() if hasattr(self,'codmunity_password_edit') else ''
+        if password is None or isinstance(password,bool):password=self.codmunity_password_edit.text() if hasattr(self,'codmunity_password_edit') else ''
         if not email or not password:
             if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Enter your CODMunity email and password.')
             return
+        try:_sender=self.sender()
+        except Exception:_sender=None
+        _btn=_sender if _sender is not None and hasattr(_sender,'setText') and hasattr(_sender,'setEnabled') and hasattr(_sender,'clicked') else None
+        if _btn is None:
+            try:_btn=getattr(self,'codmunity_signin_button',None)
+            except (AttributeError,RuntimeError):_btn=None
+            if not (hasattr(_btn,'setText') and hasattr(_btn,'setEnabled') and hasattr(_btn,'clicked')):_btn=None
+        self._set_button_busy(_btn,True,'Signing in')
         if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Signing in…')
         def work():
             auth=codmunity_player_stats.CodmunityAuthClient()
@@ -2445,7 +2562,9 @@ class Window(QMainWindow):
             if on_signed_in is not None:
                 try:on_signed_in()
                 except Exception:pass
+            self._set_button_busy(_btn,False)
         def failed(message):
+            self._set_button_busy(_btn,False)
             if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText(str(message))
             self.log('CODMunity sign-in failed.')
             if on_failed is not None:
@@ -3156,6 +3275,14 @@ class Window(QMainWindow):
             except Exception:pass
         self._embed_auto_browser(hwnd)
     def open_login_window(self):
+        if not self.settings.values.get('meta_login_prompt_seen'):
+            box=QMessageBox(self);box.setWindowTitle('Meta AI login')
+            box.setText('You only need to log into Meta AI once. The login is used to generate AI pictures and videos.\n\nNo user info is saved or stored by the app or on any servers.')
+            go=box.addButton('Continue to login',QMessageBox.AcceptRole);box.addButton('Cancel',QMessageBox.RejectRole);box.setDefaultButton(go)
+            box.exec()
+            if box.clickedButton()!=go:return
+            try:self.settings.values['meta_login_prompt_seen']=True;self.settings.save()
+            except Exception:pass
         if getattr(self,'_inapp_active',None) or getattr(self,'_inapp_poster_active',None):
             try:self.statusBar().showMessage('A Meta AI job is running. Wait for it to finish before opening the login window.',8000)
             except (AttributeError,RuntimeError):pass
@@ -3526,7 +3653,6 @@ class Window(QMainWindow):
         self.camo_status_dot=QLabel('●');self.camo_status_dot.setObjectName('camoStatusDot');status_layout.addWidget(self.camo_status_dot)
         self.camo_status_line=QLabel('Waiting for Call of Duty');self.camo_status_line.setObjectName('camoStatusLine');status_layout.addWidget(self.camo_status_line)
         self.camo_last_line=QLabel('');self.camo_last_line.setObjectName('camoStatusLast');status_layout.addWidget(self.camo_last_line,1)
-        self.camo_open_tracking_button=self.button('Open Auto tracking',self.goto_tracking);status_layout.addWidget(self.camo_open_tracking_button)
         l.addWidget(status_bar)
         self.camo_games_row=QHBoxLayout();self.camo_games_row.setSpacing(4);l.addLayout(self.camo_games_row)
         self.camo_game_group=QButtonGroup(self);self.camo_game_group.setExclusive(True)
@@ -3590,7 +3716,6 @@ class Window(QMainWindow):
         l.addWidget(filter_frame)
         self.camo_weapon_list=QListWidget();self.camo_weapon_list.setObjectName('camoWeaponList');l.addWidget(self.camo_weapon_list,1)
         self.camo_status=QLabel('');self.camo_status.setWordWrap(True);self.camo_status.setObjectName('camoStatusLine');l.addWidget(self.camo_status)
-        self.row(l,self.button('Refresh catalogue',lambda:self._maybe_refresh_camo(True)))
         self.refresh_camo_tracker()
     def goto_tracking(self):
         for row in range(self.nav.count()):
@@ -4493,8 +4618,10 @@ class Window(QMainWindow):
         QApplication.clipboard().setText(line);self.log('Stats summary copied to the clipboard.')
     def build_settings(self):
         l=self.page('Settings','CODMunity, Meta AI automation, and Discord settings in one place. Mutable files are stored under Windows AppData.')
-        self.settings_tabs=QTabWidget();self.settings_tabs.addTab(self.solo_settings_panel,'CODMunity');l.addWidget(self.settings_tabs,1)
-        self.sync_tab_page=QWidget();sync_tab_layout=QVBoxLayout(self.sync_tab_page);sync_tab_layout.setContentsMargins(20,16,20,16);sync_tab_layout.setSpacing(10)
+        self.settings_tabs=QTabWidget();self.settings_tabs.addTab(self.solo_settings_panel,'CODMunity');l.addWidget(self.settings_tabs)
+        self.sync_tab_page=QWidget();sync_page_layout=QVBoxLayout(self.sync_tab_page);sync_page_layout.setContentsMargins(0,0,0,0)
+        sync_scroll=QScrollArea();sync_scroll.setWidgetResizable(True);sync_scroll.setFrameShape(QFrame.NoFrame);sync_page_layout.addWidget(sync_scroll)
+        sync_host=QWidget();sync_tab_layout=QVBoxLayout(sync_host);sync_tab_layout.setContentsMargins(20,16,20,16);sync_tab_layout.setSpacing(10);sync_scroll.setWidget(sync_host)
         sync_header=QHBoxLayout();sync_title=QLabel('CODMunity Sync & Account');sync_title.setObjectName('title');sync_header.addWidget(sync_title);sync_header.addStretch()
         self.sync_header_status=QLabel('Native sync page — no external app.');self.sync_header_status.setStyleSheet('color:#99a8bc;font-weight:700;');sync_header.addWidget(self.sync_header_status);sync_tab_layout.addLayout(sync_header)
         if self.tab_prototype:
@@ -4504,6 +4631,8 @@ class Window(QMainWindow):
         self.settings_tabs.addTab(self.sync_tab_page,'Sync & Account')
         self.settings_tabs.currentChanged.connect(self._settings_tab_changed)
         automation_tab=QWidget();automation_layout=QVBoxLayout(automation_tab);automation_layout.setContentsMargins(12,12,12,12);automation_layout.setSpacing(12);self.settings_tabs.addTab(automation_tab,'Automation & Chrome')
+        try:self.settings_tabs.setTabVisible(self.settings_tabs.indexOf(automation_tab),False)
+        except (AttributeError,RuntimeError):pass
         self.poll=QSpinBox();self.poll.setRange(3,60);self.poll.setValue(int(self.settings.values.get('poll_seconds',5)))
         self.browser_timeout=QSpinBox();self.browser_timeout.setRange(10,180);self.browser_timeout.setSuffix(' sec');self.browser_timeout.setValue(int(self.settings.values.get('browser_navigation_timeout',60)))
         self.download_timeout=QSpinBox();self.download_timeout.setRange(5,120);self.download_timeout.setSuffix(' min');self.download_timeout.setValue(max(5,int(self.settings.values.get('browser_download_timeout',1800))//60))
@@ -4519,12 +4648,18 @@ class Window(QMainWindow):
         automation_layout.addStretch()
         poster_tab=QWidget();poster_layout=QVBoxLayout(poster_tab);poster_layout.setContentsMargins(12,12,12,12);poster_layout.setSpacing(12)
         poster_note=QLabel('Poster automation runs in the background. These switches apply to every finished match.');poster_note.setWordWrap(True);poster_note.setStyleSheet('color:#99a8bc');poster_layout.addWidget(poster_note)
-        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(bool(self.settings.values.get('include_stats',True)));self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.include_stats_checkbox)
-        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(bool(self.settings.values.get('auto_post',True)));self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.auto_post)
-        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',True)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.full_auto)
+        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.include_stats_checkbox)
+        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(True);self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.auto_post)
+        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(True);self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.full_auto)
         poster_layout.addStretch(1)
         self.settings_tabs.addTab(poster_tab,'Poster Automation')
+        try:self.settings_tabs.setTabVisible(self.settings_tabs.indexOf(poster_tab),False)
+        except (AttributeError,RuntimeError):pass
+        try:self.settings.values.update(include_stats=True,auto_post=True,full_auto=True);self.settings.save()
+        except Exception:pass
         self.settings_tabs.addTab(self.discord_settings_panel,'Discord')
+        try:self.settings_tabs.setTabVisible(self.settings_tabs.indexOf(self.discord_settings_panel),False)
+        except (AttributeError,RuntimeError):pass
         hotkeys_tab=QWidget();hotkeys_layout=QVBoxLayout(hotkeys_tab);hotkeys_layout.setContentsMargins(12,12,12,12);hotkeys_layout.setSpacing(12)
         hotkeys_note=QLabel('Global hotkeys work while the tracker is minimized. Click a box, then press the new keys (a modifier plus another key, or a bare key).');hotkeys_note.setWordWrap(True);hotkeys_layout.addWidget(hotkeys_note)
         score_vk,score_mod=self.hotkey_setting('scoreboard_hotkey_vk','scoreboard_hotkey_mod',DEFAULT_SCOREBOARD_HOTKEY)
@@ -4551,6 +4686,8 @@ class Window(QMainWindow):
             from PySide6.QtWebEngineWidgets import QWebEngineView
             self.codmunity_stats_view=QWebEngineView(self.codmunity_stats_frame);self.codmunity_stats_view.setMinimumHeight(320)
             stats_frame_layout.addWidget(self.codmunity_stats_view)
+            try:self.codmunity_stats_view.loadFinished.connect(lambda _ok: self._dmz_hide_site_rail(self.codmunity_stats_view))
+            except (AttributeError,RuntimeError):pass
         except Exception:
             self.codmunity_stats_view=None
             stats_frame_fallback=QLabel('Stats preview unavailable: Qt WebEngine is not installed.');stats_frame_fallback.setWordWrap(True)
@@ -5188,9 +5325,7 @@ class Window(QMainWindow):
         if not path or not Path(path).is_file():return
         try:webhook=self.settings.cinematic_webhook().strip()
         except Exception:webhook=''
-        if not webhook:
-            self.cinematic_status.setText('Add the separate Cinematic videos webhook under Settings → Discord, save it, then post manually.');return
-        if not re.fullmatch(r'https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9._-]+',webhook):self.cinematic_status.setText('The saved cinematic webhook is not a valid Discord webhook URL.');return
+        if not re.fullmatch(r'https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9._-]+',webhook):self.cinematic_status.setText('The cinematic webhook is not a valid Discord webhook URL.');return
         def send():
             return post_file_to_discord_webhook(webhook,path)
         cid=item.data(Qt.UserRole) if item else ''
@@ -5456,7 +5591,7 @@ class Window(QMainWindow):
         if not path:return
         data=E.read_json(path,{})
         if data.get('webhook_url'):self.webhook.setText(data['webhook_url'])
-        self.player.setText(data.get('player','vintendo'));self.stats_dir.setText(data.get('stats_dir',''));self.profile.setText(data.get('profile_url',''))
+        self.player.setText(data.get('player',''));self.stats_dir.setText(data.get('stats_dir',''));self.profile.setText(data.get('profile_url',''))
         parent=Path(path).parent
         for name in ('posted_matches.json','achievement_history.json','achievement_config.json'):
             source=parent/name;target=E.DATA/name
@@ -5484,9 +5619,13 @@ class Window(QMainWindow):
         folders_missing=not screenshot or not video or not Path(screenshot).is_dir() or not Path(video).is_dir()
         if folders_missing:self.show_media_folder_setup()
         if not values.get('capture_hotkey_prompt_seen'):
-            answer=QMessageBox.question(self,'Capture hotkey','Would you like to change the capture hotkey?\n\nOne press saves a screenshot and prepares scoreboard OCR.',QMessageBox.Yes|QMessageBox.No,QMessageBox.Yes)
+            default_text=format_hotkey(*DEFAULT_SCOREBOARD_HOTKEY)
+            box=QMessageBox(self);box.setWindowTitle('Set your capture hotkey')
+            box.setText('Your capture hotkey is '+default_text+'.\n\nOne press saves a screenshot and prepares scoreboard OCR.\n\nWould you like to set your own hotkey instead?')
+            set_button=box.addButton('Set hotkey',QMessageBox.AcceptRole);box.addButton('Keep default',QMessageBox.RejectRole);box.setDefaultButton(set_button)
+            box.exec()
             values['capture_hotkey_prompt_seen']=True;self.settings.save()
-            if answer==QMessageBox.Yes:self.open_hotkey_dialog('scoreboard')
+            if box.clickedButton()==set_button:self.open_hotkey_dialog('scoreboard')
     def show_media_folder_setup(self):
         dialog=QDialog(self);dialog.setWindowTitle('Choose screenshot and video folders');dialog.setModal(True)
         layout=QVBoxLayout(dialog);layout.setSpacing(12)
@@ -5586,7 +5725,9 @@ class Window(QMainWindow):
             for proc in psutil.process_iter(['name']):
                 if (proc.info.get('name') or '').lower()=='vintendo match tracker.exe':self.notice('The original Vintendo Match Tracker is running. Stop it before starting the unified tracker to prevent duplicate reports.');return
         except ImportError:pass
-        if not self.webhook.text().strip():self.notice('Enter a Discord webhook in Discord Settings first.');return
+        try:tracking_webhook=self.settings.webhook().strip()
+        except Exception:tracking_webhook=''
+        if not tracking_webhook:self.notice('Discord posting is not configured.');return
         if not self.store.meta('cod_bootstrapped',False):
             try:
                 _,records=E.load_matches(self.settings.values)
@@ -6001,7 +6142,7 @@ class Window(QMainWindow):
         mid=self._latest_codmunity_match()
         if mid:
             existing=self.store.get(mid)
-            if existing['status'] in ('delivered','solo_delivered') and not self.allow_both.isChecked():self.notice('This match was already delivered. Choose another record or explicitly enable an additional format in Discord Settings.');return False
+            if existing['status'] in ('delivered','solo_delivered') and not self.allow_both.isChecked():self.notice('This match was already delivered. Choose another record.');return False
             base_payload=json.loads(existing['payload'])
         else:
             digest=__import__('hashlib').sha256(self.last_frame.tobytes()).hexdigest()[:24]
@@ -6471,11 +6612,6 @@ class Window(QMainWindow):
             self.statusBar().showMessage('An automatic poster job is already running.',5000)
             return
         no_discord=job.get('status') in ('delivered','solo_delivered')
-        try:webhook= self.settings.webhook().strip()
-        except Exception:webhook=self.webhook.text().strip()
-        if not no_discord and not webhook:
-            self.notice('Add a Discord webhook in Settings before starting the full automatic job.')
-            return
         if not no_discord:
             self.auto_post.setChecked(True)
             self.settings.values['auto_post']=True
@@ -7101,7 +7237,9 @@ class Window(QMainWindow):
         if not job:return
         if job['status']=='solo_delivered' and self.allow_both.isChecked():self.store.update(mid,status='ready')
         if not self.store.reserve(mid,force,allow_both=self.allow_both.isChecked()):self.notice('Duplicate delivery prevented, or this job needs manual resolution in Match History.');return
-        url=self.webhook.text().strip();match=json.loads(job['payload']);players=json.loads(job['players']);content=E.recap(match,players,snapshot=self.store.meta('codmunity_stats'));poster=job.get('poster') or job['image']
+        try:url=self.settings.webhook().strip()
+        except Exception:url=self.webhook.text().strip()
+        match=json.loads(job['payload']);players=json.loads(job['players']);content=E.recap(match,players,snapshot=self.store.meta('codmunity_stats'));poster=job.get('poster') or job['image']
         if job['capture'] and not players:content+='\nOCR (not verified):\n'+job['ocr'][:600]
         def done(message_id):
             self.store.update(mid,status='delivered',message_id=message_id,error='');E.reserve_legacy_match(match);self.refresh_history();self.log('Discord poster delivered: '+mid)

@@ -62,15 +62,22 @@ class DmzEmbedUiTests(unittest.TestCase):
         labels = [w.dmz_nav.item(i).text() for i in range(w.dmz_nav.count())]
         self.assertIn("Overview", labels)
         self.assertIn("Map", labels)
-        self.assertIn("Beginner guide", labels)
+        for gone in ("Beginner guide", "What's New", "News", "Review pins",
+                     "How the map works", "Missions", "Traits", "TOOLS",
+                     "DATABASE", "GUIDES AND NEWS", "DMZ", "Meta"):
+            self.assertNotIn(gone, labels)
+        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QPushButton
+        for i in range(w.nav.count()):
+            self.assertEqual(w.nav.item(i).textAlignment(), Qt.AlignCenter)
+        for i in range(w.dmz_nav.count()):
+            self.assertEqual(w.dmz_nav.item(i).textAlignment(), Qt.AlignCenter)
         rows = [w.dmz_nav.item(i) for i in range(w.dmz_nav.count())]
         self.assertFalse(any(r.data(256) == "__dmz_back__" for r in rows))
-        back_btn = w.findChild(QPushButton, "dmzNavBack")
+        back_btn = w.findChild(QPushButton, "dmzBrowserBack")
         self.assertIsNotNone(back_btn)
         self.assertFalse(back_btn.isHidden())
-        self.assertIn("2563eb", back_btn.styleSheet())
-        self.assertIsNone(w.findChild(QPushButton, "dmzBrowserBack"))
+        self.assertEqual(back_btn.text(), "Back")
         w._dmz_exit_mode()
         self.qt.processEvents()
         self.assertFalse(w.nav.isHidden())
@@ -134,17 +141,97 @@ class DmzEmbedUiTests(unittest.TestCase):
         self.assertEqual(loaded, ["https://codmunity.gg/dmz/map"])
         self.assertTrue(any(".cm-side-menu" in js for js in scripts))
 
+    def test_dmz_nav_scrollbar_is_visible_and_offset(self):
+        w = self.window
+        w._dmz_enter_mode()
+        self.qt.processEvents()
+        margins = w.dmz_nav.viewportMargins()
+        self.assertGreaterEqual(margins.right(), 8)
+        sheet = w.dmz_nav.styleSheet()
+        self.assertIn("QScrollBar:vertical", sheet)
+        self.assertIn("width:12px", sheet)
+        self.assertIn(":hover", sheet)
+
+    def test_overlay_hider_blocks_app_promo(self):
+        scripts = []
+        class FakePage:
+            def runJavaScript(self, js):
+                scripts.append(js)
+        class FakeView:
+            def page(self):
+                return FakePage()
+        w = self.window
+        w._dmz_hide_site_rail(FakeView())
+        self.assertEqual(len(scripts), 1)
+        self.assertIn("much better on the app", scripts[0])
+        self.assertIn(".cm-side-menu", scripts[0])
+        self.assertIn("MutationObserver", scripts[0])
+
+    def test_site_chrome_hider_covers_rail_and_header(self):
+        scripts = []
+        class FakePage:
+            def runJavaScript(self, js):
+                scripts.append(js)
+        class FakeView:
+            def page(self):
+                return FakePage()
+        w = self.window
+        w._dmz_hide_site_rail(FakeView())
+        self.assertEqual(len(scripts), 1)
+        for selector in (".cm-side-menu", ".cm-rail", ".cm-rail-space",
+                         ".cm-header", ".cm-gt--strip", ".cm-ad-slot",
+                         ".cm-publift-slot", ".cm-download-banner",
+                         ".cm-toggle-menu-container"):
+            self.assertIn(selector, scripts[0])
+        self.assertIn("innerHeight", scripts[0])
+
+    def test_failed_page_load_shows_error_status(self):
+        w = self.window
+        w._dmz_page_loaded(False)
+        self.qt.processEvents()
+        self.assertIn("failed to load", w.dmz_status.text())
+
+    def test_successful_page_load_rehides_chrome(self):
+        scripts = []
+        class FakePage:
+            def runJavaScript(self, js):
+                scripts.append(js)
+        class FakeView:
+            def page(self):
+                return FakePage()
+        w = self.window
+        w._dmz_page_loaded(True, FakeView())
+        self.qt.processEvents()
+        self.assertEqual(len(scripts), 1)
+        self.assertIn(".cm-rail", scripts[0])
+
+    def test_dmz_row_above_settings_and_selection_matches_page(self):
+        from PySide6.QtCore import Qt
+        w = self.window
+        rows = [(w.nav.item(i).data(Qt.UserRole), w.nav.item(i).isHidden())
+                for i in range(w.nav.count())]
+        visible = [name for name, hidden in rows if not hidden]
+        self.assertLess(visible.index("DMZ Command Center"), visible.index("Settings"))
+        for i in range(w.nav.count()):
+            name = w.nav.item(i).data(Qt.UserRole)
+            # Only visit side-effect-free rows: Scoreboard Capture can open
+            # a modal display picker and Camo Tracker kicks off downloads.
+            if name not in ("Dashboard", "Settings", "Player Roster"):
+                continue
+            w.nav.setCurrentRow(i)
+            self.qt.processEvents()
+            self.assertEqual(w.stack.currentWidget(), w.pages[name][0])
+
     def test_back_returns_to_main_sidebar(self):
         from PySide6.QtWidgets import QPushButton
         w = self.window
         w._dmz_enter_mode()
         self.qt.processEvents()
-        back_btn = w.findChild(QPushButton, "dmzNavBack")
+        back_btn = w.findChild(QPushButton, "dmzBrowserBack")
         back_btn.click()
         self.qt.processEvents()
         self.assertFalse(w.nav.isHidden())
         self.assertTrue(w.dmz_nav.isHidden())
-        self.assertTrue(w.dmz_back.isHidden())
         self.assertEqual(w.stack.currentWidget(), w.pages["Dashboard"][0])
 
 

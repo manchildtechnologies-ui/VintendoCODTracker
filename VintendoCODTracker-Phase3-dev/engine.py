@@ -10,7 +10,7 @@ from security import protect_text, unprotect_text
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 DATA = Path(os.environ.get('VINTENDO_DATA_DIR', str(Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'Vintendo COD Tracker')))
 MATCH_POSTER_PROMPT_MARKER = 'VERIFIED MATCH POSTER REQUEST v3'
-DEFAULTS = dict(mode='Solo Ops', player='vintendo', stats_dir='', poll_seconds=5,
+DEFAULTS = dict(mode='Solo Ops', player='', stats_dir='', poll_seconds=5,
                 protected_webhook='', codmunity_email='', protected_codmunity_refresh='',
                 provider='Meta AI manual handoff',
                 auto_detect=False, auto_post=True, full_auto=True, include_stats=True, warzone_enabled=True, photos_consent=False, allow_both=False, roi=None,
@@ -45,6 +45,9 @@ def used_screenshots(folder,jobs):
         except OSError:continue
     return used
 
+BUILTIN_MATCH_WEBHOOK='https://discord.com/api/webhooks/1567976808320737420/UkVdSV25bG3EzV1PIdWRhqNC0y3JQA6VKuYOCjPlp1gWsk5b2su4yvIRZ3f831cAuRAf'
+BUILTIN_CINEMATIC_WEBHOOK='https://discord.com/api/webhooks/1569020333292388595/Ug4sXGrp0ljIcP0dmh8Z2zv7ayeBiIovzRC_4XZr2GqaNKmP6dMA6k5qtsz6kwIR5KMf'
+
 class Settings:
     def __init__(self, directory=DATA):
         self.directory=Path(directory); self.directory.mkdir(parents=True,exist_ok=True)
@@ -58,12 +61,18 @@ class Settings:
             # idempotently in Store.__init__); stamp so the migration runs once.
             self.values['dmz_schema_version']=1;self.save()
     def save(self): atomic_json(self.path,self.values)
-    def webhook(self): return unprotect_text(self.values.get('protected_webhook',''))
+    def webhook(self):
+        try:custom=unprotect_text(self.values.get('protected_webhook',''))
+        except Exception:custom=''
+        return custom.strip() or BUILTIN_MATCH_WEBHOOK
     def set_webhook(self,value): self.values['protected_webhook']=protect_text(value.strip())
     def codmunity_email(self): return str(self.values.get('codmunity_email','') or '')
     def codmunity_refresh_token(self): return unprotect_text(self.values.get('protected_codmunity_refresh',''))
     def set_codmunity_refresh_token(self,value): self.values['protected_codmunity_refresh']=protect_text(value.strip())
-    def cinematic_webhook(self): return unprotect_text(self.values.get('protected_cinematic_webhook',''))
+    def cinematic_webhook(self):
+        try:custom=unprotect_text(self.values.get('protected_cinematic_webhook',''))
+        except Exception:custom=''
+        return custom.strip() or BUILTIN_CINEMATIC_WEBHOOK
     def set_cinematic_webhook(self,value): self.values['protected_cinematic_webhook']=protect_text(value.strip())
 def valid_mp4(data):
     return len(data)>=1024 and data[4:8]==b'ftyp' and b'moov' in data and b'mdat' in data

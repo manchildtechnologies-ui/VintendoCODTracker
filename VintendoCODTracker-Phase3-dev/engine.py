@@ -10,15 +10,20 @@ from security import protect_text, unprotect_text
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 DATA = Path(os.environ.get('VINTENDO_DATA_DIR', str(Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'Vintendo COD Tracker')))
 MATCH_POSTER_PROMPT_MARKER = 'VERIFIED MATCH POSTER REQUEST v3'
-DEFAULTS = dict(mode='Solo Ops', player='vintendo', stats_dir='', poll_seconds=5, warzone_enabled=False,
-                protected_webhook='', provider='Meta AI manual handoff',
-                auto_detect=False, auto_post=True, photos_consent=False, allow_both=False, roi=None,
+DEFAULTS = dict(mode='Solo Ops', player='vintendo', stats_dir='', poll_seconds=5,
+                protected_webhook='', codmunity_email='', protected_codmunity_refresh='',
+                provider='Meta AI manual handoff',
+                auto_detect=False, auto_post=True, full_auto=True, include_stats=True, warzone_enabled=True, photos_consent=False, allow_both=False, roi=None,
+                codmunity_username='', codmunity_uid='', codmunity_display_name='', codmunity_link_email='',
+                codmunity_avatar='', codmunity_bio='', codmunity_followers=0, codmunity_loadouts=0, codmunity_likes=0,
+                dmz_schema_version=0,
                 monitor=0, scoreboard_profile='auto', profile_url='', career_summary_every_matches=10,
                 browser_navigation_timeout=60, browser_download_timeout=1800, browser_retries=1,
                 scoreboard_hotkey_vk=0x77, scoreboard_hotkey_mod=0x0002|0x0004,
                 screenshot_hotkey_vk=0x77, screenshot_hotkey_mod=0x0002,
                 screenshots_dir='', videos_dir='',
-                webhook_channel='', cinematic_webhook_channel='')
+                webhook_channel='', cinematic_webhook_channel='',
+                autotrack_enabled=True, autotrack_source='game')
 
 def read_json(path, default=None):
     try: return json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -48,9 +53,16 @@ class Settings:
             # The requested Squad Night flow posts automatically after the user
             # downloads the generated image. Preserve an explicit future opt-out.
             self.values['auto_post']=True;self.values['squad_auto_post_version']=1;self.save()
+        if int(stored.get('dmz_schema_version',0))<1:
+            # DMZ Command Center local store (dmz_checkmarks table, created
+            # idempotently in Store.__init__); stamp so the migration runs once.
+            self.values['dmz_schema_version']=1;self.save()
     def save(self): atomic_json(self.path,self.values)
     def webhook(self): return unprotect_text(self.values.get('protected_webhook',''))
     def set_webhook(self,value): self.values['protected_webhook']=protect_text(value.strip())
+    def codmunity_email(self): return str(self.values.get('codmunity_email','') or '')
+    def codmunity_refresh_token(self): return unprotect_text(self.values.get('protected_codmunity_refresh',''))
+    def set_codmunity_refresh_token(self,value): self.values['protected_codmunity_refresh']=protect_text(value.strip())
     def cinematic_webhook(self): return unprotect_text(self.values.get('protected_cinematic_webhook',''))
     def set_cinematic_webhook(self,value): self.values['protected_cinematic_webhook']=protect_text(value.strip())
 def valid_mp4(data):
@@ -303,9 +315,10 @@ STAT_ALIASES={
     'death':'deaths','deaths':'deaths','damage':'damage','assist':'assists','assists':'assists','score':'score',
     'placement':'placement','place':'placement','position':'placement','redeploy':'redeploys','redeploys':'redeploys',
     'revive':'revives','revives':'revives','headshot':'headshots','headshots':'headshots','objective':'objective','objectives':'objectives',
-    'captures':'captures','capture':'captures','downs':'downs','down':'downs','wins':'wins','win':'wins','streak':'streak',
+    'captures':'captures','capture':'captures','downs':'downs','down':'downs','wins':'wins','win':'wins','loss':'losses','losses':'losses','streak':'streak',
     'kd':'kd','kdratio':'kd','objective':'objective','objectives':'objectives',
-    'objtime':'objective_time','objectivetime':'objective_time'
+    'objtime':'objective_time','objectivetime':'objective_time',
+    'games':'games','matches':'games','match':'games'
 }
 
 def _parse_scoreboard_spatial(text,ocr_tokens,profile=None,region_width=None):
@@ -477,6 +490,175 @@ def parse_scoreboard(text,ocr_tokens=None,profile=None,region_width=None):
                     rows.append(dict(name=name,stats={},verified=False,source='ocr',confidence='review_required'))
     rows.sort(key=lambda row:sum(value is not None for value in row.get('stats',{}).values()),reverse=True)
     return rows[:16]
+
+# ---------------------------------------------------------------------------
+# Phase 1 local-only autotrack parsers (SINGLE_EXE_DESIGN §4).
+#
+# Every parser is side-effect free and returns None on non-matching input;
+# nothing is fabricated. "Not used" reasons reuse the exe vocabulary
+# (NoResult, NotLifetimeMultiplayer, Missing(columns), OtherMode) so
+# autotrack logs stay comparable. No cloud / desktop-read path exists here.
+# ---------------------------------------------------------------------------
+
+_PARSER_MODE_PATTERNS=[
+    ('resurgence','Resurgence','resurgence'),
+    ('battle royale','Battle Royale','battle_royale'),
+    ('plunder','Plunder','plunder'),
+    ('kill confirmed','Kill Confirmed','kill_confirmed'),
+    ('team deathmatch','Team Deathmatch','team_deathmatch'),
+    ('free for all','Free-for-All','free_for_all'),
+    ('hardpoint','Hardpoint','hardpoint'),
+    ('domination','Domination','domination'),
+    ('search and destroy','Search and Destroy','search_destroy'),
+    ('control','Control','control'),
+    ('ranked play','Ranked Play','ranked_play'),
+    ('multiplayer','Multiplayer','multiplayer'),
+    ('warzone','Warzone','warzone'),
+]
+
+def _parser_lines(text):
+    return [line.strip() for line in str(text or '').splitlines() if line.strip()]
+
+def _parser_result(text):
+    raw=str(text or '')
+    if re.search(r'\b(victory|victorious|you win|winner)\b',raw,re.I):return 'Victory'
+    if re.search(r'\b(defeat|defeated|you lose|you lost)\b',raw,re.I):return 'Defeat'
+    return ''
+
+def _parser_mode(text):
+    raw=str(text or '')
+    for needle,label,key in _PARSER_MODE_PATTERNS:
+        if re.search(r'\b'+re.escape(needle)+r'\b',raw,re.I):return label,key
+    return '',''
+
+def _parser_int(cleaned):
+    try:
+        cleaned=str(cleaned).replace(',','').strip()
+        if re.fullmatch(r'\d+',cleaned):return int(cleaned)
+        if re.fullmatch(r'\d+\.\d+',cleaned):return float(cleaned)
+    except (TypeError,ValueError):pass
+    return None
+
+def parse_after_action(text,ocr_tokens=None):
+    """P1: read an after-action report; None when the gate is not met."""
+    raw=str(text or '')
+    if not raw.strip():return None
+    if not re.search(r'\bafter\s+action\b',raw,re.I):return None
+    result=_parser_result(raw)
+    if not result:return None
+    headings={'kill','kills','damage','assist','assists','score','elimination','eliminations','death','deaths','objective','captures','downs'}
+    found=set(re.findall(r'[a-z]+',raw.casefold()))
+    if not (found & headings) and not any(word in found for word in ('objtime','objectivetime')):return None
+    mode_label,mode_key=_parser_mode(raw)
+    score_own=None;score_opp=None
+    for line in _parser_lines(raw):
+        numbers=[_parser_int(token) for token in re.split(r'\s{2,}|\t|\|',line) if re.fullmatch(r'[\d,]+',token.strip())]
+        numbers=[n for n in numbers if n is not None]
+        low=line.casefold()
+        if ('your score' in low or ('team' in low and 'score' in low)) and len(numbers)>=1 and score_own is None:
+            score_own=int(numbers[0])
+        if ('enemy' in low or 'opponent' in low) and len(numbers)>=1 and score_opp is None:
+            score_opp=int(numbers[0])
+        if ' : ' in line or re.search(r'\d\s*[:\-–]\s*\d',line):
+            pair=[int(n) for n in re.findall(r'\b\d{1,3}\b',line)]
+            if len(pair)>=2 and score_own is None:score_own,score_opp=int(pair[0]),int(pair[1])
+    players=parse_scoreboard(raw,ocr_tokens=ocr_tokens) if ocr_tokens else parse_scoreboard(raw)
+    return {'parser':'after_action','mode':mode_label,'modeKey':mode_key or 'multiplayer',
+            'result':result,'scoreOwn':score_own,'scoreOpp':score_opp,
+            'players':players,'text':raw,'lines':_parser_lines(raw),'tokens':list(ocr_tokens or [])}
+
+def _combat_record_is_lifetime(raw):
+    low=str(raw or '').casefold()
+    if ('warzone' in low or 'resurgence' in low or 'battle royale' in low) and 'multiplayer' not in low:return False
+    return bool('multiplayer' in low or 'lifetime' in low or 'mw4' in low or 'career' in low or 'top stats' in low)
+
+def combat_record_reason(text):
+    """Return the exe 'not used' reason for a combat-record capture, or None."""
+    raw=str(text or '')
+    if not raw.strip():return 'NoResult'
+    if not re.search(r'\bcombat\s+record\b',raw,re.I):return None
+    if not _combat_record_is_lifetime(raw):return 'NotLifetimeMultiplayer'
+    record=_extract_combat_record(raw)
+    if record is None:return 'NoResult'
+    if not any(record.get(key) is not None for key in ('kd_num','kd_den','wins','losses','games')):return 'NoResult'
+    return None
+
+def _extract_combat_record(raw):
+    kd_num=None;kd_den=None;wins=None;losses=None;games=None
+    match=re.search(r'k\s*/\s*d\s*[:\-]?\s*([\d,]+)\s*/\s*([\d,]+)',raw,re.I)
+    if match:kd_num=_parser_int(match.group(1));kd_den=_parser_int(match.group(2))
+    else:
+        kills=re.search(r'\bkills?\s*[:\-]?\s*([\d,]+)',raw,re.I)
+        deaths=re.search(r'\bdeaths?\s*[:\-]?\s*([\d,]+)',raw,re.I)
+        if kills and deaths:kd_num=_parser_int(kills.group(1));kd_den=_parser_int(deaths.group(1))
+    wl=re.search(r'\bwins?\s*[:\-]?\s*([\d,]+)\s*[/:]\s*([\d,]+)',raw,re.I)
+    if wl:wins=_parser_int(wl.group(1));losses=_parser_int(wl.group(2))
+    else:
+        w=re.search(r'\bwins?\s*[:\-]?\s*([\d,]+)',raw,re.I);l=re.search(r'\blosses?\s*[:\-]?\s*([\d,]+)',raw,re.I)
+        if w and l:wins=_parser_int(w.group(1));losses=_parser_int(l.group(1))
+    g=re.search(r'\bgames?\s*[:\-]?\s*([\d,]+)',raw,re.I) or re.search(r'\bmatches\s*[:\-]?\s*([\d,]+)',raw,re.I)
+    if g:games=_parser_int(g.group(1))
+    return {'parser':'combat_record','game':'mw4','mode':'multiplayer','scope':'lifetime',
+            'kd_num':kd_num,'kd_den':kd_den,'wins':wins,'losses':losses,'games':games,
+            'raw':raw,'lines':_parser_lines(raw)}
+
+def parse_combat_record(text,ocr_tokens=None):
+    """P2: read an MW4 lifetime combat-record card; None + reason via combat_record_reason."""
+    raw=str(text or '')
+    if not re.search(r'\bcombat\s+record\b',raw,re.I):return None
+    if not _combat_record_is_lifetime(raw):return None
+    record=_extract_combat_record(raw)
+    if not any(record.get(key) is not None for key in ('kd_num','kd_den','wins','losses','games')):return None
+    return record
+
+def parse_warzone_summary(text,ocr_tokens=None,profile='warzone'):
+    """P3: read a Warzone end-of-match summary; placement only, never invented."""
+    raw=str(text or '')
+    if not raw.strip():return None
+    low=raw.casefold()
+    if not ('warzone summary' in low or ('warzone' in low and ('summary' in low or 'placement' in low or 'squad' in low))):return None
+    placement=None
+    found=re.search(r'\b(\d{1,3})(?:st|nd|rd|th)\s+(?:place|position)\b|\b(?:placement|place|position)\s*[:#-]?\s*(\d{1,3})(?:st|nd|rd|th)?\b',raw,re.I)
+    if found:placement=_parser_int(next((part for part in found.groups() if part),'')) or None
+    if placement is None:return None
+    mode_label,mode_key=_parser_mode(raw)
+    players=parse_scoreboard(raw,ocr_tokens=ocr_tokens,profile=profile if profile in ('warzone','multiplayer') else 'warzone')
+    result=_parser_result(raw) or ('Victory' if placement==1 else 'Defeat')
+    return {'parser':'warzone_summary','mode':mode_label,'modeKey':mode_key,'placement':placement,
+            'result':result,'profile':'warzone','players':players,
+            'text':raw,'lines':_parser_lines(raw),'tokens':list(ocr_tokens or [])}
+
+_CAMO_WEAPON_CLASSES=('assault rifle','submachine gun','smg','sniper','marksman rifle','light machine gun','lmg','shotgun','handgun','pistol','launcher','melee','battle rifle','burst rifle')
+
+def parse_camo_challenge(text,lines=None):
+    """P4: read a camo/challenge popup; None when no weapon class is present."""
+    raw=str(text or '')
+    if not raw.strip():return None
+    low=raw.casefold()
+    if not (re.search(r'\bchallenge\b',low) or re.search(r'\bcamo\b',low)):return None
+    weapon=next((label for label in _CAMO_WEAPON_CLASSES if re.search(r'\b'+re.escape(label)+r'\b',low)),'')
+    if not weapon:return None
+    camo=''
+    found=re.search(r'\bcamo(?:flage)?\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 \'\-]{1,30})',raw,re.I)
+    if found:camo=found.group(1).strip()
+    changed=[]
+    for first,second in re.findall(r'([A-Za-z][A-Za-z0-9 \'\-]{1,40})\s*[-–]\s*([A-Za-z][A-Za-z0-9 \'\-]{1,30})',raw):
+        if re.search(r'[A-Za-z]',first) and re.search(r'[A-Za-z]',second):changed.append([first,weapon,f'{first}-{second}'])
+    read_rect=[line.strip() for line in (lines if lines is not None else _parser_lines(raw)) if str(line).strip()]
+    return {'parser':'camo_challenge','weapon':weapon,'camo':camo,'grind':'mw4','changed':changed,'read':read_rect}
+
+def parse_banner_hud(text,lines=None):
+    """P5: read a HUD banner hint (mode/squad count only, PII-free, log only)."""
+    raw=str(text or '')
+    if not raw.strip():return None
+    low=raw.casefold()
+    if not ('banner' in low or 'hud read' in low or re.search(r'\b\d{1,3}\s+squads?\b',low)):return None
+    squads=None
+    found=re.search(r'\b(\d{1,3})\s+squads?\b',raw,re.I)
+    if found:squads=_parser_int(found.group(1))
+    mode_label,mode_key=_parser_mode(raw)
+    hint=(f'{squads} squads' if squads is not None else 'banner') + (f' {mode_label}' if mode_label else '')
+    return {'parser':'banner_hud','squads':squads,'mode':mode_label,'modeKey':mode_key,'hint':hint,'read':[line.strip() for line in (lines if lines is not None else _parser_lines(raw)) if str(line).strip()]}
 
 def extract_match_context(match=None, ocr_text=''):
     """Use explicit CODMunity fields first, then only facts read from scoreboard OCR."""
@@ -664,12 +846,18 @@ class Store:
             CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY,status TEXT,created REAL,message_id TEXT,error TEXT);''')
             c.execute('CREATE TABLE IF NOT EXISTS match_aliases(alias TEXT PRIMARY KEY,match_id TEXT NOT NULL)')
             c.execute("CREATE TABLE IF NOT EXISTS cinematic_jobs(id TEXT PRIMARY KEY,filename TEXT NOT NULL,image TEXT NOT NULL,prompt TEXT NOT NULL,status TEXT NOT NULL,video TEXT DEFAULT '',error TEXT DEFAULT '',created REAL,updated REAL)")
+            c.executescript('''CREATE TABLE IF NOT EXISTS lifetime_snapshots(id TEXT PRIMARY KEY, at REAL, game TEXT, mode TEXT, scope TEXT, kd_num INTEGER DEFAULT 0, kd_den INTEGER DEFAULT 0, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, games INTEGER DEFAULT 0, raw TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS camo_detections(id TEXT PRIMARY KEY, at REAL, weapon TEXT, camo TEXT, grind TEXT DEFAULT 'mw4', state TEXT DEFAULT 'saved', changed TEXT DEFAULT '[]', read TEXT DEFAULT '[]', error TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS dmz_checkmarks(key TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'done', updated REAL);
+            CREATE TABLE IF NOT EXISTS tracking_feed(id INTEGER PRIMARY KEY, at INTEGER, kind TEXT, state TEXT, reason TEXT, data TEXT DEFAULT '{}');
+            CREATE TABLE IF NOT EXISTS sync_outbox(id TEXT PRIMARY KEY, kind TEXT, match_id TEXT DEFAULT '', status TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0, next_at REAL DEFAULT 0, error TEXT DEFAULT '', created REAL, updated REAL);''')
             columns={row[1] for row in c.execute('PRAGMA table_info(matches)')}
             for name,ddl in (('artwork',"TEXT DEFAULT ''"),('poster',"TEXT DEFAULT ''"),
                              ('gen_state',"TEXT DEFAULT 'idle'"),('gen_attempts','INTEGER DEFAULT 0')):
                 if name not in columns:c.execute(f'ALTER TABLE matches ADD COLUMN {name} {ddl}')
             cine_columns={row[1] for row in c.execute('PRAGMA table_info(cinematic_jobs)')}
             if 'talent_ids' not in cine_columns:c.execute("ALTER TABLE cinematic_jobs ADD COLUMN talent_ids TEXT DEFAULT ''")
+            if 'attempts' not in cine_columns:c.execute("ALTER TABLE cinematic_jobs ADD COLUMN attempts INTEGER DEFAULT 0")
             c.execute("INSERT OR IGNORE INTO deliveries SELECT id||'|squad','delivered',updated,message_id,'' FROM matches WHERE status='delivered'")
             c.execute("INSERT OR IGNORE INTO deliveries SELECT id||'|solo','delivered',updated,message_id,'' FROM matches WHERE status='solo_delivered'")
             c.execute("UPDATE matches SET status='needs_review',error='Interrupted job; review before retry' WHERE status='generating'")
@@ -698,7 +886,7 @@ class Store:
             cur=c.execute("UPDATE cinematic_jobs SET status='running',updated=? WHERE id=? AND status='queued'",(time.time(),job_id))
             return cur.rowcount==1
     def update_cinematic(self,job_id,**values):
-        allowed={'status','video','error','talent_ids'}
+        allowed={'status','video','error','talent_ids','attempts'}
         if not values or not set(values)<=allowed:raise ValueError('Invalid cinematic job update')
         values['updated']=time.time()
         with self.connect() as c:
@@ -820,6 +1008,71 @@ class Store:
             row=c.execute('SELECT value FROM meta WHERE key=?',(key,)).fetchone(); return json.loads(row[0]) if row else default
     def set_meta(self,key,value):
         with self.connect() as c:c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',(key,json.dumps(value)))
+    def log_autotrack(self,message):
+        """Append one line to the capped autotrack log tail (meta, never Discord)."""
+        stamp=time.strftime('%Y-%m-%d %H:%M:%S')
+        line=f'{stamp} {str(message)[:500]}'
+        with self.connect() as c:
+            row=c.execute('SELECT value FROM meta WHERE key=?',('autotrack_log_tail',)).fetchone()
+            tail=json.loads(row[0]) if row else []
+            if not isinstance(tail,list):tail=[]
+            tail.append(line);tail=tail[-200:]
+            c.execute('INSERT OR REPLACE INTO meta VALUES(?,?)',('autotrack_log_tail',json.dumps(tail)))
+        return line
+    def autotrack_log_tail(self,limit=200):
+        tail=self.meta('autotrack_log_tail',[]) or []
+        return list(tail)[-max(1,int(limit)):] if isinstance(tail,list) else []
+    def enqueue_sync(self,kind,match_id=''):
+        """Queue one local outbox row; no network dispatch happens here."""
+        outbox_id=hashlib.sha256((str(kind)+'|'+str(match_id)+'|'+str(time.time())+'|'+uuid.uuid4().hex).encode()).hexdigest()
+        with self.connect() as c:
+            c.execute('INSERT OR IGNORE INTO sync_outbox(id,kind,match_id,status,attempts,next_at,error,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',(outbox_id,str(kind),str(match_id or ''),'pending',0,0,'',time.time(),time.time()))
+        return outbox_id
+    def pending_sync(self,limit=10):
+        with self.connect() as c:
+            return [dict(r) for r in c.execute('SELECT * FROM sync_outbox WHERE status=? AND next_at<=? ORDER BY created LIMIT ?' ,('pending',time.time(),max(1,min(int(limit),50))))]
+    def mark_sync(self,outbox_id,status,error='',next_at=None):
+        allowed={'pending','delivered','failed'}
+        if status not in allowed:raise ValueError('Invalid sync status')
+        with self.connect() as c:
+            cur=c.execute('UPDATE sync_outbox SET status=?,error=?,updated=? WHERE id=? AND status!=?',(status,str(error or ''),time.time(),outbox_id,'delivered'))
+            return cur.rowcount==1
+    def save_lifetime_snapshot(self,record):
+        snap=dict(record or {})
+        snap_id=str(snap.get('id') or hashlib.sha256((json.dumps(snap,sort_keys=True)+str(time.time())).encode()).hexdigest())
+        with self.connect() as c:
+            c.execute('INSERT OR IGNORE INTO lifetime_snapshots(id,at,game,mode,scope,kd_num,kd_den,wins,losses,games,raw) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(snap_id,float(snap.get('at') or time.time()),str(snap.get('game','')),str(snap.get('mode','')),str(snap.get('scope','lifetime')),int(snap.get('kd_num') or 0),int(snap.get('kd_den') or 0),int(snap.get('wins') or 0),int(snap.get('losses') or 0),int(snap.get('games') or 0),str(snap.get('raw') or snap.get('text') or '')))
+        return snap_id
+    def lifetime_snapshots(self,limit=50):
+        with self.connect() as c:return [dict(r) for r in c.execute('SELECT * FROM lifetime_snapshots ORDER BY at DESC LIMIT ?',(max(1,min(int(limit),200)),))]
+    def save_camo_detection(self,detection):
+        det=dict(detection or {})
+        det_id=str(det.get('id') or hashlib.sha256((json.dumps(det,sort_keys=True)+str(time.time())).encode()).hexdigest())
+        with self.connect() as c:
+            c.execute('INSERT OR IGNORE INTO camo_detections(id,at,weapon,camo,grind,state,changed,read,error) VALUES(?,?,?,?,?,?,?,?,?)',(det_id,float(det.get('at') or time.time()),str(det.get('weapon','')),str(det.get('camo','')),str(det.get('grind','mw4')),str(det.get('state','saved')),json.dumps(list(det.get('changed') or [])),json.dumps(list(det.get('read') or [])),str(det.get('error','') or '')))
+        return det_id
+    def camo_detections(self,limit=50):
+        with self.connect() as c:return [dict(r) for r in c.execute('SELECT * FROM camo_detections ORDER BY at DESC LIMIT ?',(max(1,min(int(limit),200)),))]
+    def save_dmz_checkmark(self,key,state='done'):
+        key=str(key or '').strip()
+        if not key:raise ValueError('DMZ checkmark key is required')
+        with self.connect() as c:
+            c.execute('INSERT OR REPLACE INTO dmz_checkmarks(key,state,updated) VALUES(?,?,?)',(key,str(state or 'done'),time.time()))
+        return True
+    def dmz_checkmarks(self,limit=500):
+        with self.connect() as c:return [dict(r) for r in c.execute('SELECT * FROM dmz_checkmarks ORDER BY updated DESC LIMIT ?',(max(1,min(int(limit),1000)),))]
+    def delete_dmz_checkmark(self,key):
+        key=str(key or '').strip()
+        if not key:raise ValueError('DMZ checkmark key is required')
+        with self.connect() as c:
+            c.execute('DELETE FROM dmz_checkmarks WHERE key=?',(key,))
+        return True
+    def record_tracking_feed(self,kind,state,reason='',data=None):
+        with self.connect() as c:
+            cur=c.execute('INSERT INTO tracking_feed(at,kind,state,reason,data) VALUES(?,?,?,?,?)',(int(time.time()),str(kind),str(state),str(reason or ''),json.dumps(data or {},ensure_ascii=False)))
+            return cur.lastrowid
+    def tracking_feed(self,limit=50):
+        with self.connect() as c:return [dict(r) for r in c.execute('SELECT * FROM tracking_feed ORDER BY at DESC, id DESC LIMIT ?',(max(1,min(int(limit),200)),))]
 
 def load_matches(settings):
     m=legacy(); directory=m.find_stats_dir(settings)

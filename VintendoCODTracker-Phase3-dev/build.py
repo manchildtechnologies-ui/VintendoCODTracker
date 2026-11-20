@@ -37,6 +37,7 @@ arguments=[
     '--icon',str(ROOT/'tracker.ico'),
     '--paths',str(ROOT/'core'/'legacy'),'--paths',str(ROOT/'tests'),
     '--hidden-import','vintendo_tracker','--hidden-import','achievements','--hidden-import','graphics',
+    '--hidden-import','autotrack','--hidden-import','capture_utils','--hidden-import','capture_engine',
     '--hidden-import','codmunity_share','--hidden-import','test_core','--hidden-import','test_ui',
     '--hidden-import','test_squad_queue',
     '--hidden-import','codmunity_stats','--hidden-import','test_codmunity_stats',

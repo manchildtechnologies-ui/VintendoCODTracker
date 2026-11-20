@@ -6,7 +6,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
 trackerExe = root & "\VintendoCODTracker.exe"
 pendingExe = root & "\VintendoCODTracker.pending.exe"
-dataDir = root & "\browser-e2e-work\chrome-test-data"
+dataDir = root & "\browser-e2e-work\chrome-test-data" ' legacy path (unused; VINTENDO_DATA_DIR override removed so data lives in %LOCALAPPDATA%)
 localApp = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%")
 codmunity = localApp & "\CODMunity Desktop\codmunity-desktop.exe"
 
@@ -71,7 +71,7 @@ Else
 End If
 
 Set processEnv = sh.Environment("PROCESS")
-processEnv("VINTENDO_DATA_DIR") = dataDir
+' Single data home: %LOCALAPPDATA%\Vintendo COD Tracker (no VINTENDO_DATA_DIR override).
 processEnv("VINTENDO_TRACK_BOTH") = "1"
 processEnv("VINTENDO_AUTO_START_TRACKING") = "1"
 currentPath = sh.ExpandEnvironmentStrings("%PATH%")
@@ -85,6 +85,6 @@ Next
 processEnv("PATH") = cleanPath
 sh.CurrentDirectory = root
 
-If Not hasCodmunity And fso.FileExists(codmunity) Then sh.Run Chr(34) & codmunity & Chr(34) & " --start-minimized", 0, False
+' Single-app build: never auto-start the external desktop app.
 
 sh.Run Chr(34) & trackerExe & Chr(34), 1, False

@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import engine as E
 import player_stats_service as S
+from codmunity_player_stats import AuthError, upload_tracked_matches
 
 DIST = {'game': 'warzone', 'mode': 'resurgence', 'scope': 'lifetime',
         'kd': [0.8, 1.0, 1.5, 2.0, 2.75, 3.47, 4.2, 4.94, 5.86, 7.43, 8.84, 12.03],
@@ -68,6 +69,54 @@ class ServiceTests(unittest.TestCase):
         _win(self.store)
         snap = S.snapshot_for_player(self.store, goomy, 'warzone', 'battle_royale', 'lifetime')
         self.assertIsNone(snap['rank'])
+
+    def test_tiny_sample_snapshot_has_no_rank(self):
+        tiny = dict(DIST, kd=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
+                    sampled=10, users_total=12)
+        self.store.set_meta('codmunity_public_distributions',
+                            {'warzone|resurgence|lifetime': tiny})
+        player = next(p for p in self.store.roster() if p['id'] == 'rank-a')
+        _win(self.store)
+        snap = S.snapshot_for_player(self.store, player, 'warzone', 'resurgence', 'lifetime')
+        self.assertEqual(snap['kd'], 3.41)
+        self.assertIsNone(snap['rank'])
+        self.assertEqual(snap['distribution']['sampled'], 10)
+
+    def test_tracked_upload_posts_verified_store_rows(self):
+        posted = []
+
+        class _FakeAuth:
+            def post_json(self, route, body):
+                posted.append((route, dict(body)))
+                if body.get('matchId') == 'bad-1':
+                    raise AuthError('HTTP 400 rejected')
+                return {}
+
+        good = {'matchId': 'up-1', 'modeKey': 'resurgence', 'playedAt': '2026-11-10T12:00:00Z',
+                'result': 'win', 'stats': {'kills': 5},
+                'players': [{'name': 'Vintendo', 'verified': True, 'stats': {'kills': 5}}]}
+        self.store.add(dict(good))
+        bad = dict(good, matchId='bad-1', playedAt='2026-11-10T13:00:00Z', result='loss')
+        self.store.add(bad)
+        unverified = dict(good, matchId='nov-1', playedAt='2026-11-10T14:00:00Z',
+                          players=[{'name': 'Vintendo'}])
+        self.store.add(unverified)
+        baseline = dict(good, matchId='file-1', playedAt='2026-11-10T15:00:00Z')
+        self.store.add(baseline, 'baseline')
+        summary = upload_tracked_matches(_FakeAuth(), self.store)
+        self.assertEqual(summary['uploaded'], 1)
+        self.assertEqual([f['matchId'] for f in summary['failed']], ['bad-1'])
+        routes = {route for route, _ in posted}
+        self.assertEqual(routes, {'/api/app/matches'})
+        posted_ids = [body.get('matchId') for _, body in posted]
+        self.assertIn('up-1', posted_ids)
+        self.assertNotIn('nov-1', posted_ids)
+        self.assertNotIn('file-1', posted_ids)
+        self.assertIn('up-1', self.store.meta('codmunity_uploaded_match_ids', []))
+        again = upload_tracked_matches(_FakeAuth(), self.store)
+        self.assertEqual(again['uploaded'], 0)
+        self.assertEqual(again['skipped'], 1)
+        self.assertEqual([f['matchId'] for f in again['failed']], ['bad-1'])
 
     def test_stored_lifetime_kd_wins_over_tracked_sample(self):
         player = next(p for p in self.store.roster() if p['id'] == 'rank-a')

@@ -39,9 +39,13 @@ class LauncherSingleInstanceTests(unittest.TestCase):
                      "desktop launcher VBS is a local-only file")
     def test_desktop_launcher_quits_when_tracker_running(self):
         text = read_vbs(DESKTOP_VBS)
+        self.assertIsNotNone(
+            re.search(r'trackerExe\s*=\s*root\s*&\s*"\\VintendoCODTracker\.exe"',
+                      text, re.IGNORECASE),
+            "desktop VBS must default its launch target to VintendoCODTracker.exe")
         self.assertTrue(
-            guard_before_launch(text, r"vintendocodtracker\.exe",
-                                r"sh\.Run.*VintendoCODTracker\.exe"),
+            guard_before_launch(text, r"If hasTracker Then",
+                                r"sh\.Run.*trackerExe"),
             "desktop VBS must check for VintendoCODTracker.exe and quit "
             "before launching the exe again")
         self.assertIsNotNone(
@@ -65,15 +69,16 @@ class LauncherSingleInstanceTests(unittest.TestCase):
     def test_desktop_launcher_starts_visible(self):
         text = read_vbs(DESKTOP_VBS)
         self.assertIsNotNone(
-            re.search(r"sh\.Run.*VintendoCODTracker\.exe.*,\s*1,\s*False",
+            re.search(r"sh\.Run.*trackerExe.*,\s*1,\s*False",
                        text, re.IGNORECASE),
             "desktop VBS must launch the tracker with a normal window so "
             "it appears on screen")
-        self.assertIsNone(
-            re.search(r"sh\.Run.*VintendoCODTracker\.exe.*,\s*0,\s*False",
-                       text, re.IGNORECASE),
-            "desktop VBS must not launch the tracker hidden: hidden starts "
-            "run with no window while tracking")
+        for line in text.splitlines():
+            if re.search(r"sh\.Run", line, re.IGNORECASE):
+                self.assertIsNone(
+                    re.search(r",\s*0\s*,", line),
+                    "desktop VBS must not launch the tracker hidden: hidden starts "
+                    "run with no window while tracking")
 
     def test_dev_launcher_starts_visible(self):
         text = read_vbs(DEV_VBS)

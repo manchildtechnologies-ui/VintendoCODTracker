@@ -82,3 +82,38 @@ def looks_like_scoreboard(lines: list[str]) -> bool:
     has_player_column = any(re.search(r"\b"+word+r"\b", text) for word in ("player", "players", "username", "gamertag", "operator"))
     numeric_rows = sum(1 for line in lines if re.search(r"\d", line))
     return has_player_column and heading_hits >= 2 and numeric_rows >= 4 and len(lines) >= 5
+
+def _gate_text(lines) -> str:
+    try:return " ".join(str(line) for line in (lines or []))
+    except Exception:return str(lines or "")
+
+def looks_like_after_action(lines: list[str]) -> bool:
+    """After-action report words plus a result and at least one stat heading."""
+    text = _gate_text(lines).casefold()
+    if not re.search(r"\bafter\s+action\b", text):return False
+    has_result = bool(re.search(r"\b(victory|victorious|you win|winner|defeat|defeated|you lose|you lost)\b", text))
+    has_stat = any(re.search(r"\b"+word+r"\b", text) for word in ("kill", "kills", "damage", "assist", "assists", "score", "elimination", "eliminations", "death", "deaths", "objective", "captures", "downs"))
+    return has_result and has_stat
+
+def looks_like_combat_record(lines: list[str]) -> bool:
+    """Combat Record words; lifetime validity is decided by the parser reason."""
+    text = _gate_text(lines).casefold()
+    return bool(re.search(r"\bcombat\s+record\b", text))
+
+def looks_like_warzone_summary(lines: list[str]) -> bool:
+    """Warzone summary/placement words plus squad or placement language."""
+    text = _gate_text(lines).casefold()
+    if "warzone summary" in text:return True
+    if "warzone" not in text:return False
+    return any(word in text for word in ("summary", "placement", "squad"))
+
+def looks_like_camo_challenge(lines: list[str]) -> bool:
+    """Challenge/camo words plus a weapon class label."""
+    text = _gate_text(lines).casefold()
+    if not (re.search(r"\bchallenge\b", text) or re.search(r"\bcamo\b", text)):return False
+    return any(re.search(r"\b"+re.escape(name)+r"\b", text) for name in ("assault rifle", "submachine gun", "smg", "sniper", "marksman rifle", "light machine gun", "lmg", "shotgun", "handgun", "pistol", "launcher", "melee", "battle rifle", "burst rifle"))
+
+def looks_like_banner_hud(lines: list[str]) -> bool:
+    """HUD banner words or a squad-count pattern; PII-free hint only."""
+    text = _gate_text(lines).casefold()
+    return bool("banner" in text or "hud read" in text or re.search(r"\b\d{1,3}\s+squads?\b", text))

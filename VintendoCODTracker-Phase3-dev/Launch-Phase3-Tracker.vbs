@@ -33,11 +33,11 @@ If hasTracker Then
     WScript.Quit 0
 End If
 Set processEnv = sh.Environment("PROCESS")
-processEnv("VINTENDO_DATA_DIR") = dataDir
+' Single data home: %LOCALAPPDATA%\Vintendo COD Tracker (no VINTENDO_DATA_DIR override).
 processEnv("VINTENDO_TRACK_BOTH") = "1"
 processEnv("VINTENDO_AUTO_START_TRACKING") = "1"
 sh.CurrentDirectory = root
 
-If Not hasCodmunity And fso.FileExists(codmunity) Then sh.Run Chr(34) & codmunity & Chr(34) & " --start-minimized", 0, False
+' Single-app build: never auto-start the external desktop app.
 
 sh.Run Chr(34) & root & "\.venv\Scripts\pythonw.exe" & Chr(34) & " " & Chr(34) & root & "\launcher.py" & Chr(34), 1, False

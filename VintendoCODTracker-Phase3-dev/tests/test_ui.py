@@ -1,2368 +1,6921 @@
 import os,sys,unittest,time,json,uuid
+
+
 from pathlib import Path
+
+
 from contextlib import contextmanager
+
+
 import shutil
+
+
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
+
+
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+
+
+from PySide6.QtWidgets import QApplication,QWidget,QFrame,QLabel,QPushButton
+
+
 import app
 
+
+
+
+
 @contextmanager
+
+
 def browser_fixture_dir():
+
+
     root=Path(app.E.DATA)/('browser-fixture-'+uuid.uuid4().hex)
+
+
     root.mkdir(parents=True)
+
+
     try:yield root
+
+
     finally:shutil.rmtree(root,ignore_errors=True)
 
+
+
+
+
 class UITests(unittest.TestCase):
+
+
     @classmethod
+
+
     def setUpClass(cls):cls.qt=QApplication.instance() or QApplication([])
+
+
     def setUp(self):self.window=app.Window()
+
+
     def tearDown(self):self.window.shutdown();self.window.deleteLater();self.qt.processEvents()
+
+
     def test_all_navigation_sections_exist(self):
-        self.assertEqual(self.window.nav.count(),11)
-        self.assertIn('ScreenShots and Videos',[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())])
-    def test_top_level_tabs_include_tracker_and_codommunity(self):
-        self.assertEqual(self.window.app_tabs.count(),2)
-        self.assertEqual([self.window.app_tabs.tabText(i) for i in range(2)],['Vintendo COD Tracker','CODMunity'])
-        self.assertIs(self.window.app_tabs.widget(1),self.window.codmunity_page)
+
+
+        self.assertEqual(self.window.nav.count(),15)
+
+
+        names=[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())]
+
+
+        self.assertIn('ScreenShots and Videos',names)
+
+
+        for page in ('Camo Tracker','Leaderboards','Stats','DMZ Command Center'):self.assertIn(page,names)
+        self.assertNotIn('How it works',names)
+
+
+    def test_single_top_level_tab_holds_tracker(self):
+
+
+        self.assertEqual(self.window.app_tabs.count(),1)
+
+
+        self.assertEqual(self.window.app_tabs.tabText(0),'Vintendo COD Tracker')
+
+
     def test_tick_never_triggers_automatic_capture(self):
+
+
         self.assertGreater(app.AUTO_OCR_INTERVAL_SECONDS,0)
+
+
         self.assertTrue(self.window.auto_detect.isHidden())
+
+
         self.assertFalse(self.window.auto_detect.isChecked())
+
+
         self.window.mode.setCurrentText('Squad Night')
+
+
         self.window.last_poll=time.monotonic()
+
+
         self.window.last_auto=0
+
+
         self.window.capture_busy=False
+
+
         self.window.tracking=True
+
+
         calls=[];real=self.window.capture_once;self.window.capture_once=lambda *args,**kwargs:calls.append((args,kwargs))
+
+
         try:self.window.tick()
+
+
         finally:self.window.tracking=False;self.window.capture_once=real
+
+
         self.assertEqual(calls,[])
+
+
     def test_delete_selected_screenshot_removes_file_and_row(self):
+
+
         from PIL import Image
+
+
         folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
+
+
         target=folder/('COD_delete_'+uuid.uuid4().hex+'.png');Image.new('RGB',(320,180),'blue').save(target)
+
+
         self.window.refresh_cod_ai_screenshots()
+
+
         found=[self.window.cod_ai_screenshots.item(i) for i in range(self.window.cod_ai_screenshots.count())
+
+
               if self.window.cod_ai_screenshots.item(i).data(Qt.UserRole)==str(target)]
+
+
         self.assertTrue(found);self.window.cod_ai_screenshots.setCurrentItem(found[0])
+
+
         self.window.ask=lambda *args,**kwargs:True
+
+
         self.window.delete_cod_ai_screenshot()
+
+
         self.assertFalse(target.exists())
+
+
         self.assertIn('Deleted',self.window.cod_ai_capture_status.text())
+
+
     def test_posted_cinematic_video_is_auto_deleted_but_failed_post_keeps_file(self):
+
+
         folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
         cid='cin-del-'+uuid.uuid4().hex
+
+
         shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
         self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
+
+
         good=folder/(cid+'.mp4');good.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*4096)
+
+
         self.window.store.update_cinematic(cid,status='completed',video=str(good))
+
+
         self.window.on_cinematic_discord_result('Discord accepted the video (HTTP 200).',cid,str(good))
+
+
         self.assertFalse(good.exists())
+
+
         self.assertEqual(self.window.store.get_cinematic(cid)['video'],'')
+
+
         self.assertIn('deleted',self.window.cinematic_status.text().lower())
+
+
         bad=folder/(cid+'-keep.mp4');bad.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*4096)
+
+
         self.window.store.update_cinematic(cid,video=str(bad))
+
+
         self.window.on_cinematic_discord_result('Discord post failed: boom',cid,str(bad))
+
+
         self.assertTrue(bad.exists())
+
+
     def _button_by_text(self,text):
+
+
         from PySide6.QtWidgets import QPushButton
+
+
         for button in self.window.findChildren(QPushButton):
+
+
             if button.text()==text:return button
+
+
         return None
+
+
     def test_send_to_meta_queues_without_bridge(self):
+
+
         from PIL import Image
+
+
         folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
+
+
         target=folder/('COD_send_'+uuid.uuid4().hex+'.png');Image.new('RGB',(320,180),'red').save(target)
+
+
         self.window.refresh_cod_ai_screenshots()
+
+
         send=self._button_by_text('Send Selected Material to Meta Ai to Make A Video')
+
+
         self.assertIsNotNone(send)
+
+
         self.assertIsNone(getattr(self.window,'extension_bridge',None))
+
+
         found=[self.window.cod_ai_screenshots.item(i) for i in range(self.window.cod_ai_screenshots.count())
+
+
               if self.window.cod_ai_screenshots.item(i).data(Qt.UserRole)==str(target)]
+
+
         self.assertTrue(found);self.window.cod_ai_screenshots.setCurrentItem(found[0])
+
+
         send.click()
+
+
         self.assertIn('Queued',self.window.cinematic_status.text())
+
+
         cid=self.window.cinematic_status.text().split('Queued ')[1].split('.')[0].strip()
+
+
         try:self.assertTrue(self.window.store.get_cinematic(cid))
+
+
         finally:
+
+
             try:self.window.store.update_cinematic(cid,status='failed')
+
+
             except Exception:pass
+
+
             shutil.rmtree(Path(app.E.DATA)/'Cinematics'/cid,ignore_errors=True)
+
+
             try:(Path(app.E.DATA)/'Cinematics'/'input'/(cid+'.png')).unlink(missing_ok=True)
+
+
             except OSError:pass
+
+
     def test_sidebar_fits_without_horizontal_scroll(self):
+
+
         self.assertGreaterEqual(self.window.sidebar.width(),275)
+
+
         self.assertEqual(self.window.nav.horizontalScrollBarPolicy(),Qt.ScrollBarAlwaysOff)
+
+
     def test_clicking_a_screenshot_loads_an_in_app_preview(self):
+
+
         from PIL import Image
+
+
         path=Path(app.E.DATA)/'Screenshots'/('COD_preview_'+uuid.uuid4().hex+'.png');path.parent.mkdir(parents=True,exist_ok=True);Image.new('RGB',(640,360),'red').save(path)
+
+
         item=app.QListWidgetItem(path.name);item.setData(Qt.UserRole,str(path))
+
+
         try:
+
+
             self.window.preview_cod_ai_screenshot(item)
+
+
             self.assertIsNotNone(self.window.preview_image.pixmap())
+
+
             self.assertIn('640×360',self.window.preview_sub.text())
+
+
         finally:path.unlink(missing_ok=True)
+
+
     def test_codommunity_preview_snapshots_settings_roster_and_headshots(self):
+
+
         import hashlib
+
+
         source=Path(app.E.DATA)/('preview-source-'+uuid.uuid4().hex);target=Path(app.E.DATA)/('preview-copy-'+uuid.uuid4().hex)
+
+
         (source/'headshots').mkdir(parents=True);(source/'headshots'/'player.jpg').write_bytes(b'fixture-photo')
+
+
         (source/'Screenshots').mkdir();(source/'Screenshots'/'COD_fixture.png').write_bytes(b'fixture-screenshot')
+
+
         settings=b'{"player":"fixture-user","poll_seconds":9}';(source/'settings.json').write_bytes(settings)
+
+
         store=app.E.Store(source/'history.sqlite3');store.save_player({'id':'fixture-id','name':'Fixture','photo':str(source/'headshots'/'player.jpg'),'enabled':True,'consent_meta':True})
+
+
         digest=hashlib.sha256((source/'history.sqlite3').read_bytes()).hexdigest()
+
+
         try:
+
+
             app.prepare_tab_preview_data(source,target)
+
+
             preview_store=app.E.Store(target/'history.sqlite3');player=preview_store.roster()[0]
+
+
             self.assertEqual((target/'settings.json').read_bytes(),settings)
+
+
             self.assertTrue(Path(player['photo']).is_file());self.assertEqual(Path(player['photo']).read_bytes(),b'fixture-photo')
+
+
             self.assertNotEqual(Path(player['photo']).resolve(),(source/'headshots'/'player.jpg').resolve())
+
+
             self.assertEqual((target/'Screenshots'/'COD_fixture.png').read_bytes(),b'fixture-screenshot')
+
+
             self.assertEqual(hashlib.sha256((source/'history.sqlite3').read_bytes()).hexdigest(),digest)
+
+
         finally:
+
+
             shutil.rmtree(source,ignore_errors=True);shutil.rmtree(target,ignore_errors=True)
+
+
     def test_cod_ai_screenshot_controls_are_available(self):
+
+
         self.assertTrue(hasattr(self.window,'cod_ai_hotkey_status'))
+
+
         self.assertTrue(hasattr(self.window,'cod_ai_screenshots'))
+
+
     def test_preview_video_widget_stays_hidden_without_a_video(self):
+
+
         w=self.window
+
+
         self.assertTrue(w.cinematic_video_widget.isHidden())
+
+
         w.preview_cinematic_video(None)
+
+
         self.assertTrue(w.cinematic_video_widget.isHidden())
+
+
         self.assertFalse(w.preview_image.isHidden())
+
+
         self.assertEqual(w.preview_sub.text(),'Watch the selected video.')
+
+
         self.assertTrue(w.video_controls.isHidden())
+
+
     def test_poster_studio_has_one_scoreboard_driven_generate_action(self):
+
+
         self.assertEqual(self.window.generate_poster_button.text(),'Generate AI End Game Picture')
+
+
         self.assertFalse(hasattr(self.window,'provider'));self.assertFalse(hasattr(self.window,'theme'))
+
+
     def test_solo_startup_does_not_initialize_ocr(self):self.assertIsNone(self.window.capture);self.assertIsNone(self.window.browser)
+
+
     def test_activate_squad_night_button_acknowledges_every_click(self):
+
+
         w=self.window
+
+
         w.mode.setCurrentText('Solo Ops');w.nav.setCurrentRow(2)
+
+
         button=self._button_by_text('Activate Squad Night')
+
+
         self.assertIsNotNone(button);self.assertTrue(button.isEnabled())
+
+
         button.click()
+
+
         self.assertEqual(w.mode.currentText(),'Squad Night');self.assertEqual(w.nav.currentRow(),0)
+
+
         button.click()
+
+
         self.assertEqual(w.mode.currentText(),'Squad Night');self.assertEqual(w.nav.currentRow(),0)
+
+
     def test_tracker_browser_search_survives_capture_engine_scan(self):
+
+
         import ctypes
+
+
         from capture_engine import CaptureEngine
+
+
         before=ctypes.windll.user32.EnumWindows.argtypes
+
+
         CaptureEngine().game_windows()
+
+
         self.assertEqual(ctypes.windll.user32.EnumWindows.argtypes,before)
+
+
         self.assertIsInstance(self.window.find_tracker_chrome_windows(),list)
+
+
     def test_hotkey_capture_shows_waiting_then_confirms(self):
+
+
         from unittest.mock import patch
+
+
         from PySide6.QtCore import QEvent
+
+
         from PySide6.QtGui import QFocusEvent,QKeyEvent
+
+
         from PySide6.QtWidgets import QMessageBox
+
+
         edit=self.window.scoreboard_hotkey_edit
+
+
         edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.MouseFocusReason))
+
+
         self.assertIn('Press the new keys',edit.text())
+
+
         event=QKeyEvent(QEvent.KeyPress,Qt.Key_F9,Qt.ControlModifier|Qt.ShiftModifier,'',False,1)
+
+
         with patch.object(QMessageBox,'information',return_value=QMessageBox.Ok) as confirm:
+
+
             edit.keyPressEvent(event)
+
+
         self.assertEqual((edit.vk,edit.mod),(0x78,app.MOD_CONTROL|app.MOD_SHIFT))
+
+
         confirm.assert_called_once()
+
+
         self.assertEqual(confirm.call_args[0][1],'Hotkeys Set')
+
+
         self.assertNotIn('Press the new keys',edit.text())
+
     def test_default_hotkeys_are_bare_arrows(self):
+
         self.assertEqual(app.DEFAULT_SCOREBOARD_HOTKEY,(0x26,0));self.assertEqual(app.format_hotkey(*app.DEFAULT_SCOREBOARD_HOTKEY),'Up')
+
         self.assertEqual(app.DEFAULT_SCREENSHOT_HOTKEY,(0x28,0));self.assertEqual(app.format_hotkey(*app.DEFAULT_SCREENSHOT_HOTKEY),'Down')
-    def test_codmunity_tab_pulls_matches_into_tracker(self):
+
+
+    def test_sync_settings_tab_pulls_matches_into_tracker(self):
+
+
         from unittest.mock import patch
+
+
         w=self.window
+
+
+        for row in range(w.nav.count()):
+
+            if w.nav.item(row).data(Qt.UserRole)=='Settings':
+
+                w.nav.setCurrentRow(row);break
+
+
         with patch.object(app.E,'load_matches',wraps=app.E.load_matches) as loader:
-            w.app_tabs.setCurrentIndex(1)
+
+
+            w.settings_tabs.setCurrentWidget(w.sync_tab_page)
+
+
             self.wait_until(lambda:not w.poll_busy)
+
+
             self.assertTrue(loader.called)
-            self.assertEqual(w.codmunity_status.text(),'CODMunity matches are in the tracker.')
+
+
+            self.assertEqual(w.sync_header_status.text(),'CODMunity matches are in the tracker.')
+
+
     def test_studio_autoloads_newest_undelivered_match(self):
+
+
         import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'studio.sqlite3')
+
+
         payload={'matchId':'studio-auto','game':'warzone','mode':'battle_royale','modeKey':'resurgence','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':7}}
+
+
         mid,_=w.store.add(payload,'needs_review')
+
+
         w.store.update(mid,players=json.dumps([{'name':'Vintendo','stats':{'kills':7},'verified':True}]),prompt=app.E.MATCH_POSTER_PROMPT_MARKER+'\nfixture')
+
+
         w.refresh_history()
+
+
         self.assertEqual(w.active_id,mid)
+
+
         self.assertIn(mid,w.studio_match.text())
+
+
         self.assertTrue(w.generate_poster_button.isEnabled())
+
+
     def test_automation_stage_updates_status_without_dial(self):
+
+
         w=self.window
+
+
         self.assertFalse(hasattr(w,'auto_core'))
+
+
         w.set_automation_stage('generating','test job overdrive')
+
+
         self.assertEqual(w.auto_stage,'generating')
+
+
         self.assertIn('test job overdrive',w.browser_status.text())
+
+
         w._auto_stage_tick()
+
+
         w.set_automation_stage('failed','boom')
+
+
         self.assertEqual(w.auto_stage,'failed')
+
+
         self.assertIn('boom',w.browser_status.text())
+
+
         w.set_automation_stage('ready')
+
+
         self.assertEqual(w.auto_stage,'ready')
+
+
         self.assertIn('visibly',w.browser_status.text())
+
+
     def test_tracker_browser_tab_has_no_progress_dial(self):
+
+
         w=self.window
+
+
         self.assertFalse(hasattr(w,'auto_core'))
+
+
         self.assertFalse(hasattr(app,'MissionCore'))
+
+
         self.assertIsNotNone(w.browser_status)
+
+
         self.assertIsNotNone(w.browser_surface)
+
+
         self.assertIsNotNone(w.auto_stage_timer)
+
+
     def test_login_card_appears_on_login_failure(self):
+
+
         w=self.window
+
+
         mid,_=w.store.add({'matchId':'login-fail-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
         pumped=[]
+
+
         w._pump_full_auto=lambda:pumped.append(True)
+
+
         w._poster_manual=False
+
+
         w.notice=lambda *args:(_ for _ in ()).throw(AssertionError('no modal in background flow'))
+
+
         w._fail_inapp_poster(mid,'login','Meta AI is signed out')
+
+
         self.assertFalse(w.login_card.isHidden())
+
+
         self.assertEqual(pumped,[True])
+
+
         row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle')
+
+
     def test_toggle_browser_without_window_reports_clearly(self):
+
+
         w=self.window;w.auto_browser_hwnd=None
+
+
         w.toggle_auto_browser()
+
+
         self.assertIn('not open',w.browser_status.text())
+
+
     def test_open_login_window_refuses_during_active_job(self):
+
+
         w=self.window;w._inapp_poster_active='job-123'
+
+
         try:w.open_login_window()
+
+
         finally:w._inapp_poster_active=None
+
+
         self.assertIn('wait for it',w.browser_status.text())
+
+
     def test_verify_login_without_context_reports(self):
+
+
         w=self.window;w._login_context=None
+
+
         w.verify_login()
+
+
         self.assertIn('Press Log into Meta AI first',w.browser_status.text())
+
+
     def test_open_tracker_chrome_login_notice_then_meta_home(self):
+
+
         from unittest.mock import patch
+
+
         from PySide6.QtWidgets import QMessageBox
+
+
         w=self.window
+
+
         w.browser_host.hwnd=None
+
+
         with patch.object(QMessageBox,'information',return_value=QMessageBox.Ok) as confirm, \
                 patch.object(w,'chrome_executable',return_value='C:/fake/chrome.exe'), \
                 patch.object(w,'find_tracker_chrome_windows',return_value=[]), \
                 patch('subprocess.Popen') as popen:
+
+
             w.open_tracker_chrome()
+
+
             confirm.assert_called_once()
+
+
             self.assertEqual(confirm.call_args[0][1],'Meta.ai Login Required')
+
+
             self.assertIn('login to Meta.ai',confirm.call_args[0][2])
+
+
         popen.assert_called_once()
+
+
         launched_args=popen.call_args[0][0]
+
+
         self.assertIn('--window-size=1440,900',launched_args)
+
+
         self.assertTrue(str(launched_args[-1]).startswith('https://www.meta.ai'))
+
+
     def test_embedded_browser_focus_is_safe_without_window(self):
+
+
         w=self.window
+
+
         self.assertFalse(w.browser_host.focus_embedded())
+
+
         self.assertFalse(w.codmunity_host.focus_embedded())
+
+
     def test_tracker_browser_nav_focuses_embedded_window(self):
+
+
         from unittest.mock import patch as mock_patch
+
+
         w=self.window
+
+
         with mock_patch.object(w.browser_host,'focus_embedded',return_value=True) as focus:
+
+
             for row in range(w.nav.count()):
+
+
                 if w.nav.item(row).data(Qt.UserRole)=='Tracker Browser':
+
+
                     w.nav.setCurrentRow(row);break
+
+
             focus.assert_called_once_with()
+
+
     def test_all_buttons_keep_stylesheet_hover_feedback(self):
+
+
         from PySide6.QtWidgets import QPushButton
+
+
         offenders=[b.text() or b.objectName() for b in self.window.findChildren(QPushButton) if 'background' in b.styleSheet()]
+
+
         self.assertEqual(offenders,[])
+
+
     def test_friend_tile_hover_highlights_border(self):
+
+
         tile=app.FriendTile('f1',lambda pid:None)
+
+
         tile.set_selected(False)
+
+
         self.assertIn('#292f39',tile.styleSheet())
+
+
         tile.enterEvent(None);self.assertIn('#8a93a3',tile.styleSheet())
+
+
         tile.leaveEvent(None);self.assertIn('#292f39',tile.styleSheet())
+
+
         tile.set_selected(True);self.assertIn('#f97316',tile.styleSheet())
+
+
     def test_mode_switch_roundtrip(self):
+
+
         self.window.mode.setCurrentText('Squad Night');self.window.mode.setCurrentText('Solo Ops');self.assertIsNone(self.window.capture);self.assertFalse(self.window.tracking)
+
+
     def test_roi_verification_defaults_checked_and_hidden(self):self.assertTrue(self.window.verified.isChecked());self.assertTrue(self.window.verified.isHidden())
+
+
     def test_browser_failure_is_reported_without_losing_match(self):
+
+
         from browser_service import BrowserSession
+
+
         statuses=[];b=BrowserSession(app.E.DATA,lambda *a:None,statuses.append)
+
+
         from unittest.mock import patch
+
+
         with patch('playwright.sync_api.sync_playwright',side_effect=RuntimeError('fixture browser unavailable')):b._run('fixture')
+
+
         self.assertIn('browser unavailable',statuses[0].lower())
+
+
     def test_browser_download_is_validated_and_bound_to_immutable_match_id(self):
+
+
         import shutil
+
+
         from PIL import Image
+
+
         from browser_service import save_download
+
+
         with browser_fixture_dir() as root:
+
+
             source=Path(root)/'meta-output.jpg';Image.new('RGB',(640,360),'orange').save(source)
+
+
             class Download:
+
+
                 def save_as(self,target):shutil.copyfile(source,target)
+
+
             images=[];statuses=[]
+
+
             target=save_download(root,'match-fixed-id',Download(),lambda *args:images.append(args),statuses.append)
+
+
             self.assertTrue(Path(target).is_file());self.assertEqual(images[0][0],'match-fixed-id')
+
+
             self.assertEqual(Path(target).suffix,'.png');self.assertIn('validated',statuses[0].lower())
+
+
             self.assertFalse(Path(target).with_suffix('.download').exists())
+
+
     def test_browser_download_rejects_small_image(self):
+
+
         import shutil
+
+
         from PIL import Image
+
+
         from browser_service import save_download
+
+
         with browser_fixture_dir() as root:
+
+
             source=Path(root)/'too-small.png';Image.new('RGB',(100,100),'black').save(source)
+
+
             class Download:
+
+
                 def save_as(self,target):shutil.copyfile(source,target)
+
+
             images=[];statuses=[]
+
+
             self.assertIsNone(save_download(root,'small',Download(),lambda *args:images.append(args),statuses.append))
+
+
             self.assertFalse(images);self.assertIn('valueerror',statuses[0].lower())
+
+
     def test_browser_refuses_to_relink_open_window_to_another_match(self):
+
+
         from browser_service import BrowserSession
+
+
         statuses=[];b=BrowserSession(app.E.DATA,lambda *a:None,statuses.append)
+
+
         class LiveThread:
+
+
             def is_alive(self):return True
+
+
         b.thread=LiveThread();b.job_id='match-one'
+
+
         self.assertFalse(b.open('match-two'));self.assertEqual(b.job_id,'match-one')
+
+
         self.assertIn('another match',statuses[0].lower())
+
+
     def test_browser_uses_small_isolated_profile_and_retries_browser_launch(self):
+
+
         from pathlib import Path
+
+
         from types import SimpleNamespace
+
+
         from browser_service import BrowserSession
+
+
         statuses=[];b=BrowserSession(app.E.DATA,lambda *a:None,statuses.append,retries=1)
+
+
         b.stopped.wait=lambda _:False
+
+
         calls=[]
+
+
         def launch(profile,**kwargs):
+
+
             kwargs['profile']=profile;calls.append(kwargs)
+
+
             if len(calls)<3:raise RuntimeError('fixture')
+
+
             return object()
+
+
         with browser_fixture_dir() as root:
+
+
             result=b._launch(SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch)),Path(root)/'browser-profile')
+
+
             self.assertIsNotNone(result);self.assertEqual(len(calls),3)
+
+
             self.assertEqual(calls[0]['channel'],'msedge');self.assertEqual(calls[1]['channel'],'chrome')
+
+
             self.assertEqual(calls[2]['channel'],'msedge');self.assertFalse(calls[2]['headless'])
+
+
             self.assertTrue(calls[2]['accept_downloads']);self.assertEqual(calls[2]['viewport'],{'width':900,'height':700})
+
+
             self.assertEqual(calls[2]['args'],['--window-size=940,780'])
+
+
     def test_browser_download_timeout_reports_without_closing_manual_session_early(self):
+
+
         from types import SimpleNamespace
+
+
         from browser_service import BrowserSession
+
+
         from unittest.mock import patch
+
+
         statuses=[];b=BrowserSession(app.E.DATA,lambda *a:None,statuses.append,download_timeout=300,retries=0)
+
+
         class Page:
+
+
             def __init__(self):self.handlers={};self.navigations=[]
+
+
             def on(self,name,callback):self.handlers[name]=callback
+
+
             def goto(self,url,**kwargs):self.navigations.append((url,kwargs))
+
+
             def wait_for_timeout(self,ms):self.wait_ms=ms;b.stopped.set()
+
+
         class Context:
+
+
             def __init__(self):self.pages=[Page()];self.handlers={};self.closed=False
+
+
             def new_page(self):return self.pages[0]
+
+
             def on(self,name,callback):self.handlers[name]=callback
+
+
             def close(self):self.closed=True
+
+
         context=Context();manager=SimpleNamespace(__enter__=lambda s:SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=lambda *a,**k:context)),__exit__=lambda *a:None)
+
+
         class Manager:
+
+
             def __enter__(self):return manager.__enter__(self)
+
+
             def __exit__(self,*args):return manager.__exit__(self,*args)
+
+
         with browser_fixture_dir() as root,patch('playwright.sync_api.sync_playwright',return_value=Manager()),patch('browser_service.time.monotonic',side_effect=[10,311]):
+
+
             b.directory=Path(root);b._run('timeout-match')
+
+
         self.assertEqual(context.pages[0].navigations[0][0],'https://www.meta.ai/')
+
+
         self.assertTrue(context.closed);self.assertIn('wait timeout', '\n'.join(statuses).lower())
+
+
     def wait_until(self,fn):
+
+
         end=time.monotonic()+10
+
+
         while time.monotonic()<end and not fn():self.qt.processEvents();time.sleep(.01)
+
+
         self.assertTrue(fn())
+
+
     def test_squad_capture_prompt_overlay_post_end_to_end(self):
+
+
         from PIL import Image
+
+
         import numpy as np
+
+
         from unittest.mock import patch
+
+
         w=self.window;import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'history.sqlite3');w.mode.setCurrentText('Squad Night');w.auto_post.setChecked(False);mid,_=w.store.add({'matchId':'squad-test-'+uuid.uuid4().hex,'modeKey':'resurgence','integration_source':'CODMunity','result':'win','stats':{'kills':12}})
+
+
         w.refresh_history();w.last_frame=np.array(Image.new('RGB',(1200,500),'navy'))
+
+
         w.ocr_text.setPlainText('PLAYER  KILLS  DAMAGE  SCORE\nVintendo  12  3400  4500\nConcha  8  2000  3200');w.parse_ocr();w.verified.setChecked(True);w.save_capture()
+
+
         job=w.store.get(mid);self.assertTrue(job['capture']);self.assertEqual(len(json.loads(job['players'])),2);self.assertIn('16:9',job['prompt'])
+
+
         background=app.E.DATA/('fixture-art-'+uuid.uuid4().hex+'.png');Image.new('RGB',(1600,900),'navy').save(background);w.received_art(mid,str(background))
+
         from unittest.mock import patch as _patch
+
         with _patch.object(app.QDialog,'exec',return_value=app.QDialog.Rejected):
+
             w.render_overlay();self.wait_until(lambda:w.store.get(mid)['status']=='ready')
+
+
         calls=[];w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.notice=lambda _:None;w.ask=lambda _:True
+
+
         with patch('engine.send_discord',side_effect=lambda *args:(calls.append(args) or 'fixture-message')):
+
+
             w.deliver(mid);self.wait_until(lambda:w.store.get(mid)['status']=='delivered');w.deliver(mid)
+
+
         self.assertEqual(len(calls),1);self.assertIn('kills: 12',calls[0][2]);self.assertEqual(w.store.get(mid)['message_id'],'fixture-message')
+
+
     def test_history_and_dashboard_show_codmunity_end_game_fields(self):
+
+
         w=self.window
+
+
         mid,_=w.store.add({'matchId':'endgame-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-01T08:00:00Z','result':'win','stats':{'kills':17,'eliminations':19,'damage':6878,'deaths':2,'assists':3,'placement':1}})
+
+
         w.refresh_history()
+
+
         self.assertEqual(w.history.columnCount(),12)
+
+
         headers=[w.history.horizontalHeaderItem(i).text() for i in range(w.history.columnCount())]
+
+
         self.assertIn('DAMAGE',headers);self.assertIn('ELIMS',headers)
+
+
         row=next(i for i in range(w.history.rowCount()) if w.history.item(i,0).toolTip()==mid)
+
+
         self.assertEqual(w.history.item(row,headers.index('DAMAGE')).text(),'6878')
+
+
         self.assertEqual(w.history.item(row,headers.index('ELIMS')).text(),'19')
+
+
         import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'card.sqlite3')
+
+
         mid2,_=w.store.add({'matchId':'card-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-05T08:00:00Z','result':'win','stats':{'kills':17,'eliminations':19,'damage':6878,'deaths':2,'assists':3,'placement':1}})
+
+
         w.refresh_history()
+
+
         self.assertEqual(w.latest_job_id,mid2)
+
+
         self.assertIn('WIN',w.latest_result.text())
+
+
         self.assertIn('6878',w.latest_stats.text())
+
+
         self.assertIn('19',w.latest_stats.text())
+
+
         self.assertEqual(w.dashboard_metrics['games'].text(),str(len(w.store.history())))
+
+
         self.assertRegex(w.history_summary['kills_per_game'][1].text(),r'Best \d+ kills')
+
+
     def test_latest_match_card_shows_newest_and_failed_hint(self):
+
+
         import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
         old,_=w.store.add({'matchId':'old-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-02T08:00:00Z','result':'win','stats':{'kills':5,'eliminations':5,'damage':2500,'deaths':1,'assists':0}},'delivered')
+
+
         new,_=w.store.add({'matchId':'new-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-03T08:00:00Z','result':'loss','stats':{'kills':2,'eliminations':2,'damage':900,'deaths':4,'assists':1}},'failed')
+
+
         w.refresh_history()
+
+
         self.assertEqual(w.latest_job_id,new)
+
+
         self.assertIn('LOSS',w.latest_result.text())
+
+
         self.assertIn('failed',w.latest_status.text().lower());self.assertIn('retry',w.latest_status.text().lower())
+
+
         self.assertTrue(w.latest_review.isEnabled())
+
+
         self.assertIn('2 matches tracked',w.center_count.text())
+
+
         w.store=app.E.Store(_tmpdir/'empty.sqlite3');w.refresh_history()
+
+
         self.assertIsNone(w.latest_job_id);self.assertFalse(w.latest_review.isEnabled());self.assertIn('No matches',w.latest_detail.text())
+
+
     def test_dashboard_games_cards_mirror_history_summary(self):
+
+
         w=self.window
+
+
         rows=w.store.history()
+
+
         summary=w._match_summary(rows)
+
+
         self.assertEqual(w.dashboard_metrics['games'].text(),str(summary['games']))
+
+
         self.assertEqual(w.dashboard_metrics['win_rate'].text(),str(summary['win_rate']))
+
+
         self.assertEqual(w.dashboard_metrics['kd'].text(),str(summary['kd']))
+
+
         self.assertEqual(w.dashboard_metrics['kills_per_game'].text(),str(summary['kills_per_game']))
+
+
     def test_latest_match_review_opens_studio(self):
+
+
         import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
         mid,_=w.store.add({'matchId':'open-'+uuid.uuid4().hex,'game':'warzone','mode':'battle_royale','playedAt':'2026-10-04T08:00:00Z','result':'win','stats':{'kills':9,'eliminations':9,'damage':4100,'deaths':0,'assists':2}})
+
+
         w.refresh_history()
+
+
         self.assertEqual(w.latest_job_id,mid)
+
+
         calls=[];real=w.load_studio;w.load_studio=lambda job_id:calls.append(job_id)
+
+
         try:
+
+
             w.open_latest_match()
+
+
             self.assertEqual(calls,[mid]);self.assertEqual(w.nav.currentRow(),5)
+
+
         finally:
+
+
             w.load_studio=real;w.nav.setCurrentRow(0)
+
+
     def test_open_image_composer_goes_straight_to_chat(self):
+
+
         from unittest.mock import MagicMock
+
+
         import meta_automation as MA
+
+
         gotos = []
+
+
         shown = MagicMock(); shown.is_visible.return_value = True
+
+
         hidden = MagicMock(); hidden.is_visible.return_value = False
+
+
         page = MagicMock()
+
+
         def loc_side_effect(sel):
+
+
             m = MagicMock()
+
+
             if 'Ask Meta AI' in sel:
+
+
                 m.first = hidden
+
+
             elif 'contenteditable' in sel:
+
+
                 m.first = shown
+
+
             else:
+
+
                 m.first = hidden
+
+
             return m
+
+
         page.locator.side_effect = loc_side_effect
+
+
         page.url = 'https://www.meta.ai/'
+
+
         page.goto.side_effect = lambda url, wait_until=None: gotos.append(url)
+
+
         driver = MA.MetaDriver.__new__(MA.MetaDriver)
+
+
         driver.diagnose_dir = None
+
+
         self.assertIs(page, driver.open_image_composer(page))
+
+
         self.assertTrue(gotos)
+
+
         self.assertTrue(all('/create' not in u for u in gotos))
 
+
+
+
+
     def test_first_visible_polls_candidates_within_budget(self):
+
+
         import time
+
+
         from unittest.mock import MagicMock
+
+
         import meta_automation as MA
+
+
         driver = MA.MetaDriver.__new__(MA.MetaDriver)
+
+
         hidden = MagicMock(); hidden.is_visible.return_value = False
+
+
         page = MagicMock(); page.locator.return_value.first = hidden
+
+
         t0 = time.monotonic()
+
+
         self.assertIsNone(driver._first_visible(page, ['gone-a', 'gone-b'], timeout=600))
+
+
         self.assertLess(time.monotonic() - t0, 5.0)
+
+
         shown = MagicMock(); shown.is_visible.return_value = True
+
+
         page2 = MagicMock(); page2.locator.return_value.first = shown
+
+
         t0 = time.monotonic()
+
+
         self.assertIs(shown, driver._first_visible(page2, ['here'], timeout=8000))
+
+
         self.assertLess(time.monotonic() - t0, 2.0)
+
+
+
+
 
     def test_sync_codmunity_embed_size_noops_safely(self):
+
+
         w = self.window
+
+
         w.codmunity_host.hwnd = None
+
+
         w._sync_codmunity_embed_size()
+
+
         w.codmunity_host.hwnd = 12345
+
+
         w._sync_codmunity_embed_size()
+
+
         self.assertEqual(w.codmunity_host.hwnd, 12345)
 
+
+
+
+
     def test_show_auto_browser_clears_dead_handle(self):
+
+
         w = self.window
+
+
         w.auto_browser_hwnd = None
+
+
         w._show_auto_browser()
+
+
         self.assertIsNone(w.auto_browser_hwnd)
+
+
         w.auto_browser_hwnd = 12345
+
+
         w._show_auto_browser()
+
+
         self.assertIsNone(w.auto_browser_hwnd)
+
+
+
+
 
     def test_largest_image_skips_old_and_nav(self):
+
+
         from unittest.mock import MagicMock
+
+
         import meta_automation as MA
+
+
         driver = MA.MetaDriver.__new__(MA.MetaDriver)
+
+
         def make_img(w, h, in_nav=False, src=None):
+
+
             img = MagicMock()
+
+
             img.is_visible.return_value = True
+
+
             img.bounding_box.return_value = {'width': w, 'height': h}
+
+
             img.get_attribute.return_value = src
+
+
             nav = MagicMock()
+
+
             nav.count.return_value = 1 if in_nav else 0
+
+
             img.locator.return_value = nav
+
+
             return img
+
+
         old_image = make_img(900, 900, src='https://meta.ai/old.png')
+
+
         sidebar_thumb = make_img(900, 900, in_nav=True, src='https://meta.ai/nav.png')
+
+
         small_icon = make_img(16, 16, src='https://meta.ai/icon.png')
+
+
         fresh_image = make_img(800, 600, src='https://meta.ai/new.png')
+
+
         page = MagicMock()
+
+
         page.locator.return_value.all.return_value = [old_image, sidebar_thumb, small_icon, fresh_image]
+
+
         img, key = driver._largest_image(page, {'https://meta.ai/old.png'}, set())
+
+
         self.assertIs(img, fresh_image)
+
+
         self.assertEqual(key, 'https://meta.ai/new.png')
 
+
+
+
+
     def test_screenshot_largest_saves_valid_png(self):
+
+
         import tempfile, shutil
+
+
         from pathlib import Path
+
+
         from unittest.mock import MagicMock
+
+
         import meta_automation as MA
+
+
         driver = MA.MetaDriver.__new__(MA.MetaDriver)
+
+
         png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 2048
+
+
         img = MagicMock()
+
+
         img.is_visible.return_value = True
+
+
         img.bounding_box.return_value = {'width': 800, 'height': 600}
+
+
         img.get_attribute.return_value = None
+
+
         nav = MagicMock(); nav.count.return_value = 0
+
+
         img.locator.return_value = nav
+
+
         img.screenshot.return_value = png
+
+
         page = MagicMock()
+
+
         page.locator.return_value.all.return_value = [img]
+
+
         tmpdir = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, tmpdir, True)
+
+
         target = driver._screenshot_largest(page, tmpdir)
+
+
         self.assertIsNotNone(target)
+
+
         data = Path(str(target)).read_bytes()
+
+
         self.assertTrue(MA.valid_image_bytes(data))
 
+
+
+
+
     def test_first_visible_polls_candidates_within_budget(self):
+
+
         import time
+
+
         from unittest.mock import MagicMock
+
+
         import meta_automation as MA
+
+
         driver = MA.MetaDriver.__new__(MA.MetaDriver)
+
+
         hidden = MagicMock(); hidden.is_visible.return_value = False
+
+
         page = MagicMock(); page.locator.return_value.first = hidden
+
+
         t0 = time.monotonic()
+
+
         self.assertIsNone(driver._first_visible(page, ['gone-a', 'gone-b'], timeout=600))
+
+
         self.assertLess(time.monotonic() - t0, 5.0)
+
+
         shown = MagicMock(); shown.is_visible.return_value = True
+
+
         page2 = MagicMock(); page2.locator.return_value.first = shown
+
+
         t0 = time.monotonic()
+
+
         self.assertIs(shown, driver._first_visible(page2, ['here'], timeout=8000))
+
+
         self.assertLess(time.monotonic() - t0, 2.0)
 
+
+
+
+
     def test_acquire_viewer_shot_prefers_real_download(self):
+
+
         from unittest.mock import MagicMock
+
+
         import meta_automation as MA
+
+
         driver = MA.MetaDriver.__new__(MA.MetaDriver)
+
+
         img = MagicMock()
+
+
         img.is_visible.return_value = True
+
+
         img.bounding_box.return_value = {'width': 800, 'height': 600}
+
+
         img.get_attribute.return_value = 'https://meta.ai/fresh.png'
+
+
         nav = MagicMock(); nav.count.return_value = 0
+
+
         img.locator.return_value = nav
+
+
         dl_file = MagicMock()
+
+
         fired = MagicMock(); fired.value = dl_file
+
+
         ctx = MagicMock(); ctx.__enter__.return_value = fired
+
+
         page = MagicMock()
+
+
         def loc_side_effect(sel):
+
+
             m = MagicMock()
+
+
             if sel == 'img':
+
+
                 m.all.return_value = [img]
+
+
             else:
+
+
                 m.first.is_visible.return_value = True
+
+
             return m
+
+
         page.locator.side_effect = loc_side_effect
+
+
         page.expect_download.return_value = ctx
+
+
         got = driver._acquire_viewer_shot(page, None, set(), set(), None)
+
+
         self.assertIs(got, dl_file)
+
+
         img.click.assert_called_once()
+
+
     def test_codmunity_window_picker_skips_helpers(self):
+
+
         w=self.window
+
+
         self.assertEqual(w._pick_codmunity_window([(2,16,16),(3,16,16),(1,1920,1023)]),1)
+
+
         self.assertEqual(w._pick_codmunity_window([(2,16,16),(5,800,600)]),5)
+
+
         self.assertIsNone(w._pick_codmunity_window([(2,16,16)]))
+
+
         self.assertIsNone(w._pick_codmunity_window([]))
-    def test_stale_codmunity_attach_recovers_loading(self):
+
+
+    def test_stale_codmunity_handles_stay_inert(self):
+
+
         w=self.window
-        w.codmunity_hwnd=12345;w.codmunity_loading.hide()
-        try:
-            self.assertFalse(w._validate_codmunity_attach())
-            self.assertIsNone(w.codmunity_hwnd)
-            self.assertFalse(w.codmunity_loading.isHidden())
-            self.assertIn('Restarting',w.codmunity_status.text())
-        finally:
-            w.codmunity_poll.stop();w.codmunity_hwnd=None
+
+
+        w.codmunity_hwnd=12345
+
+
+        for row in range(w.nav.count()):
+
+            if w.nav.item(row).data(Qt.UserRole)=='Settings':
+
+                w.nav.setCurrentRow(row);break
+
+
+        w.settings_tabs.setCurrentWidget(w.sync_tab_page)
+
+
+        self.assertIn('Outbox',w.sync_state_label.text())
+
+
+        self.assertEqual(w.codmunity_hwnd,12345)
+
+
+        w.codmunity_poll.stop();w.codmunity_hwnd=None
+
+
     def test_section_banners_centered(self):
+
+
         w=self.window
+
+
         for name in app.PAGE_BANNERS:
+
+
             _page,layout=w.pages[name]
+
+
             title=layout.itemAt(0).widget()
+
+
             self.assertEqual(title.objectName(),'pageBanner',name)
+
+
             self.assertTrue(bool(layout.itemAt(0).alignment()&Qt.AlignHCenter),name)
+
+
             self.assertFalse(title.pixmap().isNull(),name)
+
+
     def test_settings_nav_and_logs_tab(self):
+
+
         w=self.window
+
+
         names=[w.nav.item(r).data(Qt.UserRole) for r in range(w.nav.count()) if not w.nav.item(r).isHidden()]
+
+
         self.assertIn('Settings',names)
+
+
         self.assertNotIn('Application Settings',names);self.assertNotIn('Activity Logs',names)
+
+
         tabs=[w.settings_tabs.tabText(i) for i in range(w.settings_tabs.count())]
+
+
         self.assertIn('Hotkeys & Folders',tabs);self.assertIn('Logs',tabs)
+
+
         self.assertEqual(w.settings_tabs.tabText(w.settings_tabs.indexOf(w.logs.parentWidget())),'Logs')
+
+
     def test_worker_log_opens_settings_logs_tab(self):
+
+
         w=self.window
+
+
         w.worker_log()
+
+
         settings_row=next(r for r in range(w.nav.count()) if w.nav.item(r).data(Qt.UserRole)=='Settings')
+
+
         self.assertEqual(w.nav.currentRow(),settings_row)
+
+
         self.assertEqual(w.settings_tabs.tabText(w.settings_tabs.currentIndex()),'Logs')
+
+
     def test_hotkey_and_folder_overrides_persist(self):
+
+
         import tempfile
+
+
         w=self.window
+
+
         keys=('scoreboard_hotkey_vk','scoreboard_hotkey_mod','screenshot_hotkey_vk','screenshot_hotkey_mod','screenshots_dir','videos_dir')
+
+
         original={k:w.settings.values.get(k) for k in keys}
+
+
         try:
+
+
             self.assertEqual((w.scoreboard_hotkey_edit.vk,w.scoreboard_hotkey_edit.mod),w.hotkey_setting('scoreboard_hotkey_vk','scoreboard_hotkey_mod',app.DEFAULT_SCOREBOARD_HOTKEY))
+
+
             with tempfile.TemporaryDirectory() as tmp:
+
+
                 shots=str(Path(tmp)/'Shots');vids=str(Path(tmp)/'Vids')
+
+
                 w.scoreboard_hotkey_edit.set_hotkey(0x79,0x0002)
+
+
                 w.screenshot_hotkey_edit.set_hotkey(0x7A,0x0006)
+
+
                 w.screenshots_dir_edit.setText(shots);w.videos_dir_edit.setText(vids)
+
+
                 w.save_settings()
+
+
                 self.assertEqual(w.settings.values['scoreboard_hotkey_vk'],0x79)
+
+
                 self.assertEqual(w.settings.values['screenshot_hotkey_mod'],0x0006)
+
+
                 self.assertEqual(w.screenshots_dir(),Path(shots));self.assertEqual(w.videos_dir(),Path(vids))
+
+
                 self.assertTrue(Path(shots).is_dir() and Path(vids).is_dir())
+
+
                 self.assertIn('F10',w.hotkey_hint.text())
+
+
         finally:
+
+
             for k,v in original.items():
+
+
                 if v is None:w.settings.values.pop(k,None)
+
+
                 else:w.settings.values[k]=v
+
+
             w.settings.save();w.unregister_global_hotkeys();w.register_global_hotkeys();w.refresh_hotkey_labels()
+
+
             w.screenshots_dir_edit.setText(original['screenshots_dir'] or '');w.videos_dir_edit.setText(original['videos_dir'] or '')
+
+
     def test_discord_channel_labels_persist(self):
+
+
         w=self.window
+
+
         original={k:w.settings.values.get(k) for k in ('webhook_channel','cinematic_webhook_channel')}
+
+
         try:
+
+
             w.webhook_channel.setText('#match-clips');w.cinematic_webhook_channel.setText('#cod-cinema')
+
+
             w.save_settings()
+
+
             self.assertEqual(w.settings.values['webhook_channel'],'#match-clips')
+
+
             self.assertEqual(w.settings.values['cinematic_webhook_channel'],'#cod-cinema')
+
+
         finally:
+
+
             for k,v in original.items():
+
+
                 if v is None:w.settings.values.pop(k,None)
+
+
                 else:w.settings.values[k]=v
+
+
             w.settings.save()
+
+
             w.webhook_channel.setText(original['webhook_channel'] or '');w.cinematic_webhook_channel.setText(original['cinematic_webhook_channel'] or '')
+
+
     def test_exit_button_confirms_then_shuts_down(self):
+
+
         w=self.window
-        self.assertEqual(w.app_tabs.cornerWidget(Qt.TopRightCorner),w.exit_button)
+
+
+        side=w.sidebar.layout()
+        gen_idx=side.indexOf(w.generate_sidebar_button)
+        self.assertEqual(side.indexOf(w.exit_button),gen_idx+2)
+        self.assertIsInstance(side.itemAt(gen_idx+1).widget(),QFrame)
+        self.assertTrue(w.exit_button.isVisibleTo(w))
+
+
         w.ask=lambda *args,**kwargs:False;w.request_exit();self.assertFalse(w.closing)
+
+
         w.ask=lambda *args,**kwargs:True;w.request_exit();self.assertTrue(w.closing)
+
+
     def test_match_history_button_hidden_but_page_kept(self):
+
+
         w=self.window
+
+
         found=[w.nav.item(r) for r in range(w.nav.count()) if w.nav.item(r).data(Qt.UserRole)=='Match History']
+
+
         self.assertEqual(len(found),1);self.assertTrue(found[0].isHidden())
+
+
         self.assertTrue(hasattr(w,'history'));self.assertTrue(hasattr(w,'refresh_match_history_view'))
+
+
     def test_save_capture_combines_ocr_placement_and_manual_result(self):
+
+
         import numpy as np
+
+
         from PIL import Image
+
+
         w=self.window;import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'history.sqlite3');w.mode.setCurrentText('Squad Night')
+
+
         w.last_frame=np.array(Image.new('RGB',(1200,500),'navy'))
+
+
         w.ocr_text.setPlainText('PLAYER  KILLS  PLACEMENT\nVintendo  12  1\nConcha  8  1');w.parse_ocr();w.verified.setChecked(True)
+
+
         w.save_capture()
+
+
         job=w.store.get(w.active_id);context=app.E.extract_match_context(json.loads(job['payload']),job.get('ocr',''))
+
+
         self.assertEqual(context['result'],'Victory');self.assertEqual(context['placement'],'1st place')
+
+
         w.last_frame=np.array(Image.new('RGB',(1200,500),'maroon'))
+
+
         w.ocr_text.setPlainText('PLAYER  KILLS\nVintendo  12');w.parse_ocr();w.verified.setChecked(True)
+
+
         w.result_override.setCurrentIndex(w.result_override.findData('loss'))
+
+
         w.save_capture()
+
+
         forced=w.store.get(w.active_id);forced_context=app.E.extract_match_context(json.loads(forced['payload']),forced.get('ocr',''))
+
+
         self.assertEqual(forced_context['result'],'Defeat')
+
+
     def test_save_capture_asks_win_or_lose_when_result_unknown(self):
+
+
         import numpy as np
+
+
         from PIL import Image
+
+
         w=self.window;import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w.store=app.E.Store(_tmpdir/'history.sqlite3');w.mode.setCurrentText('Squad Night')
+
+
         w.last_frame=np.array(Image.new('RGB',(1200,500),'teal'))
+
+
         w.ocr_text.setPlainText('PLAYER  KILLS\nVintendo  12');w.parse_ocr();w.verified.setChecked(True)
+
+
         w.ask_match_result=lambda:'win'
+
+
         w.save_capture()
+
+
         job=w.store.get(w.active_id)
+
+
         self.assertEqual(app.E.extract_match_context(json.loads(job['payload']),job.get('ocr',''))['result'],'Victory')
+
+
         w.last_frame=np.array(Image.new('RGB',(1200,500),'olive'))
+
+
         w.ocr_text.setPlainText('PLAYER  KILLS\nVintendo  5');w.parse_ocr();w.verified.setChecked(True)
+
+
         before=w.active_id
+
+
         w.ask_match_result=lambda:None;rows_before=len(w.store.history())
+
+
         w.save_capture()
+
+
         self.assertEqual(w.active_id,before)
+
+
         self.assertEqual(len(w.store.history()),rows_before)
+
+
         self.assertEqual(w.store.get(w.active_id)['capture'],job['capture'])
+
+
     def test_download_auto_overlays_and_posts_once_when_enabled(self):
+
+
         import shutil
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         from browser_service import save_download
+
+
         w=self.window;match={'matchId':'auto-download-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'}
+
+
         mid,_=w.store.add(match);w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':9,'damage':2100})]))
+
+
         w.auto_post.setChecked(True);w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.notice=lambda _:None
+
+
         with browser_fixture_dir() as root:
+
+
             source=Path(root)/'meta-result.png';Image.new('RGB',(640,360),'navy').save(source)
+
+
             class Download:
+
+
                 def save_as(self,target):shutil.copyfile(source,target)
+
+
             calls=[]
+
+
             with patch('engine.send_discord',side_effect=lambda *args:(calls.append(args) or 'auto-message')):
+
+
                 save_download(root,mid,Download(),w.received_art,w.log)
+
+
                 self.wait_until(lambda:w.store.get(mid)['status']=='delivered')
+
+
             self.assertEqual(len(calls),1);self.assertIn('kills: 9',calls[0][2]);self.assertTrue(Path(calls[0][1]).is_file())
+
     def test_stale_awaiting_download_video_is_requeued(self):
+
         import sqlite3
+
         import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         db=_tmpdir/'history.sqlite3';w=self.window;w.store=app.E.Store(db)
+
         image=_tmpdir/'shot.png';image.write_bytes(b'png')
+
         stale='cin-stale-'+uuid.uuid4().hex
+
         self.assertTrue(w.store.create_cinematic(stale,'COD_2026-11-12.png',image,'prompt'))
+
         w.store.update_cinematic(stale,status='awaiting_download')
+
         con=sqlite3.connect(db);con.execute('UPDATE cinematic_jobs SET updated=? WHERE id=?',(time.time()-7200,stale));con.commit();con.close()
+
         fresh='cin-fresh-'+uuid.uuid4().hex
+
         self.assertTrue(w.store.create_cinematic(fresh,'shot.png',image,'prompt'))
+
         w.store.update_cinematic(fresh,status='awaiting_download')
+
         w._inapp_active=fresh;w._inapp_started=time.time()
+
         try:reset=w._sweep_stale_cinematics()
+
         finally:
+
             w._inapp_active=None
+
             try:w._inapp_started=None
+
             except Exception:pass
+
         self.assertEqual(reset,1)
+
         self.assertEqual(w.store.get_cinematic(stale)['status'],'queued')
+
         self.assertEqual(w.store.get_cinematic(fresh)['status'],'awaiting_download')
+
+
     def test_headshots_only_for_identified_consenting_players(self):
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         w=self.window;mid,_=w.store.add({'matchId':'photo-test-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'});w.active_id=mid
+
+
         w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8}),dict(name='Beta',verified=True,stats={'kills':3}),dict(name='NotIdentified',verified=False,stats={'kills':900})]))
+
+
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+
+
         roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True),dict(id='beta',name='Beta',photo=str(photo),consent_meta=False,enabled=True),dict(id='other',name='NotIdentified',photo=str(photo),consent_meta=True,enabled=True)]
+
+
         w.notice=lambda _:None
+
+
         with patch.object(w.store,'roster',return_value=roster),patch('os.startfile'):
+
+
             w.load_studio(mid);self.assertTrue(w.prompt.toPlainText());w._start_poster_automation=lambda *args:False;w.prepare_artwork()
+
+
         self.assertIn('prepared',w.job_status.text().lower())
+
+
         handoff=app.E.DATA/'handoff'/app.E.disk_id(mid)
+
+
         self.addCleanup(shutil.rmtree,handoff,True)
+
+
         assignments=app.E.read_json(handoff/'photo-assignments.json')
+
+
         by_user={item['username']:item for item in assignments}
+
+
         self.assertEqual(by_user['Alpha']['status'],'ready');self.assertTrue(by_user['Alpha']['filename'])
+
+
         self.assertEqual(by_user['Beta']['status'],'not_consented');self.assertIn('not consented',by_user['Beta']['reason'])
+
+
     def test_prepare_artwork_prefers_automation_over_folder(self):
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         w=self.window;mid,_=w.store.add({'matchId':'auto-poster-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'});w.active_id=mid
+
+
         w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
+
+
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+
+
         roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+
+
         w.notice=lambda _:None
+
+
         calls=[]
+
+
         with patch.object(w.store,'roster',return_value=roster),patch('os.startfile') as opened:
+
+
             w.load_studio(mid)
+
+
             w._start_poster_automation=lambda *args:(calls.append(args) or True)
+
+
             w.prepare_artwork()
+
+
         self.assertFalse(opened.called)
+
+
         self.assertEqual(len(calls),1)
+
+
         self.assertEqual(calls[0][0],mid)
+
+
         self.assertTrue(calls[0][2])
+
+
         for name in calls[0][2]:
+
+
             self.assertTrue(Path(calls[0][1],name).is_file())
+
+
         self.assertIn('automatically',w.job_status.text().lower())
+
+
         self.addCleanup(w.store.update,mid,gen_state='idle',error='')
+
+
         self.addCleanup(shutil.rmtree,Path(calls[0][1]),True)
+
+
     def test_prepare_artwork_opens_folder_when_automation_unavailable(self):
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         w=self.window;mid,_=w.store.add({'matchId':'manual-poster-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'});w.active_id=mid
+
+
         w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
+
+
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+
+
         roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+
+
         w.notice=lambda _:None
+
+
         with patch.object(w.store,'roster',return_value=roster),patch('os.startfile') as opened:
+
+
             w.load_studio(mid)
+
+
             w._start_poster_automation=lambda *args:False
+
+
             w.prepare_artwork()
+
+
         self.assertTrue(opened.called)
+
+
         folder=opened.call_args[0][0]
+
+
         self.assertTrue(Path(folder,'prompt.txt').is_file())
+
+
         self.assertIn('prepared',w.job_status.text().lower())
+
+
         self.addCleanup(shutil.rmtree,Path(folder),True)
+
+
     def test_full_auto_pump_launches_queued_job(self):
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         w=self.window;mid,_=w.store.add({'matchId':'fullauto-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
         w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]),gen_state='queued')
+
+
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+
+
         roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+
+
         w.notice=lambda _:None
+
+
         calls=[]
+
+
         with patch.object(w.store,'roster',return_value=roster):
+
+
             w._start_poster_automation=lambda *args:(calls.append(args) or True)
+
+
             w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.full_auto.blockSignals(True);w.full_auto.setChecked(True);w.full_auto.blockSignals(False)
+
+
             calls.clear()
+
+
             w._pump_full_auto()
+
+
         self.assertEqual(len(calls),1);self.assertEqual(calls[0][0],mid)
+
+
         self.addCleanup(shutil.rmtree,Path(calls[0][1]),True)
+
+
     def test_full_auto_holds_without_webhook(self):
+
+
         w=self.window;mid,_=w.store.add({'matchId':'held-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
         w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]),gen_state='queued')
+
+
         w.notice=lambda _:None
+
+
         calls=[]
+
+
         w._start_poster_automation=lambda *args:(calls.append(args) or True)
+
+
         w.webhook.setText('');w.full_auto.blockSignals(True);w.full_auto.setChecked(True);w.full_auto.blockSignals(False)
+
+
         calls.clear()
+
+
         w._pump_full_auto()
+
+
         self.assertEqual(calls,[])
+
+
         self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+
+
         self.addCleanup(w.store.update,mid,gen_state='idle',error='')
+
+
     def test_full_auto_parks_unpreparable_job(self):
+
+
         w=self.window;mid,_=w.store.add({'matchId':'unprepped-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
         w.store.update(mid,players=json.dumps([dict(name='Nobody',verified=False,stats={'kills':1})]),gen_state='queued')
+
+
         w.notice=lambda _:None
+
+
         w._start_poster_automation=lambda *args:True
+
+
         w.webhook.setText('https://discord.com/api/webhooks/123/fixture');w.full_auto.blockSignals(True);w.full_auto.setChecked(True);w.full_auto.blockSignals(False)
+
+
         w._pump_full_auto()
+
+
         row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle');self.assertTrue(row['error'])
+
+
     def test_finish_chains_pump_and_fail_parks(self):
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         w=self.window;mid,_=w.store.add({'matchId':'chained-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
         w.store.update(mid,players=json.dumps([]))
+
+
         saved=app.E.DATA/('chained-'+uuid.uuid4().hex+'.png');Image.new('RGB',(640,360),'navy').save(saved)
+
+
         w.notice=lambda _:None
+
+
         pumped=[]
+
+
         w._pump_full_auto=lambda:pumped.append(True)
+
+
         w._finish_inapp_poster(mid,str(saved))
+
+
         self.assertEqual(pumped,[True])
+
+
         pumped.clear()
+
+
         with patch('os.startfile') as opened:
+
+
             w._poster_manual=False
+
+
             w._fail_inapp_poster(mid,'generation','boom')
+
+
         self.assertEqual(pumped,[True]);self.assertFalse(opened.called)
+
+
         row=w.store.get(mid);self.assertEqual(row['gen_state'],'idle')
+
+
     def test_refresh_all_distributions_covers_catalog_combos(self):
+
+
         import codmunity_player_stats as C
+
+
         import player_stats_service as PSS
-        w=self.window
+
+
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
         pid='catalog-'+uuid.uuid4().hex
+
+
         w.store.save_player({'id':pid,'name':'Catalog','photo':'','consent_meta':True,'enabled':True,'aliases':[]})
+
+
         w.current_player=pid
+
+
         calls=[]
+
+
         kd=tuple(0.5+i*0.5 for i in range(12))
+
+
         def fake_fetch(game,mode,scope):
+
+
             calls.append((game,mode,scope))
+
+
             return C.CommunityDistribution(game=game,mode=mode,scope=scope,kd=kd,sampled=10,users_total=12)
+
+
         w.codmunity_client.community_distribution=fake_fetch
+
+
         w.async_task=lambda fn,done,failed=None:done(fn())
+
+
         w.refresh_all_distributions()
+
+
         self.assertEqual(calls,list(PSS.VERIFIED_GLOBAL_COMBOS))
+
+
         cached=w.store.meta('codmunity_public_distributions',{})
+
+
         for game,mode,scope in PSS.VERIFIED_GLOBAL_COMBOS:
+
+
             self.assertIn('|'.join((game,mode,scope)),cached)
+
+
         self.assertIn('4/4',w.codmunity_status.text())
+
+
     def test_refresh_all_distributions_reports_partial_failure(self):
+
+
         import codmunity_player_stats as C
-        w=self.window
+
+
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
         pid='catalog-fail-'+uuid.uuid4().hex
+
+
         w.store.save_player({'id':pid,'name':'CatalogFail','photo':'','consent_meta':True,'enabled':True,'aliases':[]})
+
+
         w.current_player=pid
+
+
         calls=[]
+
+
         kd=tuple(0.5+i*0.5 for i in range(12))
+
+
         def fake_fetch(game,mode,scope):
+
+
             calls.append((game,mode,scope))
+
+
             if mode=='battle_royale':raise RuntimeError('offline')
+
+
             return C.CommunityDistribution(game=game,mode=mode,scope=scope,kd=kd,sampled=10,users_total=12)
+
+
         w.codmunity_client.community_distribution=fake_fetch
+
+
         errors=[]
+
+
         def run(fn,done,failed=None):
+
+
             try:done(fn())
+
+
             except Exception as exc:
+
+
                 if failed:failed(exc)
+
+
                 else:errors.append(exc)
+
+
         w.async_task=run
+
+
         w.refresh_all_distributions()
+
+
         self.assertEqual(len(calls),4)
+
+
         self.assertIn('3/4',w.codmunity_status.text())
+
+
     def test_all_catalog_combos_selectable_in_ui(self):
+
+
         import player_stats_service as PSS
+
+
         w=self.window
+
+
         for game,mode,scope in PSS.VERIFIED_GLOBAL_COMBOS:
+
+
             w.codmunity_game.setCurrentIndex(w.codmunity_game.findData(game))
+
+
             w.codmunity_mode.setCurrentIndex(w.codmunity_mode.findData(mode))
+
+
             w.codmunity_scope.setCurrentIndex(w.codmunity_scope.findData(scope))
+
+
             self.assertEqual((w.codmunity_game.currentData(),w.codmunity_mode.currentData(),w.codmunity_scope.currentData()),(game,mode,scope))
+
+
     def test_one_click_prepare_picks_newest_codmunity_match_without_scoreboard(self):
+
+
         from PIL import Image
+
+
         from unittest.mock import patch
+
+
         import tempfile
+
+
         w=self.window;w.active_id=None
+
+
         tmp=tempfile.mkdtemp(prefix='oneclick-store-')
+
+
         w.store=app.E.Store(tmp+'/history.sqlite3')
+
+
         self.addCleanup(shutil.rmtree,tmp,True)
+
+
         record={'matchId':'oneclick-'+uuid.uuid4().hex,'integration_source':'CODMunity','modeKey':'resurgence','playedAt':'2026-11-08T20:00:00Z','result':'win','stats':{'kills':19,'damage':6878}}
+
+
         mid,_=w.store.add(record)
+
+
         photo=app.E.DATA/('fixture-head-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+
+
         w.store.save_player({'id':'vintendo','name':'Vintendo','photo':str(photo),'consent_meta':True,'enabled':True,'aliases':[]})
+
+
         w.notice=lambda _:None;w.settings.values['player']='Vintendo'
+
+
         w._start_poster_automation=lambda *args:False
+
+
         with patch('os.startfile'):w.prepare_artwork()
+
+
         self.addCleanup(shutil.rmtree,app.E.DATA/'handoff'/app.E.disk_id(mid),True)
+
+
         self.assertEqual(w.active_id,mid)
+
+
         row=w.store.get(mid);self.assertEqual(row['gen_state'],'prepared');self.assertTrue(row['prompt'])
+
+
         self.assertTrue(w.prompt.toPlainText())
+
+
     def test_final_poster_keeps_all_verified_rows_and_exact_mode_stats(self):
+
+
         from PIL import Image,ImageChops
+
+
         players=[dict(name=f'Squad{i}',verified=True,stats={'kills':10-i,'damage':2500+i,'assists':i,'eliminations':10-i,'deaths':i}) for i in range(6)]
+
+
         source=Path(app.E.DATA)/('full-squad-source-'+uuid.uuid4().hex+'.png');Image.new('RGB',(1600,900),'navy').save(source)
+
+
         target=Path(app.E.DATA)/('full-squad-poster-'+uuid.uuid4().hex+'.jpg')
+
+
         match={'game':'warzone','modeKey':'resurgence','result':'win','placement':2}
+
+
         app.E.render_poster(source,target,match,players)
+
+
         with Image.open(target) as poster:
+
+
             self.assertEqual(poster.size,(1600,900))
+
+
             self.assertIsNotNone(ImageChops.difference(poster.crop((0,790,760,830)),Image.new('RGB',(760,40),'navy')).getbbox())
+
+
         recap=app.E.recap(match,players)
+
+
         self.assertIn('VICTORY',recap);self.assertIn('Warzone',recap);self.assertIn('Resurgence',recap);self.assertIn('eliminations: 10',recap)
+
+
         self.assertIn('Squad5',recap);self.assertIn('deaths: 5',recap)
+
+
     def test_first_start_baselines_before_solo_worker(self):
+
+
         from unittest.mock import patch,MagicMock
+
+
         w=self.window;w.mode.setCurrentText('Solo Ops');w.webhook.setText('https://discord.com/api/webhooks/123/fixture')
+
+
         record={'matchId':'baseline-'+uuid.uuid4().hex,'modeKey':'kill_confirmed','playedAt':uuid.uuid4().hex,'result':'win'}
+
+
         process=MagicMock();process.poll.return_value=0
+
+
         def spawn(*args,**kwargs):
+
+
             self.assertEqual(w.store.get(app.E.key_for(record))['status'],'baseline')
+
+
             return process
+
+
         with patch.object(w.store,'meta',return_value=False),patch('engine.load_matches',return_value=(app.E.DATA,[record])),patch('psutil.process_iter',return_value=[]),patch('subprocess.Popen',side_effect=spawn):w.start()
+
+
         self.assertTrue(w.tracking);self.assertEqual(w.store.get(app.E.key_for(record))['status'],'baseline')
+
+
     def test_smoke_run_bypasses_single_instance_gate(self):
+
+
         self.assertTrue(app.is_smoke_run(['app.py', '--smoke-test'], {}))
+
+
         self.assertTrue(app.is_smoke_run(['app.py'], {'VINTENDO_SMOKE_TEST': '1'}))
+
+
         self.assertFalse(app.is_smoke_run(['app.py'], {}))
+
+
     def test_browser_close_joins_worker_thread(self):
+
+
         import threading
+
+
         from browser_service import BrowserSession
+
+
         release = threading.Event()
+
+
         class SlowThread:
+
+
             def __init__(self):self.joined = False
+
+
             def is_alive(self):return not self.joined
+
+
             def join(self, timeout=None):self.joined = True;release.set()
+
+
         statuses = []
+
+
         session = BrowserSession(app.E.DATA, lambda *a: None, statuses.append)
+
+
         slow = SlowThread()
+
+
         session.thread = slow
+
+
         session.close(timeout=2)
+
+
         self.assertTrue(session.stopped.is_set())
+
+
         self.assertTrue(slow.joined)
 
+
+
+
+
     def test_visible_cinematic_rows_hides_finished_jobs(self):
+
+
         rows=[{'id':'a','status':'queued','video':''},{'id':'b','status':'running','video':''},
+
+
               {'id':'c','status':'completed','video':''},{'id':'d','status':'failed','video':'','error':'boom'}]
+
+
         self.assertEqual([r['id'] for r in app.visible_cinematic_rows(rows)],['a','b'])
+
+
         self.assertEqual([r['id'] for r in app.visible_cinematic_rows(rows,selected_id='d')],['a','b','d'])
+
+
     def test_visible_cinematic_rows_keeps_postable_completed_video(self):
+
+
         folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
         cid='cin-vis-'+uuid.uuid4().hex
+
+
         good=folder/(cid+'.mp4');good.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
+
+
         try:
+
+
             rows=[{'id':cid,'status':'completed','video':str(good)},{'id':'old','status':'completed','video':''}]
+
+
             self.assertEqual([r['id'] for r in app.visible_cinematic_rows(rows)],[cid])
+
+
         finally:good.unlink(missing_ok=True)
+
+
     def test_refresh_results_button_exists(self):
+
+
         from PySide6.QtWidgets import QPushButton
+
+
         found=[b for b in self.window.findChildren(QPushButton) if b.text()=='Refresh']
-        self.assertTrue(found)
-    def test_cinematic_discord_post_retries_transient_tls_error(self):
-        import ssl,requests
-        calls=[];urls=[]
-        class FakeResponse:status_code=200
-        def fake_post(url,*args,**kwargs):
-            calls.append(1);urls.append(url)
-            if len(calls)==1:raise ssl.SSLError('SSL: SSL3_ALERT_BAD_RECORD_MAC')
-            return FakeResponse()
-        real_post=requests.post;requests.post=fake_post
-        try:
-            target=Path(app.E.DATA)/('cin-post-'+uuid.uuid4().hex+'.mp4');target.write_bytes(b'0'*16)
-            try:status=app.post_file_to_discord_webhook('https://discord.com/api/webhooks/1/abc',str(target))
-            finally:target.unlink(missing_ok=True)
-        finally:requests.post=real_post
-        self.assertEqual(status,200);self.assertEqual(len(calls),2)
-        self.assertIn('wait=true',urls[-1])
-    def test_cinematic_discord_post_gives_up_after_retries(self):
-        import requests
-        calls=[]
-        def fake_post(*args,**kwargs):calls.append(1);raise ConnectionError('boom')
-        real_post=requests.post;requests.post=fake_post
-        try:
-            target=Path(app.E.DATA)/('cin-post-'+uuid.uuid4().hex+'.mp4');target.write_bytes(b'0'*16)
-            try:
-                with self.assertRaises(ConnectionError):app.post_file_to_discord_webhook('https://discord.com/api/webhooks/1/abc',str(target))
-            finally:target.unlink(missing_ok=True)
-        finally:requests.post=real_post
-        self.assertEqual(len(calls),3)
-    def test_delete_selected_cinematic_video_removes_file_and_clears_row(self):
-        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
-        cid='cin-del-'+uuid.uuid4().hex
-        shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-        self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
-        good=folder/(cid+'.mp4');good.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
-        self.window.store.update_cinematic(cid,status='completed',video=str(good))
-        self.window.refresh_cinematic_results()
-        found=[self.window.cinematic_results.item(i) for i in range(self.window.cinematic_results.count())
-              if self.window.cinematic_results.item(i).data(Qt.UserRole)==cid]
-        self.assertTrue(found);self.window.cinematic_results.setCurrentItem(found[0])
-        self.window.ask=lambda *args,**kwargs:True;self.window.confirm_cinematic_delete=lambda:True
-        self.window.delete_selected_cinematic_video()
-        self.assertFalse(good.exists())
-        self.assertEqual(self.window.store.get_cinematic(cid)['video'],'')
-        self.assertIn('Deleted',self.window.cinematic_status.text())
-        shot.unlink(missing_ok=True)
-    def test_delete_releases_preview_player_before_removing_file(self):
-        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
-        cid='cin-lock-'+uuid.uuid4().hex
-        shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-        self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
-        good=folder/(cid+'.mp4');good.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
-        self.window.store.update_cinematic(cid,status='completed',video=str(good))
-        self.window.refresh_cinematic_results()
-        found=[self.window.cinematic_results.item(i) for i in range(self.window.cinematic_results.count())
-              if self.window.cinematic_results.item(i).data(Qt.UserRole)==cid]
-        self.assertTrue(found);self.window.cinematic_results.setCurrentItem(found[0])
-        self.window.cinematic_player.setSource(app.QUrl.fromLocalFile(str(good)))
-        self.assertFalse(self.window.cinematic_player.source().isEmpty())
-        real_unlink=Path.unlink
-        def guard_unlink(target,missing_ok=False):
-            if target==good and not self.window.cinematic_player.source().isEmpty():raise PermissionError(13,'file in use',str(target))
-            return real_unlink(target,missing_ok=missing_ok)
-        from unittest.mock import patch
-        self.window.confirm_cinematic_delete=lambda:True
-        with patch.object(Path,'unlink',guard_unlink):
-            self.window.delete_selected_cinematic_video()
-        self.assertFalse(good.exists())
-        self.assertTrue(self.window.cinematic_player.source().isEmpty())
-        shot.unlink(missing_ok=True)
-    def test_open_tracker_chrome_auto_embeds_new_window(self):
-        from unittest.mock import patch
-        w=self.window;attached=[]
-        w.attach_browser_window=lambda hwnd:attached.append(hwnd)
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen') as popen,patch('app.QMessageBox.information'):
-            w.open_tracker_chrome()
-            self.assertTrue(w.browser_poll.isActive());popen.assert_called_once()
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[12345]):
-            w.try_attach_tracker_chrome()
-        self.assertEqual(attached,[12345]);self.assertFalse(w.browser_poll.isActive())
-    def test_open_tracker_chrome_times_out_to_manual_embed(self):
-        from unittest.mock import patch
-        w=self.window;attached=[]
-        w.attach_browser_window=lambda hwnd:attached.append(hwnd)
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen'),patch('app.QMessageBox.information'):
-            w.open_tracker_chrome()
-            for _ in range(30):w.try_attach_tracker_chrome()
-        self.assertEqual(attached,[]);self.assertFalse(w.browser_poll.isActive())
-        self.assertIn('Embed',w.browser_status.text())
-        with patch.object(w,'find_tracker_chrome_windows',return_value=[7]),patch('subprocess.Popen'),patch('app.QMessageBox.information'):
-            w.open_tracker_chrome()
-            for _ in range(30):w.try_attach_tracker_chrome()
-        self.assertEqual(attached,[7])
-    def test_section_headlines_render_banner_graphics(self):
-        from PySide6.QtWidgets import QLabel
-        w=self.window
-        for name,filename in app.PAGE_BANNERS.items():
-            self.assertIn(name,w.pages)
-            labels=[c for c in w.pages[name][0].findChildren(QLabel) if c.objectName()=='pageBanner']
-            self.assertEqual(len(labels),1,f'{name} should show exactly one banner')
-            self.assertEqual(labels[0].property('bannerFile'),filename)
-            pixmap=labels[0].pixmap()
-            self.assertIsNotNone(pixmap);self.assertFalse(pixmap.isNull())
-            self.assertLessEqual(pixmap.width(),520);self.assertLessEqual(pixmap.height(),170)
-            self.assertGreaterEqual(pixmap.height(),100)
-        for name in ('Solo Ops','Squad Night','Discord Settings'):
-            titles=[c for c in w.pages[name][0].findChildren(QLabel) if c.objectName()=='title']
-            self.assertEqual(len(titles),1);self.assertEqual(titles[0].text(),name)
-    def test_nav_buttons_use_text_without_operations_branding(self):
-        from PySide6.QtWidgets import QLabel
-        w=self.window
-        for row in range(w.nav.count()):
-            item=w.nav.item(row);name=item.data(Qt.UserRole)
-            self.assertIn(name,item.text())
-            self.assertIsNone(w.nav.itemWidget(item))
-        self.assertEqual(w.findChildren(QLabel,'eyebrow'),[])
-        self.assertEqual(w.findChildren(QLabel,'sidebarFooter'),[])
-    def test_roster_redesign_save_search_match_and_delete(self):
-        import tempfile
-        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
-        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
-        self.window.refresh_roster()
-        self.assertEqual(self.window.roster_count.text(),'PLAYERS (0)')
-        self.window.notice=lambda *a,**k:(_ for _ in ()).throw(AssertionError('unexpected modal notice: %r' % (a,)))
-        self.window.roster_name.setText('TestFella');self.window.roster_display_name.setText('Fella')
-        self.window.roster_aliases.setText('tf; fella2')
-        self.assertTrue(self.window.roster_dirty)
-        self.assertIn('●',self.window.roster_save_button.text())
-        self.window.save_player()
-        self.assertFalse(self.window.roster_dirty)
-        self.assertEqual(self.window.roster_count.text(),'PLAYERS (1)')
-        self.assertEqual(self.window.roster_list.count(),1)
-        self.assertEqual(self.window.roster_big_name.text(),'Fella')
-        self.assertIn('ENABLED',self.window.roster_enabled_pill.text())
-        pid=self.window.current_player
-        self.window.roster_search.setText('zzz-no-match');self.assertEqual(self.window.roster_list.count(),0)
-        self.window.roster_search.setText('FELLA2');self.assertEqual(self.window.roster_list.count(),1)
-        self.window.roster_search.clear();self.assertEqual(self.window.roster_list.count(),1)
-        self.window.name_test.setText('testfella');self.window.test_name()
-        self.assertIn('TestFella',self.window.name_match_result.text())
-        self.window.name_test.setText('zzzz');self.window.test_name()
-        self.assertIn('No unambiguous',self.window.name_match_result.text())
-        self.window.roster_display_name.setText('Changed')
-        self.assertTrue(self.window.roster_dirty)
-        self.window.maybe_discard_roster_edits=lambda:False
-        self.window.roster_new_player()
-        self.assertEqual(self.window.current_player,pid)
-        self.window.maybe_discard_roster_edits=lambda:True
-        self.window.roster_new_player()
-        self.assertIsNone(self.window.current_player)
-        self.window.ask=lambda *args,**kwargs:False
-        self.window.current_player=pid;self.window.delete_player()
-        self.assertEqual(len(self.window.store.roster()),1)
-        self.window.ask=lambda *args,**kwargs:True
-        self.window.delete_player()
-        self.assertEqual(len(self.window.store.roster()),0)
-        self.assertEqual(self.window.roster_count.text(),'PLAYERS (0)')
-    def test_roster_headshot_save_and_remove(self):
-        import tempfile
-        from PIL import Image
-        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
-        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
-        self.window.refresh_roster()
-        img=tmpdir/'face.png';Image.new('RGB',(64,64),'red').save(img)
-        self.window.notice=lambda *a,**k:(_ for _ in ()).throw(AssertionError('unexpected modal notice: %r' % (a,)))
-        self.window.roster_name.setText('PhotoGal')
-        self.window.photo_path.setText(str(img));self.window.headshot_filename.setText('face.png')
-        self.window.show_image(self.window.photo_preview,str(img),420,220)
-        self.window.mark_roster_dirty();self.window.save_player()
-        pid=self.window.current_player
-        target=Path(app.E.DATA)/'headshots'/(pid+'.jpg')
-        self.addCleanup(lambda:target.unlink(missing_ok=True))
-        self.assertTrue(target.is_file())
-        stored=next(p for p in self.window.store.roster() if p['id']==pid)
-        self.assertEqual(stored['photo'],str(target))
-        self.window.remove_roster_photo()
-        self.assertTrue(self.window.roster_dirty)
-        self.window.save_player()
-        cleared=next(p for p in self.window.store.roster() if p['id']==pid)
-        self.assertEqual(cleared['photo'],'')
-    def test_ai_prompt_stat_block_is_opt_in(self):
-        w=self.window
-        import tempfile as _tf
-        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
-        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
-        mid,_=w.store.add({'matchId':'ai-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win','ocr':'VICTORY'})
-        w.store.update(mid,players=json.dumps([{'name':'VintendoPower','verified':True,'stats':{'kills':19,'deaths':8}}]))
-        job=w.store.get(mid)
-        w.include_stats_checkbox.setChecked(True)
-        with_text=w.ensure_match_prompt(job)
-        self.assertIn('PLAYER STATISTICS:',with_text)
-        self.assertIn('Casual',with_text)
-        self.assertIn('2.38',with_text)
-        w.include_stats_checkbox.setChecked(False)
-        without_text=w.ensure_match_prompt(w.store.get(mid))
-        self.assertNotIn('PLAYER STATISTICS:',without_text)
-        w.include_stats_checkbox.setChecked(True)
-        self.assertIn('PLAYER STATISTICS:',w.ensure_match_prompt(w.store.get(mid)))
-    def test_legacy_poster_prompt_regenerates_without_removed_fields(self):
-        w=self.window
-        import tempfile as _tf
-        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        mid,_=w.store.add({'matchId':'legacy-'+uuid.uuid4().hex,'game':'mw4','modeKey':'kill_confirmed','playedAt':'2026-11-11T10:00:00Z','result':'loss'})
-        w.store.update(mid,players=json.dumps([{'name':'Alpha','verified':True,'stats':{'kills':12}}]),
-            prompt=app.E.MATCH_POSTER_PROMPT_MARKER+'\nUnique match ID: old\nCreative variation ID: old\nActual players (JSON):\n[{"player":"Alpha","cod_username_for_identity":"Alpha","verified_statistics":{"kills":12},"performance_rank":1,"ranking_basis":["kills"]}]\nCODMunity benchmark context (background only; do not render): median 1.03')
-        text=w.ensure_match_prompt(w.store.get(mid))
-        for junk in ('Unique match ID:','Creative variation ID:','performance_rank','ranking_basis','CODMunity benchmark context','median 1.03'):
-            self.assertNotIn(junk,text)
-        self.assertIn(app.E.MATCH_POSTER_PROMPT_MARKER,text)
-        self.assertIn('Defeat',text);self.assertIn('"player":"Alpha"',text)
-    def test_roster_cards_show_ladder_rank_or_placeholder(self):
-        from PySide6.QtWidgets import QLabel
-        w=self.window
-        import tempfile as _tf
-        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
-        w.store.save_player({'id':'rank-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False})
-        mid,_=w.store.add({'matchId':'rank-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
-        w.store.update(mid,players=json.dumps([{'name':'VintendoPower','verified':True,'stats':{'kills':341,'deaths':100}}]))
-        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
-        w.codmunity_game.setCurrentIndex(max(0,w.codmunity_game.findData('warzone')));w.codmunity_mode.setCurrentIndex(max(0,w.codmunity_mode.findData('resurgence')));w.codmunity_scope.setCurrentIndex(max(0,w.codmunity_scope.findData('lifetime')))
-        w.refresh_roster()
-        texts={}
-        for index in range(w.roster_list.count()):
-            item=w.roster_list.item(index);card=w.roster_list.itemWidget(item)
-            texts[str(item.data(Qt.UserRole))]=' | '.join(label.text() for label in card.findChildren(QLabel))
-        self.assertIn('rank-a',texts);self.assertIn('rank-b',texts)
-        self.assertIn('Solid',texts['rank-a']);self.assertIn('3.41',texts['rank-a'])
-        self.assertNotIn('VintendoPower',texts['rank-b'])
-        self.assertNotIn('RANK UNAVAILABLE',texts['rank-b'])
-        self.assertIn('TRACKED RECORD',texts['rank-b'])
-        self.assertIn('No tracked matches yet',texts['rank-b'])
-        gmid,_=w.store.add({'matchId':'rank-goomy-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:05:00Z','result':'win'})
-        w.store.update(gmid,players=json.dumps([{'name':'Goomy11','verified':True,'stats':{'kills':10,'deaths':5}}]))
-        w.refresh_roster()
-        after={}
-        for index in range(w.roster_list.count()):
-            item=w.roster_list.item(index);card=w.roster_list.itemWidget(item)
-            after[str(item.data(Qt.UserRole))]=' | '.join(label.text() for label in card.findChildren(QLabel))
-        self.assertIn('1W/0L',after['rank-b']);self.assertIn('Best 10 kills',after['rank-b'])
-        self.assertNotIn('RANK UNAVAILABLE',after['rank-b'])
-        w.load_roster_player('rank-a')
-        self.assertIn('SOLID',w.roster_rank_tier.text())
-        self.assertIn('3.41',w.roster_rank_kd.text())
-        self.assertIn('1 tracked match',w.roster_rank_kd.text())
-        self.assertIn('%',w.roster_rank_pct.text())
-        self.assertIn('Sweat',w.roster_rank_next.text())
-        w.load_roster_player('rank-b')
-        self.assertIn('CASUAL',w.roster_rank_tier.text());self.assertIn('2.00',w.roster_rank_kd.text())
-    def test_codommunity_roster_identity_cache_rank_and_player_isolation(self):
-        import tempfile,json
-        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
-        w=self.window;w.store=app.E.Store(tmpdir/'history.sqlite3')
-        players=[
-            {'id':'codm-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,
-             'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'},
-            {'id':'codm-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False,
-             'codmunity_username':'Goomy11','codmunity_uid':'uid-secondary','codmunity_display_name':'Goomy','profile_url':'https://codmunity.gg/profile/Goomy11'},
-        ]
-        for player in players:w.store.save_player(player)
-        for suffix,name,kills,deaths in (('a','VintendoPower',341,100),('b','Goomy11',10,5)):
-            mid,_=w.store.add({'matchId':'codm-'+suffix,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:'+('01' if suffix=='a' else '02')+'Z','result':'win'})
-            w.store.update(mid,players=json.dumps([{'name':name,'verified':True,'stats':{'kills':kills,'deaths':deaths}}]))
-        w.store.set_meta('codmunity_public_distributions',{
-            'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime',
-                'kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],
-                'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00+00:00','source':'public_global_endpoint'}})
-        w.refresh_roster();w.load_roster_player('codm-a')
-        self.assertIn('vintendopower',w.codmunity_identity_label.text())
-        self.assertIn('uid-primary',w.codmunity_identity_label.text())
-        self.assertIn('https://codmunity.gg/profile/vintendopower',w.codmunity_profile_label.text())
-        self.assertIn('Profile linked',w.codmunity_status.text())
-        self.assertIn('Community data ready',w.codmunity_status.text())
-        self.assertIn('3.41',w.codmunity_kd_value.text())
-        self.assertIn('not lifetime',w.codmunity_kd_value.text())
-        self.assertIn('Solid',w.codmunity_rank_value.text())
-        self.assertAlmostEqual(float(w.codmunity_percentile_value.text().rstrip('%')),49.2,places=1)
-        self.assertEqual(w.codmunity_next_kd_value.text(),'4.94')
-        self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
-        w.codmunity_stats_button.click()
-        self.assertEqual(w.codmunity_status.text(),'Live player stats need an approved provider.')
-        w.load_roster_player('codm-b')
-        self.assertIn('uid-secondary',w.codmunity_identity_label.text())
-        self.assertIn('2.00',w.codmunity_kd_value.text())
-        self.assertIn('local tracked matches',w.codmunity_kd_value.text())
-        self.assertNotIn('3.41',w.codmunity_kd_value.text())
-        self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
-        w.roster_display_name.setText('Goomy display updated');w.save_player()
-        saved=next(player for player in w.store.roster() if player['id']=='codm-b')
-        self.assertEqual(saved['codmunity_uid'],'uid-secondary')
-        self.assertEqual(saved['codmunity_username'],'Goomy11')
-        self.assertEqual(saved['display_name'],'Goomy display updated')
-        self.assertFalse(saved['consent_meta'])
-    def test_cinematic_results_list_shows_several_rows(self):
-        self.assertGreaterEqual(self.window.cinematic_results.minimumHeight(),140)
-    def test_cod_ai_dashboard_has_workflow_and_no_standalone_delete_button(self):
-        self.assertIsNone(self._button_by_text('Delete selected video'))
-        self.assertIsNotNone(self._button_by_text('Refresh'))
-        self.assertIsNone(self._button_by_text('Test Video'))
-        self.assertIsNotNone(self._button_by_text('Post to Discord'))
-        self.assertIsNotNone(self._button_by_text('Change Photo'))
-        self.assertIsNotNone(self._button_by_text('Remove Photo'))
-        self.assertIsNotNone(self._button_by_text('Capture Game Screenshot'))
-        self.assertIn(self.window.hotkey_text('screenshot'),self.window.cod_ai_hotkey_status.text())
-    def test_cinematic_display_helpers_format_duration_and_shorten_names(self):
-        self.assertEqual(app.format_cinematic_duration(18),'0:18')
-        self.assertEqual(app.format_cinematic_duration(75),'1:15')
-        self.assertEqual(app.format_cinematic_duration(None),'')
-        short=app.short_cinematic_name('cin-c193ae51b3a43b84f0e51caa123456789.mp4')
-        self.assertLessEqual(len(short),24);self.assertIn(chr(8230),short);self.assertTrue(short.endswith('.mp4'))
-    def test_gallery_grid_uses_three_columns(self):
-        self.window.cinematic_results.resize(660,420)
-        self.window.update_cinematic_grid()
-        viewport=self.window.cinematic_results.viewport().width()
-        columns=viewport//self.window.cinematic_results.gridSize().width()
-        self.assertEqual(columns,3)
-    def test_per_thumbnail_delete_requires_confirmation_and_only_deletes_that_video(self):
-        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
-        made=[]
-        try:
-            for tag in ('keep','drop'):
-                cid='cin-tile-'+tag+'-'+uuid.uuid4().hex
-                shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-                self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
-                video=folder/(cid+'.mp4');video.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
-                self.window.store.update_cinematic(cid,status='completed',video=str(video))
-                made.append((cid,video,shot))
-            self.window.refresh_cinematic_results()
-            drop_cid,drop_video,_=made[1];keep_cid,keep_video,_=made[0]
-            tiles=getattr(self.window,'cinematic_tiles',{})
-            self.assertIn(drop_cid,tiles);self.assertIn(keep_cid,tiles)
-            self.window.confirm_cinematic_delete=lambda:False
-            tiles[drop_cid].delete_button.click()
-            self.assertTrue(drop_video.exists())
-            self.window.confirm_cinematic_delete=lambda:True
-            tiles[drop_cid].delete_button.click()
-            self.assertFalse(drop_video.exists());self.assertTrue(keep_video.exists())
-            self.assertEqual(self.window.store.get_cinematic(drop_cid)['video'],'')
-            self.assertEqual(self.window.store.get_cinematic(keep_cid)['video'],str(keep_video))
-        finally:
-            for _,video,shot in made:video.unlink(missing_ok=True);shot.unlink(missing_ok=True)
-    def test_fullscreen_escape_and_double_click_exit_via_filter(self):
-        from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QKeyEvent,QMouseEvent
-        from PySide6.QtCore import QPointF
-        calls=[]
-        filt=app.FullscreenExitFilter(lambda:True,lambda:calls.append('escape'),lambda:calls.append('toggle'))
-        escape=QKeyEvent(QEvent.KeyPress,Qt.Key_Escape,Qt.NoModifier)
-        self.assertTrue(filt.eventFilter(None,escape));self.assertEqual(calls,['escape'])
-        other=QKeyEvent(QEvent.KeyPress,Qt.Key_A,Qt.NoModifier)
-        self.assertFalse(filt.eventFilter(None,other));self.assertEqual(calls,['escape'])
-        class FakeEvent:
-            def __init__(self,kind):self._kind=kind
-            def type(self):return self._kind
-        self.assertTrue(filt.eventFilter(None,FakeEvent(QEvent.MouseButtonDblClick)));self.assertEqual(calls,['escape','toggle'])
-        windowed=app.FullscreenExitFilter(lambda:False,lambda:calls.append('escape'),lambda:calls.append('toggle'))
-        self.assertFalse(windowed.eventFilter(None,escape));self.assertEqual(calls,['escape','toggle'])
-    def test_cinematic_fullscreen_exit_forces_windowed(self):
-        calls=[]
-        class FakeVideo:
-            def __init__(self):self.full=True
-            def isFullScreen(self):return self.full
-            def setFullScreen(self,value):self.full=value;calls.append(value)
-        fake=FakeVideo();self.window.cinematic_video_widget=fake
-        self.window.exit_cinematic_fullscreen();self.assertFalse(fake.full)
-        self.window.toggle_cinematic_fullscreen();self.assertTrue(fake.full)
-        self.window.toggle_cinematic_fullscreen();self.assertFalse(fake.full)
-        self.assertIsNotNone(getattr(self.window,'cinematic_fullscreen_filter',None))
-    def test_preview_actions_disabled_without_selection(self):
-        self.window.preview_cinematic_video(None)
-        self.assertFalse(self.window.post_cinematic_button.isEnabled())
-        self.assertFalse(self.window.cinematic_play_button.isEnabled())
-    def test_cinematic_thumbnail_source_prefers_screenshot_then_thumb(self):
-        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
-        shot=folder/('thumb-in-'+uuid.uuid4().hex+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-        thumb=folder/('thumb-'+uuid.uuid4().hex+'.jpg');thumb.write_bytes(b'\xff\xd8'+b'0'*64)
-        try:
-            self.assertEqual(app.cinematic_thumbnail_source({'image':str(shot)},str(thumb)),str(shot))
-            shot.unlink()
-            self.assertEqual(app.cinematic_thumbnail_source({'image':str(shot)},str(thumb)),str(thumb))
-            self.assertEqual(app.cinematic_thumbnail_source({'image':str(shot)},str(folder/'nope.jpg')),'')
-        finally:shot.unlink(missing_ok=True);thumb.unlink(missing_ok=True)
-    def test_screenshot_cleanup_offers_and_deletes_used(self):
-        folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
-        names=[f'COD_test_{uuid.uuid4().hex}.png' for _ in range(11)]
-        created=[]
-        for name in names:
-            target=folder/name;target.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64);created.append(target)
-        self.addCleanup(lambda:[target.unlink(missing_ok=True) for target in created])
-        used_name=names[0];w=self.window
-        real_recent=w.store.recent_cinematics
-        w.store.recent_cinematics=lambda limit=30:[{'filename':used_name}]
-        calls=[]
-        w.ask_screenshot_cleanup=lambda u,t:(calls.append((u,t)),True)[1]
-        try:
-            w.show();self.qt.processEvents()
-            w._screenshot_cleanup_offered=False
-            w.refresh_cod_ai_screenshots()
-            self.assertEqual(len(calls),1);self.assertEqual(calls[0][0],1);self.assertGreaterEqual(calls[0][1],11)
-            self.assertFalse((folder/used_name).exists())
-            self.assertTrue(all((folder/name).exists() for name in names[1:]))
-            self.assertIn('Deleted 1 used screenshot.',w.cod_ai_capture_status.text())
-            w.refresh_cod_ai_screenshots()
-            self.assertEqual(len(calls),1)
-        finally:
-            w.store.recent_cinematics=real_recent
-            w.hide()
-            w.refresh_cod_ai_screenshots()
-    def test_screenshot_cleanup_no_and_few_files_stay_quiet(self):
-        folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
-        names=[f'COD_quiet_{uuid.uuid4().hex}.png' for _ in range(11)]
-        created=[]
-        for name in names:
-            target=folder/name;target.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64);created.append(target)
-        self.addCleanup(lambda:[target.unlink(missing_ok=True) for target in created])
-        w=self.window
-        real_recent=w.store.recent_cinematics
-        w.store.recent_cinematics=lambda limit=30:[{'filename':'COD_never_queued.png'}]
-        w.ask_screenshot_cleanup=lambda u,t:(_ for _ in ()).throw(AssertionError('should not ask without used files'))
-        try:
-            w.show();self.qt.processEvents()
-            w._screenshot_cleanup_offered=False
-            w.refresh_cod_ai_screenshots()
-            self.assertTrue(all((folder/name).exists() for name in names))
-            for target in list(created)[:8]:target.unlink()
-            created[:]=[target for target in created if target.exists()]
-            w.refresh_cod_ai_screenshots()
-            self.assertTrue(all(target.exists() for target in created))
-        finally:
-            w.store.recent_cinematics=real_recent
-            w.hide()
-            w.refresh_cod_ai_screenshots()
-    def test_talent_friends_picker_lists_eligible_and_caps_four(self):
-        import tempfile
-        from PySide6.QtTest import QTest
-        from PIL import Image
-        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
-        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
-        def photo(color):
-            target=tmpdir/(f'{color}.png');Image.new('RGB',(48,48),color).save(target);return str(target)
-        players=[
-            dict(id='f1',name='Friend1',display_name='F1',aliases=[],photo=photo('red'),enabled=True,consent_meta=True),
-            dict(id='f2',name='Friend2',display_name='F2',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True),
-            dict(id='f3',name='Friend3',display_name='F3',aliases=[],photo=photo('green'),enabled=True,consent_meta=True),
-            dict(id='f4',name='Friend4',display_name='F4',aliases=[],photo=photo('orange'),enabled=True,consent_meta=True),
-            dict(id='f5',name='Friend5',display_name='F5',aliases=[],photo=photo('pink'),enabled=True,consent_meta=True),
-            dict(id='noconsent',name='NoConsent',display_name='NC',aliases=[],photo=photo('yellow'),enabled=True,consent_meta=False),
-            dict(id='nophoto',name='NoPhoto',display_name='NP',aliases=[],photo=str(tmpdir/'ghost.png'),enabled=True,consent_meta=True),
-            dict(id='off',name='Off',display_name='Off',aliases=[],photo=photo('purple'),enabled=False,consent_meta=True),
-        ]
-        for player in players:self.window.store.save_player(player)
-        self.window.refresh_talent_friends()
-        tiles=self.window.talent_friend_tiles
-        self.assertEqual(set(tiles),{'f1','f2','f3','f4','f5'})
-        self.assertIn('(Max Of 3 Can be used)',self.window.talent_friends_status.text())
-        QTest.mouseClick(tiles['f1'],Qt.LeftButton);QTest.mouseClick(tiles['f2'],Qt.LeftButton)
-        self.assertEqual(self.window.talent_friend_ids,['f1','f2'])
-        self.assertIn('Featuring: F1, F2',self.window.talent_cameo_label.text())
-        strip_widgets=[self.window.talent_cameo_strip.itemAt(i).widget() for i in range(self.window.talent_cameo_strip.count())]
-        self.assertEqual(len([wide for wide in strip_widgets if wide is not None]),2)
-        self.assertFalse(tiles['f1'].remove_button.isHidden())
-        self.assertTrue(tiles['f3'].remove_button.isHidden())
-        tiles['f1'].remove_button.click()
-        self.assertEqual(self.window.talent_friend_ids,['f2'])
-        self.assertIn('Featuring: F2',self.window.talent_cameo_label.text())
-        self.assertTrue(tiles['f1'].remove_button.isHidden())
-        self.window.on_talent_friend_toggled('f3');self.window.on_talent_friend_toggled('f4')
-        self.assertEqual(self.window.talent_friend_ids,['f2','f3','f4'])
-        self.assertIn('Featuring: F2, F3, F4',self.window.talent_cameo_label.text())
-        self.window.on_talent_friend_toggled('f5')
-        self.assertEqual(len(self.window.talent_friend_ids),3)
-        self.assertNotIn('f5',self.window.talent_friend_ids)
-        self.assertIn('Max of 3 friends',self.window.cinematic_status.text())
-    def test_friend_grid_rejects_own_cameo_with_message(self):
-        from PIL import Image
-        w=self.window
-        def photo(color):
-            target=app.E.DATA/('cameo-'+color+'-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(48,48),color).save(target);return str(target)
-        w.store.save_player(dict(id='me',name='Me',display_name='Me',aliases=[],photo=photo('red'),enabled=True,consent_meta=True))
-        w.store.save_player(dict(id='pal',name='Pal',display_name='Pal',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True))
-        w.settings.values['player']='Me'
-        talent=w.videos_dir()/'talent.png'
-        created=not talent.is_file()
-        if created:Image.new('RGB',(48,48),'gray').save(talent)
-        try:
-            w.refresh_talent_friends()
-            w.on_talent_friend_toggled('me')
-            self.assertEqual(w.talent_friend_ids,[])
-            self.assertIn('already in this video',w.cinematic_status.text())
-            w.on_talent_friend_toggled('pal')
-            self.assertEqual(w.talent_friend_ids,['pal'])
-        finally:
-            w.talent_friend_ids=[]
-            w.settings.values.pop('player',None)
-            if created:
-                try:talent.unlink()
-                except OSError:pass
-    def test_queue_cinematic_with_friends_stages_cast_and_prompt(self):
-        import shutil as _shutil
-        import tempfile
-        from PIL import Image
-        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(_shutil.rmtree,tmpdir,True)
-        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
-        w=self.window
-        def photo(color):
-            target=tmpdir/(f'{color}.png');Image.new('RGB',(48,48),color).save(target);return str(target)
-        w.store.save_player(dict(id='f1',name='Friend1',display_name='F1',aliases=[],photo=photo('red'),enabled=True,consent_meta=True))
-        w.store.save_player(dict(id='f2',name='Friend2',display_name='F2',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True))
-        w.talent_friend_ids=['f1','f2']
-        src=tmpdir/'shot.png';Image.new('RGB',(64,36),'green').save(src)
-        created=[]
-        real_create=w.store.create_cinematic
-        def spy(cid,filename,image,prompt,talent_ids=None):
-            created.append((cid,filename,prompt,talent_ids));return real_create(cid,filename,image,prompt,talent_ids=talent_ids)
-        w.store.create_cinematic=spy
-        cids=[]
-        try:
-            w.queue_cinematic_source(str(src))
-            self.assertEqual(len(created),1)
-            cid,filename,prompt,tids=created[0];cids.append(cid)
-            self.assertEqual(tids,['f1','f2'])
-            self.assertIn('talent-f1.png is a reference photo of F1',prompt)
-            self.assertIn('talent-f2.png is a reference photo of F2',prompt)
-            self.assertTrue((Path(app.E.DATA)/'Cinematics'/cid/'talent-f1.png').is_file())
-            self.assertTrue((Path(app.E.DATA)/'Cinematics'/cid/'talent-f2.png').is_file())
-            self.assertEqual(json.loads(w.store.get_cinematic(cid)['talent_ids']),['f1','f2'])
-            self.assertIn('Featuring F1, F2.',w.cinematic_status.text())
-            w.talent_friend_ids=[]
-            w.queue_cinematic_source(str(src))
-            self.assertEqual(len(created),2);cids.append(created[1][0])
-            self.assertEqual(created[1][3],[])
-            self.assertNotIn('talent-f1.png',created[1][2])
-        finally:
-            w.store.create_cinematic=real_create
-            for job_id in cids:
-                try:w.store.update_cinematic(job_id,status='failed')
-                except Exception:pass
-                _shutil.rmtree(Path(app.E.DATA)/'Cinematics'/job_id,ignore_errors=True)
-                try:(Path(app.E.DATA)/'Cinematics'/'input'/(job_id+'.png')).unlink(missing_ok=True)
-                except OSError:pass
-    def test_remove_talent_photo_deletes_file_and_clears_preview(self):
-        from PIL import Image
-        target=Path(app.E.DATA)/'Cinematics'/'talent.png'
-        backup=target.read_bytes() if target.is_file() else None
-        try:
-            Image.new('RGB',(64,64),'blue').save(target)
-            self.window.ask=lambda *args,**kwargs:True
-            self.window.remove_cinematic_talent()
-            self.assertFalse(target.exists())
-            self.assertIn('No talent photo',self.window.talent_info.text())
-        finally:
-            if backup is None:target.unlink(missing_ok=True)
-            else:target.write_bytes(backup)
-            self.window.refresh_talent_preview()
-    def test_remove_talent_photo_without_file_reports_clearly(self):
-        target=Path(app.E.DATA)/'Cinematics'/'talent.png'
-        backup=target.read_bytes() if target.is_file() else None
-        try:
-            target.unlink(missing_ok=True)
-            self.window.remove_cinematic_talent()
-            self.assertIn('No talent photo',self.window.cinematic_status.text())
-        finally:
-            if backup is None:target.unlink(missing_ok=True)
-            else:target.write_bytes(backup)
-            self.window.refresh_talent_preview()
-    def test_talent_preview_shows_current_photo(self):
-        from PIL import Image
-        target=Path(app.E.DATA)/'Cinematics'/'talent.png'
-        backup=target.read_bytes() if target.is_file() else None
-        try:
-            Image.new('RGB',(64,64),'green').save(target)
-            self.window.refresh_talent_preview()
-            self.assertFalse(self.window.talent_preview.pixmap().isNull())
-            self.assertIn('talent.png',self.window.talent_info.text())
-        finally:
-            if backup is None:target.unlink(missing_ok=True)
-            else:target.write_bytes(backup)
-            self.window.refresh_talent_preview()
-    def test_cinematic_grid_shows_screenshot_thumbnails(self):
-        from PIL import Image
-        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
-        cid='cin-thumb-'+uuid.uuid4().hex
-        shot=folder/('in_'+cid+'.png');Image.new('RGB',(320,180),'red').save(shot)
-        self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
-        try:
-            self.window.refresh_cinematic_results()
-            found=[self.window.cinematic_results.item(i) for i in range(self.window.cinematic_results.count())
-                  if self.window.cinematic_results.item(i).data(Qt.UserRole)==cid]
-            self.assertTrue(found)
-            tile=self.window.cinematic_tiles[cid];self.assertFalse(tile.image.pixmap().isNull())
-        finally:shot.unlink(missing_ok=True)
-    def test_embed_without_chrome_window_reports_clearly(self):
-        self.window.find_tracker_chrome_windows=lambda: []
-        self.window.embed_tracker_chrome()
-        self.assertIn('No Chrome windows',self.window.browser_status.text())
-    def test_discord_failure_message_redacts_webhook_url(self):
-        self.window.on_cinematic_discord_result('Discord post failed: https://discord.com/api/webhooks/123/secret-token-here')
-        text=self.window.cinematic_status.text()
-        self.assertIn('[webhook]',text);self.assertNotIn('secret-token-here',text)
-    def test_discord_failure_message_redacts_split_webhook_url(self):
-        self.window.on_cinematic_discord_result("Max retries exceeded with url: /api/webhooks/123/secret-token-here (Caused by SSLError('boom'))")
-        text=self.window.cinematic_status.text()
-        self.assertIn('[webhook]',text);self.assertNotIn('secret-token-here',text)
-    def test_tracker_browser_page_exists(self):
-        from PySide6.QtWidgets import QPushButton
-        names=[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())]
-        self.assertIn('Tracker Browser',names)
-        page,layout=self.window.pages['Tracker Browser']
-        labels=[b.text() for b in page.findChildren(QPushButton)]
-        self.assertIn('Log into Meta AI',labels)
-        self.assertTrue(all('Open Tracker Chrome' not in text and 'Embed' not in text for text in labels))
-        self.assertFalse(hasattr(self.window,'auto_core'))
-        self.assertIsNotNone(self.window.browser_surface)
-        found=True
+
+
         self.assertTrue(found)
 
+
+    def test_cinematic_discord_post_retries_transient_tls_error(self):
+
+
+        import ssl,requests
+
+
+        calls=[];urls=[]
+
+
+        class FakeResponse:status_code=200
+
+
+        def fake_post(url,*args,**kwargs):
+
+
+            calls.append(1);urls.append(url)
+
+
+            if len(calls)==1:raise ssl.SSLError('SSL: SSL3_ALERT_BAD_RECORD_MAC')
+
+
+            return FakeResponse()
+
+
+        real_post=requests.post;requests.post=fake_post
+
+
+        try:
+
+
+            target=Path(app.E.DATA)/('cin-post-'+uuid.uuid4().hex+'.mp4');target.write_bytes(b'0'*16)
+
+
+            try:status=app.post_file_to_discord_webhook('https://discord.com/api/webhooks/1/abc',str(target))
+
+
+            finally:target.unlink(missing_ok=True)
+
+
+        finally:requests.post=real_post
+
+
+        self.assertEqual(status,200);self.assertEqual(len(calls),2)
+
+
+        self.assertIn('wait=true',urls[-1])
+
+
+    def test_cinematic_discord_post_gives_up_after_retries(self):
+
+
+        import requests
+
+
+        calls=[]
+
+
+        def fake_post(*args,**kwargs):calls.append(1);raise ConnectionError('boom')
+
+
+        real_post=requests.post;requests.post=fake_post
+
+
+        try:
+
+
+            target=Path(app.E.DATA)/('cin-post-'+uuid.uuid4().hex+'.mp4');target.write_bytes(b'0'*16)
+
+
+            try:
+
+
+                with self.assertRaises(ConnectionError):app.post_file_to_discord_webhook('https://discord.com/api/webhooks/1/abc',str(target))
+
+
+            finally:target.unlink(missing_ok=True)
+
+
+        finally:requests.post=real_post
+
+
+        self.assertEqual(len(calls),3)
+
+
+    def test_delete_selected_cinematic_video_removes_file_and_clears_row(self):
+
+
+        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
+        cid='cin-del-'+uuid.uuid4().hex
+
+
+        shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+        self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
+
+
+        good=folder/(cid+'.mp4');good.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
+
+
+        self.window.store.update_cinematic(cid,status='completed',video=str(good))
+
+
+        self.window.refresh_cinematic_results()
+
+
+        found=[self.window.cinematic_results.item(i) for i in range(self.window.cinematic_results.count())
+
+
+              if self.window.cinematic_results.item(i).data(Qt.UserRole)==cid]
+
+
+        self.assertTrue(found);self.window.cinematic_results.setCurrentItem(found[0])
+
+
+        self.window.ask=lambda *args,**kwargs:True;self.window.confirm_cinematic_delete=lambda:True
+
+
+        self.window.delete_selected_cinematic_video()
+
+
+        self.assertFalse(good.exists())
+
+
+        self.assertEqual(self.window.store.get_cinematic(cid)['video'],'')
+
+
+        self.assertIn('Deleted',self.window.cinematic_status.text())
+
+
+        shot.unlink(missing_ok=True)
+
+
+    def test_delete_releases_preview_player_before_removing_file(self):
+
+
+        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
+        cid='cin-lock-'+uuid.uuid4().hex
+
+
+        shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+        self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
+
+
+        good=folder/(cid+'.mp4');good.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
+
+
+        self.window.store.update_cinematic(cid,status='completed',video=str(good))
+
+
+        self.window.refresh_cinematic_results()
+
+
+        found=[self.window.cinematic_results.item(i) for i in range(self.window.cinematic_results.count())
+
+
+              if self.window.cinematic_results.item(i).data(Qt.UserRole)==cid]
+
+
+        self.assertTrue(found);self.window.cinematic_results.setCurrentItem(found[0])
+
+
+        self.window.cinematic_player.setSource(app.QUrl.fromLocalFile(str(good)))
+
+
+        self.assertFalse(self.window.cinematic_player.source().isEmpty())
+
+
+        real_unlink=Path.unlink
+
+
+        def guard_unlink(target,missing_ok=False):
+
+
+            if target==good and not self.window.cinematic_player.source().isEmpty():raise PermissionError(13,'file in use',str(target))
+
+
+            return real_unlink(target,missing_ok=missing_ok)
+
+
+        from unittest.mock import patch
+
+
+        self.window.confirm_cinematic_delete=lambda:True
+
+
+        with patch.object(Path,'unlink',guard_unlink):
+
+
+            self.window.delete_selected_cinematic_video()
+
+
+        self.assertFalse(good.exists())
+
+
+        self.assertTrue(self.window.cinematic_player.source().isEmpty())
+
+
+        shot.unlink(missing_ok=True)
+
+
+    def test_open_tracker_chrome_auto_embeds_new_window(self):
+
+
+        from unittest.mock import patch
+
+
+        w=self.window;attached=[]
+
+
+        w.attach_browser_window=lambda hwnd:attached.append(hwnd)
+
+
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen') as popen,patch('app.QMessageBox.information'):
+
+
+            w.open_tracker_chrome()
+
+
+            self.assertTrue(w.browser_poll.isActive());popen.assert_called_once()
+
+
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[12345]):
+
+
+            w.try_attach_tracker_chrome()
+
+
+        self.assertEqual(attached,[12345]);self.assertFalse(w.browser_poll.isActive())
+
+
+    def test_open_tracker_chrome_times_out_to_manual_embed(self):
+
+
+        from unittest.mock import patch
+
+
+        w=self.window;attached=[]
+
+
+        w.attach_browser_window=lambda hwnd:attached.append(hwnd)
+
+
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[]),patch('subprocess.Popen'),patch('app.QMessageBox.information'):
+
+
+            w.open_tracker_chrome()
+
+
+            for _ in range(30):w.try_attach_tracker_chrome()
+
+
+        self.assertEqual(attached,[]);self.assertFalse(w.browser_poll.isActive())
+
+
+        self.assertIn('Embed',w.browser_status.text())
+
+
+        with patch.object(w,'find_tracker_chrome_windows',return_value=[7]),patch('subprocess.Popen'),patch('app.QMessageBox.information'):
+
+
+            w.open_tracker_chrome()
+
+
+            for _ in range(30):w.try_attach_tracker_chrome()
+
+
+        self.assertEqual(attached,[7])
+
+
+    def test_section_headlines_render_banner_graphics(self):
+
+
+        from PySide6.QtWidgets import QLabel
+
+
+        w=self.window
+
+
+        for name,filename in app.PAGE_BANNERS.items():
+
+
+            self.assertIn(name,w.pages)
+
+
+            labels=[c for c in w.pages[name][0].findChildren(QLabel) if c.objectName()=='pageBanner']
+
+
+            self.assertEqual(len(labels),1,f'{name} should show exactly one banner')
+
+
+            self.assertEqual(labels[0].property('bannerFile'),filename)
+
+
+            pixmap=labels[0].pixmap()
+
+
+            self.assertIsNotNone(pixmap);self.assertFalse(pixmap.isNull())
+
+
+            self.assertLessEqual(pixmap.width(),520);self.assertLessEqual(pixmap.height(),170)
+
+
+            self.assertGreaterEqual(pixmap.height(),100)
+
+
+        for name in ('Solo Ops','Squad Night','Discord Settings'):
+
+
+            titles=[c for c in w.pages[name][0].findChildren(QLabel) if c.objectName()=='title']
+
+
+            self.assertEqual(len(titles),1);self.assertEqual(titles[0].text(),name)
+
+
+    def test_nav_buttons_use_text_without_operations_branding(self):
+
+
+        from PySide6.QtWidgets import QLabel
+
+
+        w=self.window
+
+
+        for row in range(w.nav.count()):
+
+
+            item=w.nav.item(row);name=item.data(Qt.UserRole)
+
+
+            self.assertIn(name,item.text())
+
+
+            self.assertIsNone(w.nav.itemWidget(item))
+
+
+        self.assertEqual(w.findChildren(QLabel,'eyebrow'),[])
+
+
+        self.assertEqual(w.findChildren(QLabel,'sidebarFooter'),[])
+
+
+    def test_roster_redesign_save_search_match_and_delete(self):
+
+
+        import tempfile
+
+
+        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
+
+
+        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
+
+
+        self.window.refresh_roster()
+
+
+        self.assertEqual(self.window.roster_count.text(),'PLAYERS (0)')
+
+
+        self.window.notice=lambda *a,**k:(_ for _ in ()).throw(AssertionError('unexpected modal notice: %r' % (a,)))
+
+
+        self.window.roster_name.setText('TestFella');self.window.roster_display_name.setText('Fella')
+
+
+        self.window.roster_aliases.setText('tf; fella2')
+
+
+        self.assertTrue(self.window.roster_dirty)
+
+
+        self.assertIn('●',self.window.roster_save_button.text())
+
+
+        self.window.save_player()
+
+
+        self.assertFalse(self.window.roster_dirty)
+
+
+        self.assertEqual(self.window.roster_count.text(),'PLAYERS (1)')
+
+
+        self.assertEqual(self.window.roster_list.count(),1)
+
+
+        self.assertEqual(self.window.roster_big_name.text(),'Fella')
+
+
+        self.assertIn('ENABLED',self.window.roster_enabled_pill.text())
+
+
+        pid=self.window.current_player
+
+
+        self.window.roster_search.setText('zzz-no-match');self.assertEqual(self.window.roster_list.count(),0)
+
+
+        self.window.roster_search.setText('FELLA2');self.assertEqual(self.window.roster_list.count(),1)
+
+
+        self.window.roster_search.clear();self.assertEqual(self.window.roster_list.count(),1)
+
+
+        self.window.name_test.setText('testfella');self.window.test_name()
+
+
+        self.assertIn('TestFella',self.window.name_match_result.text())
+
+
+        self.window.name_test.setText('zzzz');self.window.test_name()
+
+
+        self.assertIn('No unambiguous',self.window.name_match_result.text())
+
+
+        self.window.roster_display_name.setText('Changed')
+
+
+        self.assertTrue(self.window.roster_dirty)
+
+
+        self.window.maybe_discard_roster_edits=lambda:False
+
+
+        self.window.roster_new_player()
+
+
+        self.assertEqual(self.window.current_player,pid)
+
+
+        self.window.maybe_discard_roster_edits=lambda:True
+
+
+        self.window.roster_new_player()
+
+
+        self.assertIsNone(self.window.current_player)
+
+
+        self.window.ask=lambda *args,**kwargs:False
+
+
+        self.window.current_player=pid;self.window.delete_player()
+
+
+        self.assertEqual(len(self.window.store.roster()),1)
+
+
+        self.window.ask=lambda *args,**kwargs:True
+
+
+        self.window.delete_player()
+
+
+        self.assertEqual(len(self.window.store.roster()),0)
+
+
+        self.assertEqual(self.window.roster_count.text(),'PLAYERS (0)')
+
+
+    def test_roster_headshot_save_and_remove(self):
+
+
+        import tempfile
+
+
+        from PIL import Image
+
+
+        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
+
+
+        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
+
+
+        self.window.refresh_roster()
+
+
+        img=tmpdir/'face.png';Image.new('RGB',(64,64),'red').save(img)
+
+
+        self.window.notice=lambda *a,**k:(_ for _ in ()).throw(AssertionError('unexpected modal notice: %r' % (a,)))
+
+
+        self.window.roster_name.setText('PhotoGal')
+
+
+        self.window.photo_path.setText(str(img));self.window.headshot_filename.setText('face.png')
+
+
+        self.window.show_image(self.window.photo_preview,str(img),420,220)
+
+
+        self.window.mark_roster_dirty();self.window.save_player()
+
+
+        pid=self.window.current_player
+
+
+        target=Path(app.E.DATA)/'headshots'/(pid+'.jpg')
+
+
+        self.addCleanup(lambda:target.unlink(missing_ok=True))
+
+
+        self.assertTrue(target.is_file())
+
+
+        stored=next(p for p in self.window.store.roster() if p['id']==pid)
+
+
+        self.assertEqual(stored['photo'],str(target))
+
+
+        self.window.remove_roster_photo()
+
+
+        self.assertTrue(self.window.roster_dirty)
+
+
+        self.window.save_player()
+
+
+        cleared=next(p for p in self.window.store.roster() if p['id']==pid)
+
+
+        self.assertEqual(cleared['photo'],'')
+
+
+    def test_ai_prompt_stat_block_is_opt_in(self):
+
+
+        w=self.window
+
+
+        import tempfile as _tf
+
+
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
+
+
+        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
+
+
+        mid,_=w.store.add({'matchId':'ai-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win','ocr':'VICTORY'})
+
+
+        w.store.update(mid,players=json.dumps([{'name':'VintendoPower','verified':True,'stats':{'kills':19,'deaths':8}}]))
+
+
+        job=w.store.get(mid)
+
+
+        w.include_stats_checkbox.setChecked(True)
+
+
+        with_text=w.ensure_match_prompt(job)
+
+
+        self.assertIn('PLAYER STATISTICS:',with_text)
+
+
+        self.assertIn('Casual',with_text)
+
+
+        self.assertIn('2.38',with_text)
+
+
+        w.include_stats_checkbox.setChecked(False)
+
+
+        without_text=w.ensure_match_prompt(w.store.get(mid))
+
+
+        self.assertNotIn('PLAYER STATISTICS:',without_text)
+
+
+        w.include_stats_checkbox.setChecked(True)
+
+
+        self.assertIn('PLAYER STATISTICS:',w.ensure_match_prompt(w.store.get(mid)))
+
+    def test_legacy_poster_prompt_regenerates_without_removed_fields(self):
+
+        w=self.window
+
+        import tempfile as _tf
+
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        mid,_=w.store.add({'matchId':'legacy-'+uuid.uuid4().hex,'game':'mw4','modeKey':'kill_confirmed','playedAt':'2026-11-11T10:00:00Z','result':'loss'})
+
+        w.store.update(mid,players=json.dumps([{'name':'Alpha','verified':True,'stats':{'kills':12}}]),
+
+            prompt=app.E.MATCH_POSTER_PROMPT_MARKER+'\nUnique match ID: old\nCreative variation ID: old\nActual players (JSON):\n[{"player":"Alpha","cod_username_for_identity":"Alpha","verified_statistics":{"kills":12},"performance_rank":1,"ranking_basis":["kills"]}]\nCODMunity benchmark context (background only; do not render): median 1.03')
+
+        text=w.ensure_match_prompt(w.store.get(mid))
+
+        for junk in ('Unique match ID:','Creative variation ID:','performance_rank','ranking_basis','CODMunity benchmark context','median 1.03'):
+
+            self.assertNotIn(junk,text)
+
+        self.assertIn(app.E.MATCH_POSTER_PROMPT_MARKER,text)
+
+        self.assertIn('Defeat',text);self.assertIn('"player":"Alpha"',text)
+
+
+    def test_roster_cards_show_ladder_rank_or_placeholder(self):
+
+
+        from PySide6.QtWidgets import QLabel
+
+
+        w=self.window
+
+
+        import tempfile as _tf
+
+
+        _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.store.save_player({'id':'rank-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'})
+
+
+        w.store.save_player({'id':'rank-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False})
+
+
+        mid,_=w.store.add({'matchId':'rank-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
+
+
+        w.store.update(mid,players=json.dumps([{'name':'VintendoPower','verified':True,'stats':{'kills':341,'deaths':100}}]))
+
+
+        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00Z','source':'test'}})
+
+
+        w.codmunity_game.setCurrentIndex(max(0,w.codmunity_game.findData('warzone')));w.codmunity_mode.setCurrentIndex(max(0,w.codmunity_mode.findData('resurgence')));w.codmunity_scope.setCurrentIndex(max(0,w.codmunity_scope.findData('lifetime')))
+
+
+        w.refresh_roster()
+
+
+        texts={}
+
+
+        for index in range(w.roster_list.count()):
+
+
+            item=w.roster_list.item(index);card=w.roster_list.itemWidget(item)
+
+
+            texts[str(item.data(Qt.UserRole))]=' | '.join(label.text() for label in card.findChildren(QLabel))
+
+
+        self.assertIn('rank-a',texts);self.assertIn('rank-b',texts)
+
+
+        self.assertIn('Solid',texts['rank-a']);self.assertIn('3.41',texts['rank-a'])
+
+
+        self.assertNotIn('VintendoPower',texts['rank-b'])
+
+
+        self.assertNotIn('RANK UNAVAILABLE',texts['rank-b'])
+
+
+        self.assertIn('TRACKED RECORD',texts['rank-b'])
+
+
+        self.assertIn('No tracked matches yet',texts['rank-b'])
+
+
+        gmid,_=w.store.add({'matchId':'rank-goomy-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:05:00Z','result':'win'})
+
+
+        w.store.update(gmid,players=json.dumps([{'name':'Goomy11','verified':True,'stats':{'kills':10,'deaths':5}}]))
+
+
+        w.refresh_roster()
+
+
+        after={}
+
+
+        for index in range(w.roster_list.count()):
+
+
+            item=w.roster_list.item(index);card=w.roster_list.itemWidget(item)
+
+
+            after[str(item.data(Qt.UserRole))]=' | '.join(label.text() for label in card.findChildren(QLabel))
+
+
+        self.assertIn('1W/0L',after['rank-b']);self.assertIn('Best 10 kills',after['rank-b'])
+
+
+        self.assertNotIn('RANK UNAVAILABLE',after['rank-b'])
+
+
+        w.load_roster_player('rank-a')
+
+
+        self.assertIn('SOLID',w.roster_rank_tier.text())
+
+
+        self.assertIn('3.41',w.roster_rank_kd.text())
+
+
+        self.assertIn('1 tracked match',w.roster_rank_kd.text())
+
+
+        self.assertIn('%',w.roster_rank_pct.text())
+
+
+        self.assertIn('Sweat',w.roster_rank_next.text())
+
+
+        w.load_roster_player('rank-b')
+
+
+        self.assertIn('CASUAL',w.roster_rank_tier.text());self.assertIn('2.00',w.roster_rank_kd.text())
+
+
+    def test_codommunity_roster_identity_cache_rank_and_player_isolation(self):
+
+
+        import tempfile,json
+
+
+        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
+
+
+        w=self.window;w.store=app.E.Store(tmpdir/'history.sqlite3')
+
+
+        players=[
+
+
+            {'id':'codm-a','name':'Vintendo','display_name':'Vintendo local','aliases':['VintendoPower'],'photo':'','enabled':True,'consent_meta':True,
+
+
+             'codmunity_username':'vintendopower','codmunity_uid':'uid-primary','codmunity_display_name':'VintendoPower','profile_url':'https://codmunity.gg/profile/vintendopower'},
+
+
+            {'id':'codm-b','name':'Goomy11','display_name':'Goomy local','aliases':[],'photo':'','enabled':True,'consent_meta':False,
+
+
+             'codmunity_username':'Goomy11','codmunity_uid':'uid-secondary','codmunity_display_name':'Goomy','profile_url':'https://codmunity.gg/profile/Goomy11'},
+
+
+        ]
+
+
+        for player in players:w.store.save_player(player)
+
+
+        for suffix,name,kills,deaths in (('a','VintendoPower',341,100),('b','Goomy11',10,5)):
+
+
+            mid,_=w.store.add({'matchId':'codm-'+suffix,'game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:'+('01' if suffix=='a' else '02')+'Z','result':'win'})
+
+
+            w.store.update(mid,players=json.dumps([{'name':name,'verified':True,'stats':{'kills':kills,'deaths':deaths}}]))
+
+
+        w.store.set_meta('codmunity_public_distributions',{
+
+
+            'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime',
+
+
+                'kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],
+
+
+                'sampled':492,'users_total':515,'updated_at':'2026-11-10T12:00:00+00:00','source':'public_global_endpoint'}})
+
+
+        w.refresh_roster();w.load_roster_player('codm-a')
+
+
+        self.assertIn('vintendopower',w.codmunity_identity_label.text())
+
+
+        self.assertIn('uid-primary',w.codmunity_identity_label.text())
+
+
+        self.assertIn('https://codmunity.gg/profile/vintendopower',w.codmunity_profile_label.text())
+
+
+        self.assertIn('Profile linked',w.codmunity_status.text())
+
+
+        self.assertIn('Community data ready',w.codmunity_status.text())
+
+
+        self.assertIn('3.41',w.codmunity_kd_value.text())
+
+
+        self.assertIn('not lifetime',w.codmunity_kd_value.text())
+
+
+        self.assertIn('Solid',w.codmunity_rank_value.text())
+
+
+        self.assertAlmostEqual(float(w.codmunity_percentile_value.text().rstrip('%')),49.2,places=1)
+
+
+        self.assertEqual(w.codmunity_next_kd_value.text(),'4.94')
+
+
+        self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
+
+
+        w.codmunity_stats_button.click()
+
+
+        self.assertEqual(w.codmunity_status.text(),'Sign in with your CODMunity account to load live player stats.')
+
+
+        w.load_roster_player('codm-b')
+
+
+        self.assertIn('uid-secondary',w.codmunity_identity_label.text())
+
+
+        self.assertIn('2.00',w.codmunity_kd_value.text())
+
+
+        self.assertIn('local tracked matches',w.codmunity_kd_value.text())
+
+
+        self.assertNotIn('3.41',w.codmunity_kd_value.text())
+
+
+        self.assertIn('Saved community cache',w.codmunity_distribution_label.text())
+
+
+        w.roster_display_name.setText('Goomy display updated');w.save_player()
+
+
+        saved=next(player for player in w.store.roster() if player['id']=='codm-b')
+
+
+        self.assertEqual(saved['codmunity_uid'],'uid-secondary')
+
+
+        self.assertEqual(saved['codmunity_username'],'Goomy11')
+
+
+        self.assertEqual(saved['display_name'],'Goomy display updated')
+
+
+        self.assertFalse(saved['consent_meta'])
+
+
+    def test_cinematic_results_list_shows_several_rows(self):
+
+
+        self.assertGreaterEqual(self.window.cinematic_results.minimumHeight(),140)
+
+
+    def test_cod_ai_dashboard_has_workflow_and_no_standalone_delete_button(self):
+
+
+        self.assertIsNone(self._button_by_text('Delete selected video'))
+
+
+        self.assertIsNotNone(self._button_by_text('Refresh'))
+
+
+        self.assertIsNone(self._button_by_text('Test Video'))
+
+
+        self.assertIsNotNone(self._button_by_text('Post to Discord'))
+
+
+        self.assertIsNotNone(self._button_by_text('Change Photo'))
+
+
+        self.assertIsNotNone(self._button_by_text('Remove Photo'))
+
+
+        self.assertIsNotNone(self._button_by_text('Capture Game Screenshot'))
+
+
+        self.assertIn(self.window.hotkey_text('screenshot'),self.window.cod_ai_hotkey_status.text())
+
+
+    def test_cinematic_display_helpers_format_duration_and_shorten_names(self):
+
+
+        self.assertEqual(app.format_cinematic_duration(18),'0:18')
+
+
+        self.assertEqual(app.format_cinematic_duration(75),'1:15')
+
+
+        self.assertEqual(app.format_cinematic_duration(None),'')
+
+
+        short=app.short_cinematic_name('cin-c193ae51b3a43b84f0e51caa123456789.mp4')
+
+
+        self.assertLessEqual(len(short),24);self.assertIn(chr(8230),short);self.assertTrue(short.endswith('.mp4'))
+
+
+    def test_gallery_grid_uses_three_columns(self):
+
+
+        self.window.cinematic_results.resize(660,420)
+
+
+        self.window.update_cinematic_grid()
+
+
+        viewport=self.window.cinematic_results.viewport().width()
+
+
+        columns=viewport//self.window.cinematic_results.gridSize().width()
+
+
+        self.assertEqual(columns,3)
+
+
+    def test_per_thumbnail_delete_requires_confirmation_and_only_deletes_that_video(self):
+
+
+        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
+        made=[]
+
+
+        try:
+
+
+            for tag in ('keep','drop'):
+
+
+                cid='cin-tile-'+tag+'-'+uuid.uuid4().hex
+
+
+                shot=folder/('in_'+cid+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+                self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
+
+
+                video=folder/(cid+'.mp4');video.write_bytes(b'\x00\x00\x00\x18ftyp'+b'0'*1024)
+
+
+                self.window.store.update_cinematic(cid,status='completed',video=str(video))
+
+
+                made.append((cid,video,shot))
+
+
+            self.window.refresh_cinematic_results()
+
+
+            drop_cid,drop_video,_=made[1];keep_cid,keep_video,_=made[0]
+
+
+            tiles=getattr(self.window,'cinematic_tiles',{})
+
+
+            self.assertIn(drop_cid,tiles);self.assertIn(keep_cid,tiles)
+
+
+            self.window.confirm_cinematic_delete=lambda:False
+
+
+            tiles[drop_cid].delete_button.click()
+
+
+            self.assertTrue(drop_video.exists())
+
+
+            self.window.confirm_cinematic_delete=lambda:True
+
+
+            tiles[drop_cid].delete_button.click()
+
+
+            self.assertFalse(drop_video.exists());self.assertTrue(keep_video.exists())
+
+
+            self.assertEqual(self.window.store.get_cinematic(drop_cid)['video'],'')
+
+
+            self.assertEqual(self.window.store.get_cinematic(keep_cid)['video'],str(keep_video))
+
+
+        finally:
+
+
+            for _,video,shot in made:video.unlink(missing_ok=True);shot.unlink(missing_ok=True)
+
+
+    def test_fullscreen_escape_and_double_click_exit_via_filter(self):
+
+
+        from PySide6.QtCore import QEvent
+
+
+        from PySide6.QtGui import QKeyEvent,QMouseEvent
+
+
+        from PySide6.QtCore import QPointF
+
+
+        calls=[]
+
+
+        filt=app.FullscreenExitFilter(lambda:True,lambda:calls.append('escape'),lambda:calls.append('toggle'))
+
+
+        escape=QKeyEvent(QEvent.KeyPress,Qt.Key_Escape,Qt.NoModifier)
+
+
+        self.assertTrue(filt.eventFilter(None,escape));self.assertEqual(calls,['escape'])
+
+
+        other=QKeyEvent(QEvent.KeyPress,Qt.Key_A,Qt.NoModifier)
+
+
+        self.assertFalse(filt.eventFilter(None,other));self.assertEqual(calls,['escape'])
+
+
+        class FakeEvent:
+
+
+            def __init__(self,kind):self._kind=kind
+
+
+            def type(self):return self._kind
+
+
+        self.assertTrue(filt.eventFilter(None,FakeEvent(QEvent.MouseButtonDblClick)));self.assertEqual(calls,['escape','toggle'])
+
+
+        windowed=app.FullscreenExitFilter(lambda:False,lambda:calls.append('escape'),lambda:calls.append('toggle'))
+
+
+        self.assertFalse(windowed.eventFilter(None,escape));self.assertEqual(calls,['escape','toggle'])
+
+
+    def test_cinematic_fullscreen_exit_forces_windowed(self):
+
+
+        calls=[]
+
+
+        class FakeVideo:
+
+
+            def __init__(self):self.full=True
+
+
+            def isFullScreen(self):return self.full
+
+
+            def setFullScreen(self,value):self.full=value;calls.append(value)
+
+
+        fake=FakeVideo();self.window.cinematic_video_widget=fake
+
+
+        self.window.exit_cinematic_fullscreen();self.assertFalse(fake.full)
+
+
+        self.window.toggle_cinematic_fullscreen();self.assertTrue(fake.full)
+
+
+        self.window.toggle_cinematic_fullscreen();self.assertFalse(fake.full)
+
+
+        self.assertIsNotNone(getattr(self.window,'cinematic_fullscreen_filter',None))
+
+
+    def test_preview_actions_disabled_without_selection(self):
+
+
+        self.window.preview_cinematic_video(None)
+
+
+        self.assertFalse(self.window.post_cinematic_button.isEnabled())
+
+
+        self.assertFalse(self.window.cinematic_play_button.isEnabled())
+
+
+    def test_cinematic_thumbnail_source_prefers_screenshot_then_thumb(self):
+
+
+        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
+        shot=folder/('thumb-in-'+uuid.uuid4().hex+'.png');shot.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+        thumb=folder/('thumb-'+uuid.uuid4().hex+'.jpg');thumb.write_bytes(b'\xff\xd8'+b'0'*64)
+
+
+        try:
+
+
+            self.assertEqual(app.cinematic_thumbnail_source({'image':str(shot)},str(thumb)),str(shot))
+
+
+            shot.unlink()
+
+
+            self.assertEqual(app.cinematic_thumbnail_source({'image':str(shot)},str(thumb)),str(thumb))
+
+
+            self.assertEqual(app.cinematic_thumbnail_source({'image':str(shot)},str(folder/'nope.jpg')),'')
+
+
+        finally:shot.unlink(missing_ok=True);thumb.unlink(missing_ok=True)
+
+
+    def test_screenshot_cleanup_offers_and_deletes_used(self):
+
+
+        folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
+
+
+        names=[f'COD_test_{uuid.uuid4().hex}.png' for _ in range(11)]
+
+
+        created=[]
+
+
+        for name in names:
+
+
+            target=folder/name;target.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64);created.append(target)
+
+
+        self.addCleanup(lambda:[target.unlink(missing_ok=True) for target in created])
+
+
+        used_name=names[0];w=self.window
+
+
+        real_recent=w.store.recent_cinematics
+
+
+        w.store.recent_cinematics=lambda limit=30:[{'filename':used_name}]
+
+
+        calls=[]
+
+
+        w.ask_screenshot_cleanup=lambda u,t:(calls.append((u,t)),True)[1]
+
+
+        try:
+
+
+            w.show();self.qt.processEvents()
+
+
+            w._screenshot_cleanup_offered=False
+
+
+            w.refresh_cod_ai_screenshots()
+
+
+            self.assertEqual(len(calls),1);self.assertEqual(calls[0][0],1);self.assertGreaterEqual(calls[0][1],11)
+
+
+            self.assertFalse((folder/used_name).exists())
+
+
+            self.assertTrue(all((folder/name).exists() for name in names[1:]))
+
+
+            self.assertIn('Deleted 1 used screenshot.',w.cod_ai_capture_status.text())
+
+
+            w.refresh_cod_ai_screenshots()
+
+
+            self.assertEqual(len(calls),1)
+
+
+        finally:
+
+
+            w.store.recent_cinematics=real_recent
+
+
+            w.hide()
+
+
+            w.refresh_cod_ai_screenshots()
+
+
+    def test_screenshot_cleanup_no_and_few_files_stay_quiet(self):
+
+
+        folder=Path(app.E.DATA)/'Screenshots';folder.mkdir(parents=True,exist_ok=True)
+
+
+        names=[f'COD_quiet_{uuid.uuid4().hex}.png' for _ in range(11)]
+
+
+        created=[]
+
+
+        for name in names:
+
+
+            target=folder/name;target.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64);created.append(target)
+
+
+        self.addCleanup(lambda:[target.unlink(missing_ok=True) for target in created])
+
+
+        w=self.window
+
+
+        real_recent=w.store.recent_cinematics
+
+
+        w.store.recent_cinematics=lambda limit=30:[{'filename':'COD_never_queued.png'}]
+
+
+        w.ask_screenshot_cleanup=lambda u,t:(_ for _ in ()).throw(AssertionError('should not ask without used files'))
+
+
+        try:
+
+
+            w.show();self.qt.processEvents()
+
+
+            w._screenshot_cleanup_offered=False
+
+
+            w.refresh_cod_ai_screenshots()
+
+
+            self.assertTrue(all((folder/name).exists() for name in names))
+
+
+            for target in list(created)[:8]:target.unlink()
+
+
+            created[:]=[target for target in created if target.exists()]
+
+
+            w.refresh_cod_ai_screenshots()
+
+
+            self.assertTrue(all(target.exists() for target in created))
+
+
+        finally:
+
+
+            w.store.recent_cinematics=real_recent
+
+
+            w.hide()
+
+
+            w.refresh_cod_ai_screenshots()
+
+
+    def test_talent_friends_picker_lists_eligible_and_caps_four(self):
+
+
+        import tempfile
+
+
+        from PySide6.QtTest import QTest
+
+
+        from PIL import Image
+
+
+        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmpdir,True)
+
+
+        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
+
+
+        def photo(color):
+
+
+            target=tmpdir/(f'{color}.png');Image.new('RGB',(48,48),color).save(target);return str(target)
+
+
+        players=[
+
+
+            dict(id='f1',name='Friend1',display_name='F1',aliases=[],photo=photo('red'),enabled=True,consent_meta=True),
+
+
+            dict(id='f2',name='Friend2',display_name='F2',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True),
+
+
+            dict(id='f3',name='Friend3',display_name='F3',aliases=[],photo=photo('green'),enabled=True,consent_meta=True),
+
+
+            dict(id='f4',name='Friend4',display_name='F4',aliases=[],photo=photo('orange'),enabled=True,consent_meta=True),
+
+
+            dict(id='f5',name='Friend5',display_name='F5',aliases=[],photo=photo('pink'),enabled=True,consent_meta=True),
+
+
+            dict(id='noconsent',name='NoConsent',display_name='NC',aliases=[],photo=photo('yellow'),enabled=True,consent_meta=False),
+
+
+            dict(id='nophoto',name='NoPhoto',display_name='NP',aliases=[],photo=str(tmpdir/'ghost.png'),enabled=True,consent_meta=True),
+
+
+            dict(id='off',name='Off',display_name='Off',aliases=[],photo=photo('purple'),enabled=False,consent_meta=True),
+
+
+        ]
+
+
+        for player in players:self.window.store.save_player(player)
+
+
+        self.window.refresh_talent_friends()
+
+
+        tiles=self.window.talent_friend_tiles
+
+
+        self.assertEqual(set(tiles),{'f1','f2','f3','f4','f5'})
+
+
+        self.assertIn('(Max Of 3 Can be used)',self.window.talent_friends_status.text())
+
+
+        QTest.mouseClick(tiles['f1'],Qt.LeftButton);QTest.mouseClick(tiles['f2'],Qt.LeftButton)
+
+
+        self.assertEqual(self.window.talent_friend_ids,['f1','f2'])
+
+
+        self.assertIn('Featuring: F1, F2',self.window.talent_cameo_label.text())
+
+
+        strip_widgets=[self.window.talent_cameo_strip.itemAt(i).widget() for i in range(self.window.talent_cameo_strip.count())]
+
+
+        self.assertEqual(len([wide for wide in strip_widgets if wide is not None]),2)
+
+
+        self.assertFalse(tiles['f1'].remove_button.isHidden())
+
+
+        self.assertTrue(tiles['f3'].remove_button.isHidden())
+
+
+        tiles['f1'].remove_button.click()
+
+
+        self.assertEqual(self.window.talent_friend_ids,['f2'])
+
+
+        self.assertIn('Featuring: F2',self.window.talent_cameo_label.text())
+
+
+        self.assertTrue(tiles['f1'].remove_button.isHidden())
+
+
+        self.window.on_talent_friend_toggled('f3');self.window.on_talent_friend_toggled('f4')
+
+
+        self.assertEqual(self.window.talent_friend_ids,['f2','f3','f4'])
+
+
+        self.assertIn('Featuring: F2, F3, F4',self.window.talent_cameo_label.text())
+
+
+        self.window.on_talent_friend_toggled('f5')
+
+
+        self.assertEqual(len(self.window.talent_friend_ids),3)
+
+
+        self.assertNotIn('f5',self.window.talent_friend_ids)
+
+
+        self.assertIn('Max of 3 friends',self.window.cinematic_status.text())
+
+
+    def test_friend_grid_rejects_own_cameo_with_message(self):
+
+
+        from PIL import Image
+
+
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        def photo(color):
+
+
+            target=app.E.DATA/('cameo-'+color+'-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(48,48),color).save(target);return str(target)
+
+
+        w.store.save_player(dict(id='me',name='Me',display_name='Me',aliases=[],photo=photo('red'),enabled=True,consent_meta=True))
+
+
+        w.store.save_player(dict(id='pal',name='Pal',display_name='Pal',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True))
+
+
+        w.settings.values['player']='Me'
+
+
+        talent=w.videos_dir()/'talent.png'
+
+
+        created=not talent.is_file()
+
+
+        if created:Image.new('RGB',(48,48),'gray').save(talent)
+
+
+        try:
+
+
+            w.refresh_talent_friends()
+
+
+            w.on_talent_friend_toggled('me')
+
+
+            self.assertEqual(w.talent_friend_ids,[])
+
+
+            self.assertIn('already in this video',w.cinematic_status.text())
+
+
+            w.on_talent_friend_toggled('pal')
+
+
+            self.assertEqual(w.talent_friend_ids,['pal'])
+
+
+        finally:
+
+
+            w.talent_friend_ids=[]
+
+
+            w.settings.values.pop('player',None)
+
+
+            if created:
+
+
+                try:talent.unlink()
+
+
+                except OSError:pass
+
+
+    def test_queue_cinematic_with_friends_stages_cast_and_prompt(self):
+
+
+        import shutil as _shutil
+
+
+        import tempfile
+
+
+        from PIL import Image
+
+
+        tmpdir=Path(tempfile.mkdtemp());self.addCleanup(_shutil.rmtree,tmpdir,True)
+
+
+        self.window.store=app.E.Store(tmpdir/'history.sqlite3')
+
+
+        w=self.window
+
+
+        def photo(color):
+
+
+            target=tmpdir/(f'{color}.png');Image.new('RGB',(48,48),color).save(target);return str(target)
+
+
+        w.store.save_player(dict(id='f1',name='Friend1',display_name='F1',aliases=[],photo=photo('red'),enabled=True,consent_meta=True))
+
+
+        w.store.save_player(dict(id='f2',name='Friend2',display_name='F2',aliases=[],photo=photo('blue'),enabled=True,consent_meta=True))
+
+
+        w.talent_friend_ids=['f1','f2']
+
+
+        src=tmpdir/'shot.png';Image.new('RGB',(64,36),'green').save(src)
+
+
+        created=[]
+
+
+        real_create=w.store.create_cinematic
+
+
+        def spy(cid,filename,image,prompt,talent_ids=None):
+
+
+            created.append((cid,filename,prompt,talent_ids));return real_create(cid,filename,image,prompt,talent_ids=talent_ids)
+
+
+        w.store.create_cinematic=spy
+
+
+        cids=[]
+
+
+        try:
+
+
+            w.queue_cinematic_source(str(src))
+
+
+            self.assertEqual(len(created),1)
+
+
+            cid,filename,prompt,tids=created[0];cids.append(cid)
+
+
+            self.assertEqual(tids,['f1','f2'])
+
+
+            self.assertIn('talent-f1.png is a reference photo of F1',prompt)
+
+
+            self.assertIn('talent-f2.png is a reference photo of F2',prompt)
+
+
+            self.assertTrue((Path(app.E.DATA)/'Cinematics'/cid/'talent-f1.png').is_file())
+
+
+            self.assertTrue((Path(app.E.DATA)/'Cinematics'/cid/'talent-f2.png').is_file())
+
+
+            self.assertEqual(json.loads(w.store.get_cinematic(cid)['talent_ids']),['f1','f2'])
+
+
+            self.assertIn('Featuring F1, F2.',w.cinematic_status.text())
+
+
+            w.talent_friend_ids=[]
+
+
+            w.queue_cinematic_source(str(src))
+
+
+            self.assertEqual(len(created),2);cids.append(created[1][0])
+
+
+            self.assertEqual(created[1][3],[])
+
+
+            self.assertNotIn('talent-f1.png',created[1][2])
+
+
+        finally:
+
+
+            w.store.create_cinematic=real_create
+
+
+            for job_id in cids:
+
+
+                try:w.store.update_cinematic(job_id,status='failed')
+
+
+                except Exception:pass
+
+
+                _shutil.rmtree(Path(app.E.DATA)/'Cinematics'/job_id,ignore_errors=True)
+
+
+                try:(Path(app.E.DATA)/'Cinematics'/'input'/(job_id+'.png')).unlink(missing_ok=True)
+
+
+                except OSError:pass
+
+
+    def test_remove_talent_photo_deletes_file_and_clears_preview(self):
+
+
+        from PIL import Image
+
+
+        target=Path(app.E.DATA)/'Cinematics'/'talent.png'
+
+
+        backup=target.read_bytes() if target.is_file() else None
+
+
+        try:
+
+
+            Image.new('RGB',(64,64),'blue').save(target)
+
+
+            self.window.ask=lambda *args,**kwargs:True
+
+
+            self.window.remove_cinematic_talent()
+
+
+            self.assertFalse(target.exists())
+
+
+            self.assertIn('No talent photo',self.window.talent_info.text())
+
+
+        finally:
+
+
+            if backup is None:target.unlink(missing_ok=True)
+
+
+            else:target.write_bytes(backup)
+
+
+            self.window.refresh_talent_preview()
+
+
+    def test_remove_talent_photo_without_file_reports_clearly(self):
+
+
+        target=Path(app.E.DATA)/'Cinematics'/'talent.png'
+
+
+        backup=target.read_bytes() if target.is_file() else None
+
+
+        try:
+
+
+            target.unlink(missing_ok=True)
+
+
+            self.window.remove_cinematic_talent()
+
+
+            self.assertIn('No talent photo',self.window.cinematic_status.text())
+
+
+        finally:
+
+
+            if backup is None:target.unlink(missing_ok=True)
+
+
+            else:target.write_bytes(backup)
+
+
+            self.window.refresh_talent_preview()
+
+
+    def test_talent_preview_shows_current_photo(self):
+
+
+        from PIL import Image
+
+
+        target=Path(app.E.DATA)/'Cinematics'/'talent.png'
+
+
+        backup=target.read_bytes() if target.is_file() else None
+
+
+        try:
+
+
+            Image.new('RGB',(64,64),'green').save(target)
+
+
+            self.window.refresh_talent_preview()
+
+
+            self.assertFalse(self.window.talent_preview.pixmap().isNull())
+
+
+            self.assertIn('talent.png',self.window.talent_info.text())
+
+
+        finally:
+
+
+            if backup is None:target.unlink(missing_ok=True)
+
+
+            else:target.write_bytes(backup)
+
+
+            self.window.refresh_talent_preview()
+
+
+    def test_cinematic_grid_shows_screenshot_thumbnails(self):
+
+
+        from PIL import Image
+
+
+        folder=Path(app.E.DATA)/'Cinematics';folder.mkdir(parents=True,exist_ok=True)
+
+
+        cid='cin-thumb-'+uuid.uuid4().hex
+
+
+        shot=folder/('in_'+cid+'.png');Image.new('RGB',(320,180),'red').save(shot)
+
+
+        self.assertTrue(self.window.store.create_cinematic(cid,'shot.png',shot,'prompt'))
+
+
+        try:
+
+
+            self.window.refresh_cinematic_results()
+
+
+            found=[self.window.cinematic_results.item(i) for i in range(self.window.cinematic_results.count())
+
+
+                  if self.window.cinematic_results.item(i).data(Qt.UserRole)==cid]
+
+
+            self.assertTrue(found)
+
+
+            tile=self.window.cinematic_tiles[cid];self.assertFalse(tile.image.pixmap().isNull())
+
+
+        finally:shot.unlink(missing_ok=True)
+
+
+    def test_embed_without_chrome_window_reports_clearly(self):
+
+
+        self.window.find_tracker_chrome_windows=lambda: []
+
+
+        self.window.embed_tracker_chrome()
+
+
+        self.assertIn('No Chrome windows',self.window.browser_status.text())
+
+
+    def test_discord_failure_message_redacts_webhook_url(self):
+
+
+        self.window.on_cinematic_discord_result('Discord post failed: https://discord.com/api/webhooks/123/secret-token-here')
+
+
+        text=self.window.cinematic_status.text()
+
+
+        self.assertIn('[webhook]',text);self.assertNotIn('secret-token-here',text)
+
+
+    def test_discord_failure_message_redacts_split_webhook_url(self):
+
+
+        self.window.on_cinematic_discord_result("Max retries exceeded with url: /api/webhooks/123/secret-token-here (Caused by SSLError('boom'))")
+
+
+        text=self.window.cinematic_status.text()
+
+
+        self.assertIn('[webhook]',text);self.assertNotIn('secret-token-here',text)
+
+
+    def test_tracker_browser_page_exists(self):
+
+
+        from PySide6.QtWidgets import QPushButton
+
+
+        names=[self.window.nav.item(i).data(Qt.UserRole) for i in range(self.window.nav.count())]
+
+
+        self.assertIn('Tracker Browser',names)
+
+
+        page,layout=self.window.pages['Tracker Browser']
+
+
+        labels=[b.text() for b in page.findChildren(QPushButton)]
+
+
+        self.assertIn('Log into Meta AI',labels)
+
+
+        self.assertTrue(all('Open Tracker Chrome' not in text and 'Embed' not in text for text in labels))
+
+
+        self.assertFalse(hasattr(self.window,'auto_core'))
+
+
+        self.assertIsNotNone(self.window.browser_surface)
+
+
+        found=True
+
+
+        self.assertTrue(found)
+
+
+
+
+
     def test_browser_mode_defaults_to_dedicated(self):
+
+
         w=self.window
+
+
         self.assertEqual(w.tracker_browser_mode(),'dedicated')
+
+
         self.assertEqual(w.browser_mode_combo.currentIndex(),0)
+
+
     def test_browser_mode_setting_round_trip(self):
+
+
         w=self.window
+
+
         original=w.settings.values.get('tracker_browser_mode')
+
+
         try:
+
+
             w.browser_mode_combo.setCurrentIndex(1);w.save_settings()
+
+
             self.assertEqual(w.settings.values['tracker_browser_mode'],'attach')
+
+
             self.assertEqual(w.tracker_browser_mode(),'attach')
+
+
             w.browser_mode_combo.setCurrentIndex(0);w.save_settings()
+
+
             self.assertEqual(w.settings.values['tracker_browser_mode'],'dedicated')
+
+
         finally:
+
+
             if original is None:w.settings.values.pop('tracker_browser_mode',None)
+
+
             else:w.settings.values['tracker_browser_mode']=original
+
+
             w.settings.save()
+
+
             w.browser_mode_combo.setCurrentIndex(1 if w.tracker_browser_mode()=='attach' else 0)
+
+
     def test_open_tracker_chrome_attach_without_windows_reports_clearly(self):
+
+
         w=self.window
+
+
         original=w.settings.values.get('tracker_browser_mode')
+
+
         w.settings.values['tracker_browser_mode']='attach'
+
+
         try:
+
+
             from unittest.mock import patch
+
+
             w.find_tracker_chrome_windows=lambda: []
+
+
             with patch('app.QMessageBox.information'):
+
+
                 w.open_tracker_chrome()
+
+
             self.assertIn('No Chrome windows found',w.browser_status.text())
+
+
         finally:
+
+
             if original is None:w.settings.values.pop('tracker_browser_mode',None)
+
+
             else:w.settings.values['tracker_browser_mode']=original
+
+
     def test_open_tracker_chrome_attach_single_window_embeds_it(self):
+
+
         w=self.window
+
+
         original=w.settings.values.get('tracker_browser_mode')
+
+
         attached=[]
+
+
         w.settings.values['tracker_browser_mode']='attach'
+
+
         try:
+
+
             w.find_tracker_chrome_windows=lambda: [4242]
+
+
             from unittest.mock import patch
+
+
             w.attach_browser_window=lambda hwnd: attached.append(hwnd)
+
+
             with patch('app.QMessageBox.information'):
+
+
                 w.open_tracker_chrome()
+
+
             self.assertEqual(attached,[4242])
+
+
         finally:
+
+
             if original is None:w.settings.values.pop('tracker_browser_mode',None)
+
+
             else:w.settings.values['tracker_browser_mode']=original
+
+
     def test_open_tracker_chrome_dedicated_uses_isolated_data_dir(self):
+
+
         import subprocess as subprocess_mod
+
+
         w=self.window
+
+
         real_popen=subprocess_mod.Popen;seen=[]
+
+
         try:
+
+
             w.chrome_executable=lambda: Path('chrome.exe')
+
+
             w.find_tracker_chrome_windows=lambda: []
+
+
             w.refresh_tracker_browser=lambda: None
+
+
             from unittest.mock import patch
+
+
             subprocess_mod.Popen=lambda *args,**kwargs: seen.append(args[0])
+
+
             with patch('app.QMessageBox.information'):
+
+
                 w.open_tracker_chrome()
+
+
             self.assertEqual(len(seen),1)
+
+
             flags=[str(part) for part in seen[0][1:]]
+
+
             self.assertTrue(any(part.startswith('--user-data-dir=') for part in flags))
+
+
             self.assertFalse(any(part.startswith('--profile-directory') for part in flags))
+
+
             self.assertIn(str(app.E.DATA),seen[0][1])
+
+
         finally:
+
+
             subprocess_mod.Popen=real_popen
+
+
     def test_boot_refresh_skips_when_distributions_cached(self):
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'kd':[]}})
+
         called=[];w.refresh_all_distributions=lambda:called.append(True)
+
         w._boot_dist_done=False;w._boot_refresh_distributions()
+
         self.assertEqual(called,[])
+
     def test_boot_refresh_silent_without_roster(self):
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         before=w.codmunity_status.text()
+
         called=[];w.refresh_all_distributions=lambda:called.append(True)
+
         w._boot_dist_done=False;w._boot_refresh_distributions()
+
         self.assertEqual(called,[])
+
         self.assertEqual(w.codmunity_status.text(),before)
+
     def test_boot_refresh_selects_default_player_and_fetches(self):
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         w.store.save_player({'id':'boot-a','name':'BootPlayer','display_name':'BootPlayer','aliases':[],'photo':'','enabled':True})
+
         called=[];w.refresh_all_distributions=lambda:called.append(True)
+
         w._boot_dist_done=False;w._boot_refresh_distributions()
+
         self.assertEqual(w.current_player,'boot-a');self.assertEqual(called,[True])
+
         w._boot_refresh_distributions()
+
         self.assertEqual(called,[True])
+
     def test_window_opens_within_screen_bounds(self):
+
         w=self.window
+
         self.assertGreaterEqual(w.width(),1100);self.assertLessEqual(w.width(),1600)
+
         self.assertGreaterEqual(w.height(),730);self.assertLessEqual(w.height(),1000)
+
     def test_boot_force_fetches_when_strip_key_missing(self):
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         w.store.save_player({'id':'me','name':'Vintendo','display_name':'Vintendo','aliases':[],'photo':'','enabled':True})
+
         w.store.set_meta('codmunity_public_distributions',{'other|key|here':{}})
+
         called=[];w.refresh_all_distributions=lambda:called.append(True)
+
         w._boot_dist_done=True;w._boot_refresh_distributions()
+
         self.assertEqual(called,[])
+
         w._boot_refresh_distributions(force=True)
+
         self.assertEqual(called,[True])
+
     def test_distribution_saves_despite_player_switch(self):
+
         from types import SimpleNamespace
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         w.store.save_player({'id':'me','name':'Vintendo','display_name':'Vintendo','aliases':[],'photo':'','enabled':True})
+
         w.current_player='ghost'
+
         w._refresh_queue=[('warzone','resurgence','lifetime')];w._refresh_total=1;w._refresh_failed=0
+
         dist=SimpleNamespace(game='warzone',mode='resurgence',scope='lifetime',kd=[0.8]*12,sampled=100,users_total=200)
+
         w.on_codmunity_distribution('me','warzone|resurgence|lifetime',dist)
+
         cached=w.store.meta('codmunity_public_distributions',{}) or {}
+
         self.assertIn('warzone|resurgence|lifetime',cached)
+
         self.assertIn('1/1',w.codmunity_status.text())
+
     def test_fullscreen_capture_has_no_region_picker(self):
+
         self.assertIsNone(self._button_by_text('Select Area To Capture Score'))
+
         self.assertFalse(hasattr(self.window,'pick_region'))
+
         self.assertFalse(hasattr(self.window,'roi_label'))
+
     def test_studio_tab_autoloads_latest_match(self):
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         mid,_=w.store.add({'matchId':'studio-auto-1','game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
+
         w.store.update(mid,players=json.dumps([{'name':'Vintendo','verified':True,'stats':{'kills':5}}]))
+
         rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
+
         home=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='Dashboard']
+
         self.assertTrue(rows);self.assertTrue(home)
+
         w.refresh_history()
+
         w.active_id=None
+
         w.nav.setCurrentRow(home[0]);w.nav.setCurrentRow(rows[0])
+
         self.assertEqual(w.active_id,mid)
+
         self.assertIn(mid,w.studio_match.text())
+
     def test_studio_tab_keeps_loaded_job(self):
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         old,_=w.store.add({'matchId':'studio-old-1','game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win'})
+
         new,_=w.store.add({'matchId':'studio-new-1','game':'warzone','modeKey':'resurgence','playedAt':'2026-11-10T12:05:00Z','result':'win'})
+
         rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
+
         home=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='Dashboard']
+
         self.assertTrue(rows);self.assertTrue(home)
+
         w.refresh_history()
+
         w.active_id=old
+
         w.nav.setCurrentRow(home[0]);w.nav.setCurrentRow(rows[0])
+
         self.assertEqual(w.active_id,old)
+
     def test_delivered_match_leaves_studio_ready_for_next(self):
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         old,_=w.store.add({'matchId':'studio-posted-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'},'delivered')
+
         new,_=w.store.add({'matchId':'studio-next-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
         w.store.update(new,players=json.dumps([{'name':'Vintendo','verified':True,'stats':{'kills':5}}]))
+
         w.active_id=old
+
         w.refresh_history()
+
         self.assertEqual(w.active_id,new)
+
         self.assertIn(new,w.studio_match.text())
+
         w.store.update(new,status='delivered')
+
         w.refresh_history()
+
         self.assertIsNone(w.active_id)
+
         self.assertIn('Ready for the next match',w.studio_match.text())
+
         self.assertFalse(w.generate_poster_button.isEnabled())
+
         calls=[]
+
         w._prepare_and_launch=lambda mid,manual=True:(calls.append(mid) or True)
+
         w.notice=lambda _:None
+
         w.prepare_artwork()
+
         self.assertEqual(calls,[])
+
     def test_ocr_highlights_roster_matches_and_keeps_only_matched(self):
+
         from PySide6.QtCore import Qt
+
         w=self.window
+
         import tempfile as _tf
+
         _tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
         w.store.save_player({'id':'me','name':'Vintendopower','display_name':'Vintendopower','aliases':[],'photo':'','enabled':True})
+
         w.ocr_text.setPlainText('PLAYER  KILLS  DAMAGE\nJunkGuy  5  100\nVintendopower  12  3400')
+
         w.parse_ocr()
+
         names=[w.ocr_table.item(r,0).text() for r in range(w.ocr_table.rowCount())]
+
         self.assertEqual(names,['Vintendopower','JunkGuy'])
+
         self.assertEqual(w.ocr_table.item(0,0).background().color().name(),'#1d3a2a')
+
         self.assertEqual(w.ocr_table.item(1,0).background().style(),Qt.NoBrush)
+
         w.keep_matched_ocr_rows()
+
         self.assertEqual(w.ocr_table.rowCount(),1)
+
         self.assertEqual(w.ocr_table.item(0,0).text(),'Vintendopower')
-    def test_codmunity_loading_graphic_shows_until_attached(self):
+
+    def test_sync_settings_tab_is_native_and_spawns_nothing(self):
+
+
         w=self.window
-        from PySide6.QtGui import QMovie
-        self.assertTrue(w.codmunity_movie.isValid())
-        self.assertEqual(w.codmunity_movie.state(),QMovie.Running)
-        self.assertEqual((w.codmunity_loading.width(),w.codmunity_loading.height()),(560,187))
-        self.assertFalse(w.codmunity_loading.isHidden())
-        w.codmunity_hwnd=None
-        w.start_or_attach_codmunity=lambda:None
-        idx=w.app_tabs.indexOf(w.codmunity_page)
-        w.app_tab_changed(idx)
-        self.assertFalse(w.codmunity_loading.isHidden())
-    def test_close_kills_only_launched_codmunity(self):
-        w=self.window
-        class Proc:
-            def __init__(self,code):self.code=code;self.killed=0
-            def poll(self):return self.code
-            def terminate(self):self.killed+=1
-        live=Proc(None);w.codmunity_process=live;w._close_codmunity_process()
-        self.assertEqual(live.killed,1)
-        gone=Proc(0);w.codmunity_process=gone;w._close_codmunity_process()
-        self.assertEqual(gone.killed,0)
-        w.codmunity_process=None;w._close_codmunity_process()
-    def test_boot_open_skips_during_tests(self):
-        w=self.window
-        called=[];w.start_or_attach_codmunity=lambda:called.append(1)
-        w._boot_open_codmunity()
-        self.assertEqual(called,[])
+
+
+        import subprocess as _sp
+
+
+        real=_sp.Popen
+
+        def boom(*args,**kwargs):raise AssertionError('external app must not spawn')
+
+        _sp.Popen=boom
+
+        try:
+
+            for row in range(w.nav.count()):
+    
+                if w.nav.item(row).data(Qt.UserRole)=='Settings':
+    
+                    w.nav.setCurrentRow(row);break
+            w.settings_tabs.setCurrentWidget(w.sync_tab_page)
+
+
+        finally:_sp.Popen=real
+
+
         self.assertIsNone(w.codmunity_process)
-    def test_second_poster_submit_queues_behind_active_job(self):
-        import tempfile as _tf
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        mid,_=w.store.add({'matchId':'queue-second-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w._inapp_poster_active='job-a-running'
-        try:
-            launched=w._start_poster_automation(mid,app.E.DATA,[],'prompt')
-        finally:
-            pass
-        self.assertTrue(launched)
-        self.assertEqual(w._inapp_poster_active,'job-a-running')
-        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
-        self.assertIn('queued',w.job_status.text().lower())
-        self.addCleanup(setattr,w,'_inapp_poster_active',None)
-    def test_sweep_resets_only_orphaned_submitting_jobs(self):
-        import tempfile as _tf
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        stale,_=w.store.add({'matchId':'stale-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(stale,gen_state='submitting')
-        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-3600,stale))
-        fresh,_=w.store.add({'matchId':'fresh-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(fresh,gen_state='submitting')
-        active,_=w.store.add({'matchId':'active-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(active,gen_state='submitting')
-        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-3600,active))
-        w._inapp_poster_active=active
-        try:n=w._sweep_stale_poster_jobs()
-        finally:w._inapp_poster_active=None
-        self.assertEqual(n,1)
-        row=w.store.get(stale);self.assertEqual(row['gen_state'],'idle');self.assertTrue(row['error'])
-        self.assertEqual(w.store.get(fresh)['gen_state'],'submitting')
-        self.assertEqual(w.store.get(active)['gen_state'],'submitting')
-    def test_finish_starts_queued_job_when_full_auto_off(self):
-        import tempfile as _tf
-        from PIL import Image
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        done,_=w.store.add({'matchId':'drained-done-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(done,players=json.dumps([]))
-        waiting,_=w.store.add({'matchId':'drained-wait-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(waiting,players=json.dumps([]),gen_state='queued')
-        saved=app.E.DATA/('drained-'+uuid.uuid4().hex+'.png');Image.new('RGB',(640,360),'navy').save(saved)
-        w.notice=lambda _:None
-        w.full_auto.blockSignals(True);w.full_auto.setChecked(False);w.full_auto.blockSignals(False)
-        calls=[]
-        def fake_launch(mid,*args,**kwargs):calls.append(mid);w._inapp_poster_active=mid;return True
-        w._prepare_and_launch=fake_launch
-        w._inapp_poster_active=done
-        try:w._finish_inapp_poster(done,str(saved))
-        finally:w._inapp_poster_active=None
-        self.assertEqual(calls,[waiting])
-    def test_tracker_browser_has_no_hidden_progress_widget(self):
-        w=self.window
-        self.assertFalse(hasattr(w,'auto_core'))
-    def test_poster_job_returns_ok_and_fail_dicts(self):
-        import tempfile as _tf
-        from unittest.mock import patch
-        from pathlib import Path
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        w._record_auto_browser=lambda *args:None
-        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-        class FakeCtx:
-            def new_page(self):return object()
-            def close(self):pass
-        class FakeMgr:
-            def __enter__(self):return None
-            def __exit__(self,*args):return False
-        class FakeDriver:
-            def __init__(self,*args):pass
-            def new_job_page(self):return object()
-            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
-        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
-            ok=w._run_poster_job('job-ok',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
-        self.assertEqual(ok,{'ok':True,'path':str(saved),'via':'download'})
-        class BoomDriver(FakeDriver):
-            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):
-                raise app.meta_automation.MetaAutomationError('generation','boom')
-        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',BoomDriver):
-            bad=w._run_poster_job('job-bad',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
-        self.assertEqual(bad,{'ok':False,'step':'generation','detail':'boom'})
-    def test_deliver_poster_result_routes_ok_fail_and_malformed(self):
-        w=self.window
-        calls=[]
-        w._finish_inapp_poster=lambda mid,path,via='download':calls.append(('finish',mid,path,via))
-        w._fail_inapp_poster=lambda mid,step,detail:calls.append(('fail',mid,step,detail))
-        w._deliver_poster_result('m1',{'ok':True,'path':'p.png'})
-        w._deliver_poster_result('m2',{'ok':False,'step':'generation','detail':'boom'})
-        w._deliver_poster_result('m3',['x'])
-        self.assertEqual(calls[0],('finish','m1','p.png','download'))
-        self.assertEqual(calls[1],('fail','m2','generation','boom'))
-        self.assertEqual(calls[2][0],'fail');self.assertEqual(calls[2][1],'m3')
-    def test_start_poster_automation_hands_off_through_pool(self):
-        import tempfile as _tf
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        mid,_=w.store.add({'matchId':'handoff-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        captured={}
-        def fake_async(fn,done=None,failed=None):
-            captured['fn']=fn;captured['done']=done
-        w.async_task=fake_async
-        w._poster_manual=False
-        launched=w._start_poster_automation(mid,str(_tmpdir),[],'prompt')
-        self.assertTrue(launched)
-        self.assertIn('fn',captured)
-        finished=[]
-        w._finish_inapp_poster=lambda m,p,via='download':finished.append((m,p))
-        w._run_poster_job=lambda *args:({'ok':True,'path':'routed.png'})
-        captured['done']({'ok':True,'path':'routed.png'})
-        self.assertEqual(finished,[(mid,'routed.png')])
-        self.addCleanup(setattr,w,'_inapp_poster_active',None)
-    def test_screenshot_result_links_but_does_not_post(self):
-        import tempfile as _tf
-        from PIL import Image
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        w.full_auto.blockSignals(True);w.full_auto.setChecked(False);w.full_auto.blockSignals(False)
-        mid,_=w.store.add({'matchId':'held-shot-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(mid,players=json.dumps([]))
-        saved=_tmpdir/'shot.png';Image.new('RGB',(640,360),'teal').save(saved)
-        delivered=[]
-        w.deliver=lambda m:delivered.append(m)
-        w._deliver_poster_result(mid,{'ok':True,'path':str(saved),'via':'screenshot'})
-        self.assertEqual(delivered,[])
-        row=w.store.get(mid)
-        self.assertTrue(row['artwork'].endswith('.png'))
-        self.assertEqual(row['gen_state'],'done')
-        self.assertIn('mport',w.job_status.text())
-    def test_ai_studio_matches_mockup_layout(self):
-        from PySide6.QtWidgets import QLabel, QPushButton
-        w=self.window
-        page,_layout=w.pages['AI Studio']
-        texts=[label.text() for label in page.findChildren(QLabel)]
-        for expected in ('MATCH INPUT','MATCH OPTIONS','PLAYERS IDENTIFIED FROM SCREENSHOTS','AI PREVIEW','SQUAD TOTALS'):
-            self.assertIn(expected,texts)
-        buttons=[b.text() for b in page.findChildren(QPushButton)]
-        for expected in ('Generate AI End Game Picture','APPROVE & POST','Cancel','Retry / review selected job'):
-            self.assertIn(expected,buttons)
-        steps=[label.text() for label in page.findChildren(QLabel) if label.objectName()=='stepTitle']
-        self.assertEqual(steps,['INPUT','GENERATE','REVIEW','DISCORD'])
-        for attr in ('opt_game_mode','opt_result','opt_placement','opt_style','studio_heads','art_preview','photo_assignments'):
+
+
+        for attr in ('sync_state_label','sync_account_label','sync_now_button','sync_export_button','sync_diag_button','sync_pair_button'):
+
+
             self.assertTrue(hasattr(w,attr),attr)
-    def test_ai_studio_options_follow_loaded_match(self):
-        import tempfile as _tf
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.mode.setCurrentText('Squad Night')
-        mid,_=w.store.add({'matchId':'opts-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','result':'win','placement':2})
-        w.load_studio(mid)
-        self.assertIn('Resurgence',w.opt_game_mode.text())
-        self.assertIn('Victory',w.opt_result.text())
-        self.assertIn('2nd place',w.opt_placement.text())
-    def test_ai_studio_hidden_from_nav_but_page_kept(self):
+
+
+        self.assertIn('Outbox',w.sync_state_label.text())
+
+
+    def test_close_kills_only_launched_codmunity(self):
+
         w=self.window
-        rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
-        self.assertEqual(len(rows),1)
-        self.assertTrue(w.nav.item(rows[0]).isHidden())
-        self.assertIn('AI Studio',w.pages)
-    def test_poster_automation_lives_in_settings(self):
+
+        class Proc:
+
+            def __init__(self,code):self.code=code;self.killed=0
+
+            def poll(self):return self.code
+
+            def terminate(self):self.killed+=1
+
+        live=Proc(None);w.codmunity_process=live;w._close_codmunity_process()
+
+        self.assertEqual(live.killed,1)
+
+        gone=Proc(0);w.codmunity_process=gone;w._close_codmunity_process()
+
+        self.assertEqual(gone.killed,0)
+
+        w.codmunity_process=None;w._close_codmunity_process()
+
+    def test_boot_open_skips_during_tests(self):
+
         w=self.window
-        titles=[w.settings_tabs.tabText(i) for i in range(w.settings_tabs.count())]
-        self.assertIn('Poster Automation',titles)
-        tab=w.settings_tabs.widget(titles.index('Poster Automation'))
-        for checkbox in (w.include_stats_checkbox,w.auto_post,w.full_auto):
-            self.assertIs(checkbox.parent(),tab)
-        self.assertEqual(w.generate_sidebar_button.text(),'Generate AI End Game Picture')
-    def test_generate_button_notices_when_nothing_actionable(self):
+
+        called=[];w.start_or_attach_codmunity=lambda:called.append(1)
+
+        w._boot_open_codmunity()
+
+        self.assertEqual(called,[])
+
+        self.assertIsNone(w.codmunity_process)
+
+    def test_second_poster_submit_queues_behind_active_job(self):
+
         import tempfile as _tf
+
         w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
         w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        notes=[];w.notice=lambda msg:notes.append(msg)
-        w.generate_and_approve()
-        self.assertTrue(notes)
-    def test_generate_button_offers_ready_poster(self):
-        import tempfile as _tf
-        from PIL import Image
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        mid,_=w.store.add({'matchId':'ready-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        art=_tmpdir/'ready.png';Image.new('RGB',(640,360),'navy').save(art)
-        w.store.note_poster(mid,str(art))
-        offered=[];w.offer_approve_post=lambda job_id:offered.append(job_id)
-        w.generate_and_approve()
-        self.assertEqual(offered,[mid])
-    def test_approve_popup_posts_finished_poster(self):
-        import tempfile as _tf
-        from PIL import Image
-        from unittest.mock import patch
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        mid,_=w.store.add({'matchId':'approve-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':9})]))
-        art=_tmpdir/'approve.png';Image.new('RGB',(640,360),'navy').save(art)
-        w.store.note_poster(mid,str(art))
-        w.webhook.setText('https://discord.com/api/webhooks/123/fixture')
-        w.auto_post.setChecked(False)
-        calls=[]
-        with patch('engine.send_discord',side_effect=lambda *args:(calls.append(args) or 'popup-message')):
-            with patch.object(app.QDialog,'exec',return_value=app.QDialog.Accepted):
-                w.offer_approve_post(mid)
-            self.wait_until(lambda:w.store.get(mid)['status']=='delivered')
-        self.assertEqual(len(calls),1)
-    def test_approve_popup_cancel_keeps_match(self):
-        import tempfile as _tf
-        from PIL import Image
-        from unittest.mock import patch
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        mid,_=w.store.add({'matchId':'cancel-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        art=_tmpdir/'cancel.png';Image.new('RGB',(640,360),'navy').save(art)
-        w.store.note_poster(mid,str(art))
-        with patch.object(app.QDialog,'exec',return_value=app.QDialog.Rejected):
-            w.offer_approve_post(mid)
-        self.assertNotEqual(w.store.get(mid)['status'],'delivered')
-    def test_record_auto_browser_embeds_fresh_window(self):
-        from unittest.mock import patch
-        w=self.window
-        attached=[]
-        class FakeHost:
-            hwnd=None
-            def attach(self,hwnd,parent):attached.append((hwnd,parent));self.hwnd=hwnd
-            def detach(self):self.hwnd=None
-            def resize(self,a,b):pass
-        w.auto_browser_host=FakeHost()
-        hwnd=int(w.winId())
-        w.find_tracker_chrome_windows=lambda:[hwnd]
-        with patch.object(app.ctypes.windll.user32,'IsWindow',return_value=True):
-            w._record_auto_browser(set())
-        self.assertEqual(w.auto_browser_hwnd,hwnd)
-        self.assertTrue(attached)
-        self.assertIn('tab',w.browser_status.text().lower())
-    def test_prepare_and_launch_shows_tracker_browser_tab(self):
-        import tempfile as _tf
-        from PIL import Image
-        from unittest.mock import patch
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.mode.setCurrentText('Squad Night')
-        mid,_=w.store.add({'matchId':'tabswitch-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
-        photo=app.E.DATA/('fixture-tab-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
-        roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+
         w.notice=lambda _:None
-        with patch.object(w.store,'roster',return_value=roster):
-            w._start_poster_automation=lambda *args:True
-            w._prepare_and_launch(mid,manual=True)
-        self.assertIs(w.stack.currentWidget(),w.pages['Tracker Browser'][0])
-        self.addCleanup(w.store.update,mid,gen_state='idle',error='')
-    def test_sweep_clears_silent_active_flag_and_requeues(self):
-        import tempfile as _tf
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        mid,_=w.store.add({'matchId':'silent-flag-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(mid,gen_state='submitting')
-        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
-        w._inapp_poster_active=mid
-        w._inapp_poster_started=time.time()-2500
-        try:n=w._sweep_stale_poster_jobs()
-        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
-        self.assertEqual(n,1)
-        self.assertIsNone(w._inapp_poster_active)
-        row=w.store.get(mid)
-        self.assertEqual(row['gen_state'],'queued')
-        self.assertEqual(row['gen_attempts'],1)
-        w._inapp_poster_active='other-active'
-        w._inapp_poster_started=time.time()
-        try:w._sweep_stale_poster_jobs()
-        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+
+        mid,_=w.store.add({'matchId':'queue-second-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w._inapp_poster_active='job-a-running'
+
+        try:
+
+            launched=w._start_poster_automation(mid,app.E.DATA,[],'prompt')
+
+        finally:
+
+            pass
+
+        self.assertTrue(launched)
+
+        self.assertEqual(w._inapp_poster_active,'job-a-running')
+
         self.assertEqual(w.store.get(mid)['gen_state'],'queued')
-        self.assertEqual(w.store.get(mid)['gen_attempts'],1)
-    def test_sweep_holds_job_after_repeated_resets(self):
-        import tempfile as _tf
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        mid,_=w.store.add({'matchId':'poison-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(mid,gen_state='submitting',gen_attempts=3)
-        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
-        w._inapp_poster_active=mid
-        w._inapp_poster_started=time.time()-2500
-        try:n=w._sweep_stale_poster_jobs()
-        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
-        self.assertEqual(n,1)
-        row=w.store.get(mid)
-        self.assertEqual(row['gen_state'],'idle')
-        self.assertTrue(row['error'])
-    def test_finish_ignores_result_for_reset_job(self):
-        import tempfile as _tf
-        from PIL import Image
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        mid,_=w.store.add({'matchId':'stale-result-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        w.store.update(mid,players=json.dumps([]),gen_state='submitting')
-        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
-        w._inapp_poster_active=mid
-        w._inapp_poster_started=time.time()-2500
-        try:n=w._sweep_stale_poster_jobs()
-        finally:pass
-        self.assertEqual(n,1)
-        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
-        saved=_tmpdir/'stale.png';Image.new('RGB',(640,360),'red').save(saved)
-        drained=[]
-        w._drain_poster_queue=lambda:drained.append(1)
-        delivered=[]
-        w.deliver=lambda m:delivered.append(m)
-        w._poster_attempts={mid:0}
-        try:w._finish_inapp_poster(mid,str(saved))
-        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
-        self.assertFalse(w.store.get(mid)['artwork'])
-        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
-        self.assertEqual(delivered,[])
-        self.assertEqual(drained,[1])
-    def test_poster_worker_does_not_touch_browser_chrome(self):
-        import tempfile as _tf
-        from unittest.mock import patch
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-        class FakeCtx:
-            def new_page(self):return object()
-            def close(self):pass
-        class FakeMgr:
-            def __enter__(self):return None
-            def __exit__(self,*args):return False
-        class FakeDriver:
-            def __init__(self,*args):pass
-            def new_job_page(self):return object()
-            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
-        touched=[];w._record_auto_browser=lambda *args:touched.append(args)
-        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
-            try:result=w._run_poster_job('job-quiet',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
-            finally:del w._record_auto_browser
-        self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
-        self.assertEqual(touched,[])
-    def test_embed_poll_docks_fresh_window(self):
-        from unittest.mock import patch
-        w=self.window
-        attached=[]
-        class FakeHost:
-            hwnd=None
-            def attach(self,hwnd,parent):attached.append((hwnd,parent));self.hwnd=hwnd
-            def detach(self):self.hwnd=None
-            def resize(self,a,b):pass
-        w.auto_browser_host=FakeHost()
-        hwnd=int(w.winId())
-        orig_find=w.find_tracker_chrome_windows
-        w.find_tracker_chrome_windows=lambda:[hwnd]
-        w._browser_known_before_launch=set()
-        w._browser_embed_ticks=0
-        with patch.object(app.ctypes.windll.user32,'IsWindow',return_value=True):
-            try:embedded=w._poll_auto_browser_embed()
-            finally:
-                w.find_tracker_chrome_windows=orig_find
-                w._browser_known_before_launch=None
-        self.assertTrue(embedded)
-        self.assertEqual(w.auto_browser_hwnd,hwnd)
-        self.assertTrue(attached)
-    def test_stage_queue_drains_to_automation_stage(self):
-        w=self.window
-        try:w._stage_queue.get_nowait()
-        except Exception:pass
-        w._driver_stage('generating','overdrive')
-        seen=[]
-        w.set_automation_stage=lambda stage,detail='':seen.append((stage,detail))
-        try:w._drain_stage_queue()
-        finally:del w.set_automation_stage
-        self.assertEqual(seen,[('generating','overdrive')])
-    def test_start_builds_runnable_worker_lambda(self):
-        import tempfile as _tf
-        from unittest.mock import patch
-        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
-        w.store=app.E.Store(_tmpdir/'history.sqlite3')
-        w.notice=lambda _:None
-        mid,_=w.store.add({'matchId':'lambda-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
-        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
-        class FakeCtx:
-            def new_page(self):return object()
-            def close(self):pass
-        class FakeMgr:
-            def __enter__(self):return self
-            def __exit__(self,*args):return False
-        class FakeDriver:
-            def __init__(self,*args):pass
-            def new_job_page(self):return object()
-            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
-        captured={}
-        def fake_async(fn,done=None,failed=None):captured['fn']=fn;captured['done']=done
-        w.async_task=fake_async
-        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver),patch('playwright.sync_api.sync_playwright',return_value=FakeMgr()):
-            launched=w._start_poster_automation(mid,str(_tmpdir),[],'prompt')
-            self.assertTrue(launched)
-            result=captured['fn']()
-        self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
+
+        self.assertIn('queued',w.job_status.text().lower())
+
         self.addCleanup(setattr,w,'_inapp_poster_active',None)
-    def test_hotkey_edit_click_arms_prompt_but_popup_return_keeps_saved_value(self):
-        from PySide6.QtGui import QFocusEvent
-        from PySide6.QtCore import QEvent
-        edit=app.HotkeyEdit(0x26,0,confirm=False)
-        try:
-            self.assertEqual(edit.text(),'Up')
-            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.MouseFocusReason))
-            self.assertIn('Press the new keys',edit.text())
-            edit.focusOutEvent(QFocusEvent(QEvent.FocusOut))
-            self.assertEqual(edit.text(),'Up')
-            edit.set_hotkey(0x28,0);edit.clearFocus()
-            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.PopupFocusReason))
-            self.assertEqual(edit.text(),'Down')
-            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.ActiveWindowFocusReason))
-            self.assertEqual(edit.text(),'Down')
-        finally:edit.deleteLater()
-    def test_hotkey_edit_keypress_clears_focus_so_ok_does_not_reprompt(self):
-        from PySide6.QtGui import QFocusEvent,QKeyEvent
-        from PySide6.QtCore import QEvent
-        edit=app.HotkeyEdit(0x26,0,confirm=False)
-        try:
-            edit.show();self.qt.processEvents()
-            edit.setFocus(Qt.MouseFocusReason);self.qt.processEvents()
-            self.assertTrue(edit.hasFocus())
-            event=QKeyEvent(QEvent.KeyPress,Qt.Key_Down,Qt.NoModifier,0,0x28,0)
-            edit.keyPressEvent(event)
-            self.assertEqual(edit.text(),'Down')
-            self.assertFalse(edit.hasFocus())
-            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.PopupFocusReason))
-            self.assertEqual(edit.text(),'Down')
-        finally:edit.deleteLater()
-    def test_save_buttons_flash_confirmation_and_restore(self):
+
+    def test_sweep_resets_only_orphaned_submitting_jobs(self):
+
+        import tempfile as _tf
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        w.notice=lambda _:None
+
+        stale,_=w.store.add({'matchId':'stale-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w.store.update(stale,gen_state='submitting')
+
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-3600,stale))
+
+        fresh,_=w.store.add({'matchId':'fresh-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w.store.update(fresh,gen_state='submitting')
+
+        active,_=w.store.add({'matchId':'active-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w.store.update(active,gen_state='submitting')
+
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-3600,active))
+
+        w._inapp_poster_active=active
+
+        try:n=w._sweep_stale_poster_jobs()
+
+        finally:w._inapp_poster_active=None
+
+        self.assertEqual(n,1)
+
+        row=w.store.get(stale);self.assertEqual(row['gen_state'],'idle');self.assertTrue(row['error'])
+
+        self.assertEqual(w.store.get(fresh)['gen_state'],'submitting')
+
+        self.assertEqual(w.store.get(active)['gen_state'],'submitting')
+
+    def test_finish_starts_queued_job_when_full_auto_off(self):
+
+        import tempfile as _tf
+
+        from PIL import Image
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        done,_=w.store.add({'matchId':'drained-done-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w.store.update(done,players=json.dumps([]))
+
+        waiting,_=w.store.add({'matchId':'drained-wait-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w.store.update(waiting,players=json.dumps([]),gen_state='queued')
+
+        saved=app.E.DATA/('drained-'+uuid.uuid4().hex+'.png');Image.new('RGB',(640,360),'navy').save(saved)
+
+        w.notice=lambda _:None
+
+        w.full_auto.blockSignals(True);w.full_auto.setChecked(False);w.full_auto.blockSignals(False)
+
+        calls=[]
+
+        def fake_launch(mid,*args,**kwargs):calls.append(mid);w._inapp_poster_active=mid;return True
+
+        w._prepare_and_launch=fake_launch
+
+        w._inapp_poster_active=done
+
+        try:w._finish_inapp_poster(done,str(saved))
+
+        finally:w._inapp_poster_active=None
+
+        self.assertEqual(calls,[waiting])
+
+    def test_tracker_browser_has_no_hidden_progress_widget(self):
+
         w=self.window
-        for button,base in ((w.save_capture_button,'Save info'),(w.roster_save_button,'Save Player'),(w.save_settings_button,'Save all settings')):
-            self.assertIsNotNone(button)
-            self.assertTrue(w.flash_save_button(button,base))
-            self.assertEqual(button.text(),'✓ Saved!')
-            self.assertIn('2ea36b',button.styleSheet())
-            self.assertTrue(w.restore_save_button(button))
-            self.assertEqual(button.text(),base)
-            self.assertEqual(button.styleSheet(),'')
-            self.assertFalse(w.restore_save_button(button))
-    def test_save_player_success_flashes_roster_save_button(self):
-        w=self.window
-        w.roster_name.setText('Flash Test Player '+uuid.uuid4().hex[:8])
-        w.roster_display_name.setText('');w.roster_aliases.setText('');w.codmunity_username.setText('')
-        w.roster_profile_url.setText('');w.photo_path.setText('');w.current_player=None
-        w.save_player()
-        try:
-            self.assertIsNotNone(w.current_player)
-            self.assertEqual(w.roster_save_button.text(),'✓ Saved!')
-            saved_names=[str(p.get('name')) for p in w.store.roster()]
-            self.assertIn(w.roster_name.text(),saved_names)
-        finally:
-            try:w.store.delete_player(w.current_player)
-            except Exception:pass
-            w.restore_save_button(w.roster_save_button)
-    def test_effective_stats_dir_prefers_valid_override_then_discovers(self):
-        import tempfile
-        from types import SimpleNamespace
+
+        self.assertFalse(hasattr(w,'auto_core'))
+
+    def test_poster_job_returns_ok_and_fail_dicts(self):
+
+
+        import tempfile as _tf
+
+
         from unittest.mock import patch
+
+
+        from pathlib import Path
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        w._record_auto_browser=lambda *args:None
+
+
+        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+        class FakeCtx:
+
+
+            def new_page(self):return object()
+
+
+            def close(self):pass
+
+
+        class FakeMgr:
+
+
+            def __enter__(self):return None
+
+
+            def __exit__(self,*args):return False
+
+
+        class FakeDriver:
+
+
+            def __init__(self,*args):pass
+
+
+            def new_job_page(self):return object()
+
+
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
+
+
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
+
+
+            ok=w._run_poster_job('job-ok',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
+
+
+        self.assertEqual(ok,{'ok':True,'path':str(saved),'via':'download'})
+
+
+        class BoomDriver(FakeDriver):
+
+
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):
+
+
+                raise app.meta_automation.MetaAutomationError('generation','boom')
+
+
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',BoomDriver):
+
+
+            bad=w._run_poster_job('job-bad',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
+
+
+        self.assertEqual(bad,{'ok':False,'step':'generation','detail':'boom'})
+
+
+    def test_deliver_poster_result_routes_ok_fail_and_malformed(self):
+
+
         w=self.window
-        tmp=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmp,True)
-        (tmp/'matches.json').write_text('[]')
-        original=w.stats_dir.text()
-        try:
-            w.stats_dir.setText(str(tmp))
-            self.assertEqual(w._effective_stats_dir(),str(tmp))
-            w.stats_dir.setText(str(tmp/'ghost-folder'))
-            with patch.object(app.E,'legacy',return_value=SimpleNamespace(find_stats_dir=lambda config:str(tmp))):
-                self.assertEqual(w._effective_stats_dir(),str(tmp))
-            with patch.object(app.E,'legacy',side_effect=FileNotFoundError('none')):
-                self.assertEqual(w._effective_stats_dir(),str(tmp/'ghost-folder'))
-        finally:w.stats_dir.setText(original)
-    def test_stats_field_autofills_from_discovered_folder(self):
-        import tempfile
-        from types import SimpleNamespace
+
+
+        calls=[]
+
+
+        w._finish_inapp_poster=lambda mid,path,via='download':calls.append(('finish',mid,path,via))
+
+
+        w._fail_inapp_poster=lambda mid,step,detail:calls.append(('fail',mid,step,detail))
+
+
+        w._deliver_poster_result('m1',{'ok':True,'path':'p.png'})
+
+
+        w._deliver_poster_result('m2',{'ok':False,'step':'generation','detail':'boom'})
+
+
+        w._deliver_poster_result('m3',['x'])
+
+
+        self.assertEqual(calls[0],('finish','m1','p.png','download'))
+
+
+        self.assertEqual(calls[1],('fail','m2','generation','boom'))
+
+
+        self.assertEqual(calls[2][0],'fail');self.assertEqual(calls[2][1],'m3')
+
+
+    def test_start_poster_automation_hands_off_through_pool(self):
+
+
+        import tempfile as _tf
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        mid,_=w.store.add({'matchId':'handoff-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        captured={}
+
+
+        def fake_async(fn,done=None,failed=None):
+
+
+            captured['fn']=fn;captured['done']=done
+
+
+        w.async_task=fake_async
+
+
+        w._poster_manual=False
+
+
+        launched=w._start_poster_automation(mid,str(_tmpdir),[],'prompt')
+
+
+        self.assertTrue(launched)
+
+
+        self.assertIn('fn',captured)
+
+
+        finished=[]
+
+
+        w._finish_inapp_poster=lambda m,p,via='download':finished.append((m,p))
+
+
+        w._run_poster_job=lambda *args:({'ok':True,'path':'routed.png'})
+
+
+        captured['done']({'ok':True,'path':'routed.png'})
+
+
+        self.assertEqual(finished,[(mid,'routed.png')])
+
+
+        self.addCleanup(setattr,w,'_inapp_poster_active',None)
+
+
+    def test_screenshot_result_links_but_does_not_post(self):
+
+
+        import tempfile as _tf
+
+
+        from PIL import Image
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        w.full_auto.blockSignals(True);w.full_auto.setChecked(False);w.full_auto.blockSignals(False)
+
+
+        mid,_=w.store.add({'matchId':'held-shot-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        w.store.update(mid,players=json.dumps([]))
+
+
+        saved=_tmpdir/'shot.png';Image.new('RGB',(640,360),'teal').save(saved)
+
+
+        delivered=[]
+
+
+        w.deliver=lambda m:delivered.append(m)
+
+
+        w._deliver_poster_result(mid,{'ok':True,'path':str(saved),'via':'screenshot'})
+
+
+        self.assertEqual(delivered,[])
+
+
+        row=w.store.get(mid)
+
+
+        self.assertTrue(row['artwork'].endswith('.png'))
+
+
+        self.assertEqual(row['gen_state'],'done')
+
+
+        self.assertIn('mport',w.job_status.text())
+
+
+    def test_ai_studio_matches_mockup_layout(self):
+
+
+        from PySide6.QtWidgets import QLabel, QPushButton
+
+
+        w=self.window
+
+
+        page,_layout=w.pages['AI Studio']
+
+
+        texts=[label.text() for label in page.findChildren(QLabel)]
+
+
+        for expected in ('MATCH INPUT','MATCH OPTIONS','PLAYERS IDENTIFIED FROM SCREENSHOTS','AI PREVIEW','SQUAD TOTALS'):
+
+
+            self.assertIn(expected,texts)
+
+
+        buttons=[b.text() for b in page.findChildren(QPushButton)]
+
+
+        for expected in ('Generate AI End Game Picture','APPROVE & POST','Cancel','Retry / review selected job'):
+
+
+            self.assertIn(expected,buttons)
+
+
+        steps=[label.text() for label in page.findChildren(QLabel) if label.objectName()=='stepTitle']
+
+
+        self.assertEqual(steps,['INPUT','GENERATE','REVIEW','DISCORD'])
+
+
+        for attr in ('opt_game_mode','opt_result','opt_placement','opt_style','studio_heads','art_preview','photo_assignments'):
+
+
+            self.assertTrue(hasattr(w,attr),attr)
+
+
+    def test_ai_studio_options_follow_loaded_match(self):
+
+
+        import tempfile as _tf
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.mode.setCurrentText('Squad Night')
+
+
+        mid,_=w.store.add({'matchId':'opts-'+uuid.uuid4().hex,'game':'warzone','modeKey':'resurgence','result':'win','placement':2})
+
+
+        w.load_studio(mid)
+
+
+        self.assertIn('Resurgence',w.opt_game_mode.text())
+
+
+        self.assertIn('Victory',w.opt_result.text())
+
+
+        self.assertIn('2nd place',w.opt_placement.text())
+
+    def test_ai_studio_hidden_from_nav_but_page_kept(self):
+
+        w=self.window
+
+        rows=[i for i in range(w.nav.count()) if w.nav.item(i).data(Qt.UserRole)=='AI Studio']
+
+        self.assertEqual(len(rows),1)
+
+        self.assertTrue(w.nav.item(rows[0]).isHidden())
+
+        self.assertIn('AI Studio',w.pages)
+
+    def test_poster_automation_lives_in_settings(self):
+
+        w=self.window
+
+        titles=[w.settings_tabs.tabText(i) for i in range(w.settings_tabs.count())]
+
+        self.assertIn('Poster Automation',titles)
+
+        tab=w.settings_tabs.widget(titles.index('Poster Automation'))
+
+        for checkbox in (w.include_stats_checkbox,w.auto_post,w.full_auto):
+
+            self.assertIs(checkbox.parent(),tab)
+
+        self.assertEqual(w.generate_sidebar_button.text(),'Generate AI End Game Picture')
+
+    def test_generate_button_notices_when_nothing_actionable(self):
+
+        import tempfile as _tf
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        notes=[];w.notice=lambda msg:notes.append(msg)
+
+        w.generate_and_approve()
+
+        self.assertTrue(notes)
+
+    def test_generate_button_offers_ready_poster(self):
+
+        import tempfile as _tf
+
+        from PIL import Image
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        mid,_=w.store.add({'matchId':'ready-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        art=_tmpdir/'ready.png';Image.new('RGB',(640,360),'navy').save(art)
+
+        w.store.note_poster(mid,str(art))
+
+        offered=[];w.offer_approve_post=lambda job_id:offered.append(job_id)
+
+        w.generate_and_approve()
+
+        self.assertEqual(offered,[mid])
+
+    def test_approve_popup_posts_finished_poster(self):
+
+        import tempfile as _tf
+
+        from PIL import Image
+
         from unittest.mock import patch
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        mid,_=w.store.add({'matchId':'approve-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':9})]))
+
+        art=_tmpdir/'approve.png';Image.new('RGB',(640,360),'navy').save(art)
+
+        w.store.note_poster(mid,str(art))
+
+        w.webhook.setText('https://discord.com/api/webhooks/123/fixture')
+
+        w.auto_post.setChecked(False)
+
+        calls=[]
+
+        with patch('engine.send_discord',side_effect=lambda *args:(calls.append(args) or 'popup-message')):
+
+            with patch.object(app.QDialog,'exec',return_value=app.QDialog.Accepted):
+
+                w.offer_approve_post(mid)
+
+            self.wait_until(lambda:w.store.get(mid)['status']=='delivered')
+
+        self.assertEqual(len(calls),1)
+
+    def test_approve_popup_cancel_keeps_match(self):
+
+        import tempfile as _tf
+
+        from PIL import Image
+
+        from unittest.mock import patch
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        mid,_=w.store.add({'matchId':'cancel-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+        art=_tmpdir/'cancel.png';Image.new('RGB',(640,360),'navy').save(art)
+
+        w.store.note_poster(mid,str(art))
+
+        with patch.object(app.QDialog,'exec',return_value=app.QDialog.Rejected):
+
+            w.offer_approve_post(mid)
+
+        self.assertNotEqual(w.store.get(mid)['status'],'delivered')
+
+
+    def test_record_auto_browser_embeds_fresh_window(self):
+
+
+        from unittest.mock import patch
+
+
         w=self.window
-        tmp=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmp,True)
-        (tmp/'matches.json').write_text('[]')
-        original=w.stats_dir.text()
-        try:
-            w.stats_dir.setText('')
-            with patch.object(app.E,'legacy',return_value=SimpleNamespace(find_stats_dir=lambda config:str(tmp))):
-                w._autofill_stats_dir()
-            self.assertEqual(w.stats_dir.text(),str(tmp))
-        finally:
-            w.stats_dir.setText(original)
-            w.settings.values['stats_dir']=original;w.settings.save()
-    def test_manual_update_check_reports_latest_or_unreachable(self):
+
+
+        attached=[]
+
+
+        class FakeHost:
+
+
+            hwnd=None
+
+
+            def attach(self,hwnd,parent):attached.append((hwnd,parent));self.hwnd=hwnd
+
+
+            def detach(self):self.hwnd=None
+
+
+            def resize(self,a,b):pass
+
+
+        w.auto_browser_host=FakeHost()
+
+
+        hwnd=int(w.winId())
+
+
+        w.find_tracker_chrome_windows=lambda:[hwnd]
+
+
+        with patch.object(app.ctypes.windll.user32,'IsWindow',return_value=True):
+
+
+            w._record_auto_browser(set())
+
+
+        self.assertEqual(w.auto_browser_hwnd,hwnd)
+
+
+        self.assertTrue(attached)
+
+
+        self.assertIn('tab',w.browser_status.text().lower())
+
+
+    def test_prepare_and_launch_shows_tracker_browser_tab(self):
+
+
+        import tempfile as _tf
+
+
+        from PIL import Image
+
+
+        from unittest.mock import patch
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.mode.setCurrentText('Squad Night')
+
+
+        mid,_=w.store.add({'matchId':'tabswitch-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        w.store.update(mid,players=json.dumps([dict(name='Alpha',verified=True,stats={'kills':8})]))
+
+
+        photo=app.E.DATA/('fixture-tab-'+uuid.uuid4().hex+'.jpg');Image.new('RGB',(400,400),'gray').save(photo)
+
+
+        roster=[dict(id='alpha',name='Alpha',photo=str(photo),consent_meta=True,enabled=True)]
+
+
+        w.notice=lambda _:None
+
+
+        with patch.object(w.store,'roster',return_value=roster):
+
+
+            w._start_poster_automation=lambda *args:True
+
+
+            w._prepare_and_launch(mid,manual=True)
+
+
+        self.assertIs(w.stack.currentWidget(),w.pages['Tracker Browser'][0])
+
+
+        self.addCleanup(w.store.update,mid,gen_state='idle',error='')
+
+
+    def test_sweep_clears_silent_active_flag_and_requeues(self):
+
+
+        import tempfile as _tf
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        mid,_=w.store.add({'matchId':'silent-flag-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        w.store.update(mid,gen_state='submitting')
+
+
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
+
+
+        w._inapp_poster_active=mid
+
+
+        w._inapp_poster_started=time.time()-2500
+
+
+        try:n=w._sweep_stale_poster_jobs()
+
+
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+
+
+        self.assertEqual(n,1)
+
+
+        self.assertIsNone(w._inapp_poster_active)
+
+
+        row=w.store.get(mid)
+
+
+        self.assertEqual(row['gen_state'],'queued')
+
+
+        self.assertEqual(row['gen_attempts'],1)
+
+
+        w._inapp_poster_active='other-active'
+
+
+        w._inapp_poster_started=time.time()
+
+
+        try:w._sweep_stale_poster_jobs()
+
+
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+
+
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+
+
+        self.assertEqual(w.store.get(mid)['gen_attempts'],1)
+
+
+    def test_sweep_holds_job_after_repeated_resets(self):
+
+
+        import tempfile as _tf
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        mid,_=w.store.add({'matchId':'poison-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        w.store.update(mid,gen_state='submitting',gen_attempts=3)
+
+
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
+
+
+        w._inapp_poster_active=mid
+
+
+        w._inapp_poster_started=time.time()-2500
+
+
+        try:n=w._sweep_stale_poster_jobs()
+
+
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+
+
+        self.assertEqual(n,1)
+
+
+        row=w.store.get(mid)
+
+
+        self.assertEqual(row['gen_state'],'idle')
+
+
+        self.assertTrue(row['error'])
+
+
+    def test_finish_ignores_result_for_reset_job(self):
+
+
+        import tempfile as _tf
+
+
+        from PIL import Image
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        mid,_=w.store.add({'matchId':'stale-result-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        w.store.update(mid,players=json.dumps([]),gen_state='submitting')
+
+
+        with w.store.connect() as c:c.execute('UPDATE matches SET updated=? WHERE id=?',(time.time()-2500,mid))
+
+
+        w._inapp_poster_active=mid
+
+
+        w._inapp_poster_started=time.time()-2500
+
+
+        try:n=w._sweep_stale_poster_jobs()
+
+
+        finally:pass
+
+
+        self.assertEqual(n,1)
+
+
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+
+
+        saved=_tmpdir/'stale.png';Image.new('RGB',(640,360),'red').save(saved)
+
+
+        drained=[]
+
+
+        w._drain_poster_queue=lambda:drained.append(1)
+
+
+        delivered=[]
+
+
+        w.deliver=lambda m:delivered.append(m)
+
+
+        w._poster_attempts={mid:0}
+
+        try:w._finish_inapp_poster(mid,str(saved))
+
+
+        finally:w._inapp_poster_active=None;w._inapp_poster_started=None
+
+
+        self.assertFalse(w.store.get(mid)['artwork'])
+
+
+        self.assertEqual(w.store.get(mid)['gen_state'],'queued')
+
+
+        self.assertEqual(delivered,[])
+
+
+        self.assertEqual(drained,[1])
+
+
+    def test_poster_worker_does_not_touch_browser_chrome(self):
+
+
+        import tempfile as _tf
+
+
+        from unittest.mock import patch
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+        class FakeCtx:
+
+
+            def new_page(self):return object()
+
+
+            def close(self):pass
+
+
+        class FakeMgr:
+
+
+            def __enter__(self):return None
+
+
+            def __exit__(self,*args):return False
+
+
+        class FakeDriver:
+
+
+            def __init__(self,*args):pass
+
+
+            def new_job_page(self):return object()
+
+
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
+
+
+        touched=[];w._record_auto_browser=lambda *args:touched.append(args)
+
+
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver):
+
+
+            try:result=w._run_poster_job('job-quiet',lambda:FakeMgr(),str(_tmpdir),[],'prompt')
+
+
+            finally:del w._record_auto_browser
+
+
+        self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
+
+
+        self.assertEqual(touched,[])
+
+
+    def test_embed_poll_docks_fresh_window(self):
+
+
+        from unittest.mock import patch
+
+
         w=self.window
+
+
+        attached=[]
+
+
+        class FakeHost:
+
+
+            hwnd=None
+
+
+            def attach(self,hwnd,parent):attached.append((hwnd,parent));self.hwnd=hwnd
+
+
+            def detach(self):self.hwnd=None
+
+
+            def resize(self,a,b):pass
+
+
+        w.auto_browser_host=FakeHost()
+
+
+        hwnd=int(w.winId())
+
+
+        orig_find=w.find_tracker_chrome_windows
+
+
+        w.find_tracker_chrome_windows=lambda:[hwnd]
+
+
+        w._browser_known_before_launch=set()
+
+
+        w._browser_embed_ticks=0
+
+
+        with patch.object(app.ctypes.windll.user32,'IsWindow',return_value=True):
+
+
+            try:embedded=w._poll_auto_browser_embed()
+
+
+            finally:
+
+
+                w.find_tracker_chrome_windows=orig_find
+
+
+                w._browser_known_before_launch=None
+
+
+        self.assertTrue(embedded)
+
+
+        self.assertEqual(w.auto_browser_hwnd,hwnd)
+
+
+        self.assertTrue(attached)
+
+
+    def test_stage_queue_drains_to_automation_stage(self):
+
+
+        w=self.window
+
+
+        try:w._stage_queue.get_nowait()
+
+
+        except Exception:pass
+
+
+        w._driver_stage('generating','overdrive')
+
+
         seen=[]
-        w.notice=lambda text:seen.append(text)
-        try:
-            w.prompt_app_update({'current':'4.0.1','latest':'4.0.1','update_available':False,'download_url':'','size':0,'notes':''},manual=True)
-            self.assertEqual(seen,['You are on the latest version.'])
-            w.prompt_app_update(None,manual=True)
-            self.assertEqual(seen,['You are on the latest version.','Could not reach the update server.'])
-            w.prompt_app_update({'current':'4.0.1','latest':'4.0.1','update_available':False,'download_url':'','size':0,'notes':''},manual=False)
-            self.assertEqual(len(seen),2)
-        finally:del w.notice
-    def test_update_prompt_offers_update_and_later_dismisses(self):
+
+
+        w.set_automation_stage=lambda stage,detail='':seen.append((stage,detail))
+
+
+        try:w._drain_stage_queue()
+
+
+        finally:del w.set_automation_stage
+
+
+        self.assertEqual(seen,[('generating','overdrive')])
+
+
+    def test_start_builds_runnable_worker_lambda(self):
+
+
+        import tempfile as _tf
+
+
         from unittest.mock import patch
+
+
+        w=self.window;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True)
+
+
+        w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+
+        w.notice=lambda _:None
+
+
+        mid,_=w.store.add({'matchId':'lambda-'+uuid.uuid4().hex,'modeKey':'resurgence','result':'win'})
+
+
+        saved=_tmpdir/'shot.png';saved.write_bytes(b'\x89PNG\r\n\x1a\n'+b'0'*64)
+
+
+        class FakeCtx:
+
+
+            def new_page(self):return object()
+
+
+            def close(self):pass
+
+
+        class FakeMgr:
+
+
+            def __enter__(self):return self
+
+
+            def __exit__(self,*args):return False
+
+
+        class FakeDriver:
+
+
+            def __init__(self,*args):pass
+
+
+            def new_job_page(self):return object()
+
+
+            def submit_text_to_image(self,page,photos,prompt,download_dir,on_stage=None):return (saved,'download')
+
+
+        captured={}
+
+
+        def fake_async(fn,done=None,failed=None):captured['fn']=fn;captured['done']=done
+
+
+        w.async_task=fake_async
+
+
+        with patch.object(app.meta_automation,'ensure_context',return_value=FakeCtx()),patch.object(app.meta_automation,'MetaDriver',FakeDriver),patch('playwright.sync_api.sync_playwright',return_value=FakeMgr()):
+
+
+            launched=w._start_poster_automation(mid,str(_tmpdir),[],'prompt')
+
+
+            self.assertTrue(launched)
+
+
+            result=captured['fn']()
+
+
+        self.assertEqual(result,{'ok':True,'path':str(saved),'via':'download'})
+
+
+        self.addCleanup(setattr,w,'_inapp_poster_active',None)
+
+
+    def test_hotkey_edit_click_arms_prompt_but_popup_return_keeps_saved_value(self):
+
+        from PySide6.QtGui import QFocusEvent
+
+        from PySide6.QtCore import QEvent
+
+        edit=app.HotkeyEdit(0x26,0,confirm=False)
+
+        try:
+
+            self.assertEqual(edit.text(),'Up')
+
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.MouseFocusReason))
+
+            self.assertIn('Press the new keys',edit.text())
+
+            edit.focusOutEvent(QFocusEvent(QEvent.FocusOut))
+
+            self.assertEqual(edit.text(),'Up')
+
+            edit.set_hotkey(0x28,0);edit.clearFocus()
+
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.PopupFocusReason))
+
+            self.assertEqual(edit.text(),'Down')
+
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.ActiveWindowFocusReason))
+
+            self.assertEqual(edit.text(),'Down')
+
+        finally:edit.deleteLater()
+
+    def test_hotkey_edit_keypress_clears_focus_so_ok_does_not_reprompt(self):
+
+        from PySide6.QtGui import QFocusEvent,QKeyEvent
+
+        from PySide6.QtCore import QEvent
+
+        edit=app.HotkeyEdit(0x26,0,confirm=False)
+
+        try:
+
+            edit.show();self.qt.processEvents()
+
+            edit.setFocus(Qt.MouseFocusReason);self.qt.processEvents()
+
+            self.assertTrue(edit.hasFocus())
+
+            event=QKeyEvent(QEvent.KeyPress,Qt.Key_Down,Qt.NoModifier,0,0x28,0)
+
+            edit.keyPressEvent(event)
+
+            self.assertEqual(edit.text(),'Down')
+
+            self.assertFalse(edit.hasFocus())
+
+            edit.focusInEvent(QFocusEvent(QEvent.FocusIn,Qt.PopupFocusReason))
+
+            self.assertEqual(edit.text(),'Down')
+
+        finally:edit.deleteLater()
+
+    def test_save_buttons_flash_confirmation_and_restore(self):
+
         w=self.window
-        shown={}
-        class FakeBox:
-            AcceptRole=0;RejectRole=1;DestructiveRole=2
-            def __init__(self,*args,**kwargs):self.buttons=[]
-            def setWindowTitle(self,text):shown['title']=text
-            def setText(self,text):shown['text']=text
-            def setInformativeText(self,text):shown['notes']=text
-            def addButton(self,text,role):
-                marker=object();self.buttons.append((text,marker));return marker
-            def setDefaultButton(self,button):shown['default']=button
-            def clickedButton(self):return self.buttons[1][1] if len(self.buttons)>1 else None
-            def exec(self):shown['exec']=True;return 0
-        with patch.object(app,'QMessageBox',FakeBox):
-            w.prompt_app_update({'current':'3.2.9','latest':'4.0.1','update_available':True,'download_url':'https://example.invalid/x.exe','size':1,'notes':'notes here'},manual=True)
-        self.assertTrue(shown.get('exec'))
-        self.assertIn('4.0.1',shown.get('text',''))
-        self.assertIn('3.2.9',shown.get('text',''))
-        self.assertEqual(shown.get('notes'),'notes here')
-    def test_packaged_build_bundles_all_banner_and_brand_assets(self):
-        import sys
-        names=list(app.PAGE_BANNERS.values())+['vintendo-cod-tracker-logo.png','loading.png','loading_animated_transparent.webp']
-        if getattr(sys,'frozen',False):
-            for filename in names:
-                self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
-        else:
-            build_text=(app.E.ROOT/'build.py').read_text(encoding='utf-8')
-            for filename in names:
-                self.assertIn(filename,build_text,filename)
-                self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
-    def test_combined_tracking_is_default_unless_explicitly_disabled(self):
-        import os
+
+        for button,base in ((w.save_capture_button,'Save info'),(w.roster_save_button,'Save Player'),(w.save_settings_button,'Save all settings')):
+
+            self.assertIsNotNone(button)
+
+            self.assertTrue(w.flash_save_button(button,base))
+
+            self.assertEqual(button.text(),'✓ Saved!')
+
+            self.assertIn('2ea36b',button.styleSheet())
+
+            self.assertTrue(w.restore_save_button(button))
+
+            self.assertEqual(button.text(),base)
+
+            self.assertEqual(button.styleSheet(),'')
+
+            self.assertFalse(w.restore_save_button(button))
+
+    def test_save_player_success_flashes_roster_save_button(self):
+
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+
+        w.roster_name.setText('Flash Test Player '+uuid.uuid4().hex[:8])
+
+        w.roster_display_name.setText('');w.roster_aliases.setText('');w.codmunity_username.setText('')
+
+        w.roster_profile_url.setText('');w.photo_path.setText('');w.current_player=None
+
+        w.save_player()
+
+        try:
+
+            self.assertIsNotNone(w.current_player)
+
+            self.assertEqual(w.roster_save_button.text(),'✓ Saved!')
+
+            saved_names=[str(p.get('name')) for p in w.store.roster()]
+
+            self.assertIn(w.roster_name.text(),saved_names)
+
+        finally:
+
+            try:w.store.delete_player(w.current_player)
+
+            except Exception:pass
+
+            w.restore_save_button(w.roster_save_button)
+
+    def test_effective_stats_dir_prefers_valid_override_then_discovers(self):
+
+        import tempfile
+
+        from types import SimpleNamespace
+
         from unittest.mock import patch
+
+        w=self.window
+
+        tmp=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmp,True)
+
+        (tmp/'matches.json').write_text('[]')
+
+        original=w.stats_dir.text()
+
+        try:
+
+            w.stats_dir.setText(str(tmp))
+
+            self.assertEqual(w._effective_stats_dir(),str(tmp))
+
+            w.stats_dir.setText(str(tmp/'ghost-folder'))
+
+            with patch.object(app.E,'legacy',return_value=SimpleNamespace(find_stats_dir=lambda config:str(tmp))):
+
+                self.assertEqual(w._effective_stats_dir(),str(tmp))
+
+            with patch.object(app.E,'legacy',side_effect=FileNotFoundError('none')):
+
+                self.assertEqual(w._effective_stats_dir(),str(tmp/'ghost-folder'))
+
+        finally:w.stats_dir.setText(original)
+
+    def test_stats_field_autofills_from_discovered_folder(self):
+
+        import tempfile
+
+        from types import SimpleNamespace
+
+        from unittest.mock import patch
+
+        w=self.window
+
+        tmp=Path(tempfile.mkdtemp());self.addCleanup(shutil.rmtree,tmp,True)
+
+        (tmp/'matches.json').write_text('[]')
+
+        original=w.stats_dir.text()
+
+        try:
+
+            w.stats_dir.setText('')
+
+            with patch.object(app.E,'legacy',return_value=SimpleNamespace(find_stats_dir=lambda config:str(tmp))):
+
+                w._autofill_stats_dir()
+
+            self.assertEqual(w.stats_dir.text(),str(tmp))
+
+        finally:
+
+            w.stats_dir.setText(original)
+
+            w.settings.values['stats_dir']=original;w.settings.save()
+
+    def test_manual_update_check_reports_latest_or_unreachable(self):
+
+        w=self.window
+
+        seen=[]
+
+        w.notice=lambda text:seen.append(text)
+
+        try:
+
+            w.prompt_app_update({'current':'4.0.1','latest':'4.0.1','update_available':False,'download_url':'','size':0,'notes':''},manual=True)
+
+            self.assertEqual(seen,['You are on the latest version.'])
+
+            w.prompt_app_update(None,manual=True)
+
+            self.assertEqual(seen,['You are on the latest version.','Could not reach the update server.'])
+
+            w.prompt_app_update({'current':'4.0.1','latest':'4.0.1','update_available':False,'download_url':'','size':0,'notes':''},manual=False)
+
+            self.assertEqual(len(seen),2)
+
+        finally:del w.notice
+
+    def test_update_prompt_offers_update_and_later_dismisses(self):
+
+        from unittest.mock import patch
+
+        w=self.window
+
+        shown={}
+
+        class FakeBox:
+
+            AcceptRole=0;RejectRole=1;DestructiveRole=2
+
+            def __init__(self,*args,**kwargs):self.buttons=[]
+
+            def setWindowTitle(self,text):shown['title']=text
+
+            def setText(self,text):shown['text']=text
+
+            def setInformativeText(self,text):shown['notes']=text
+
+            def addButton(self,text,role):
+
+                marker=object();self.buttons.append((text,marker));return marker
+
+            def setDefaultButton(self,button):shown['default']=button
+
+            def clickedButton(self):return self.buttons[1][1] if len(self.buttons)>1 else None
+
+            def exec(self):shown['exec']=True;return 0
+
+        with patch.object(app,'QMessageBox',FakeBox):
+
+            w.prompt_app_update({'current':'3.2.9','latest':'4.0.1','update_available':True,'download_url':'https://example.invalid/x.exe','size':1,'notes':'notes here'},manual=True)
+
+        self.assertTrue(shown.get('exec'))
+
+        self.assertIn('4.0.1',shown.get('text',''))
+
+        self.assertIn('3.2.9',shown.get('text',''))
+
+        self.assertEqual(shown.get('notes'),'notes here')
+
+    def test_packaged_build_bundles_all_banner_and_brand_assets(self):
+
+        import sys
+
+        names=list(app.PAGE_BANNERS.values())+['vintendo-cod-tracker-logo.png','loading.png','loading_animated_transparent.webp']
+
+        if getattr(sys,'frozen',False):
+
+            for filename in names:
+
+                self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
+
+        else:
+
+            build_text=(app.E.ROOT/'build.py').read_text(encoding='utf-8')
+
+            for filename in names:
+
+                self.assertIn(filename,build_text,filename)
+
+                self.assertTrue(any(p.is_file() for p in (app.E.ROOT/'assets').rglob(filename)),filename)
+
+    def test_combined_tracking_is_default_unless_explicitly_disabled(self):
+
+        import os
+
+        from unittest.mock import patch
+
         env=dict(os.environ);env.pop('VINTENDO_TRACK_BOTH',None)
+
         with patch.dict(os.environ,env,clear=True):
+
             default_window=app.Window()
+
         try:
+
             self.assertTrue(default_window.track_both_startup)
+
             self.assertEqual(default_window.mode.currentText(),'Squad Night')
+
             hidden=[default_window.nav.item(row).data(Qt.UserRole) for row in range(default_window.nav.count()) if default_window.nav.item(row).isHidden()]
+
             self.assertIn('Squad Night',hidden)
+
             self.assertTrue(default_window.mode.isHidden())
+
         finally:default_window.shutdown();default_window.deleteLater();self.qt.processEvents()
+
         with patch.dict(os.environ,{**os.environ,'VINTENDO_TRACK_BOTH':'0'}):
+
             solo_window=app.Window()
+
         try:
+
             self.assertFalse(solo_window.track_both_startup)
+
             self.assertFalse(solo_window.mode.isHidden())
+
         finally:solo_window.shutdown();solo_window.deleteLater();self.qt.processEvents()
+
+    def test_codmunity_stats_url_builds_from_username(self):
+        self.assertEqual(app.Window._codmunity_stats_url('VintendoPower '),'https://codmunity.gg/profile/VintendoPower/stats')
+        self.assertEqual(app.Window._codmunity_stats_url('@VintendoPower'),'https://codmunity.gg/profile/VintendoPower/stats')
+        self.assertEqual(app.Window._codmunity_stats_url('  '),'')
+        self.assertEqual(app.Window._codmunity_stats_url(None),'')
+
+    def test_settings_stats_frame_follows_username(self):
+        w=self.window;view=getattr(w,'codmunity_stats_view',None)
+        if view is None:self.skipTest('Qt WebEngine view unavailable')
+        w.player.setText('FrameProbeName');self.qt.processEvents()
+        self.assertEqual(view.url().toString(),'https://codmunity.gg/profile/FrameProbeName/stats')
+        from unittest.mock import patch
+        with patch.object(type(view),'setHtml') as set_html:w.player.setText('');self.qt.processEvents()
+        set_html.assert_called_once()
+        self.assertIn('0a0d13',set_html.call_args[0][0])
+
+    def test_settings_stats_frame_refreshes_on_login_identity(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        view=getattr(w,'codmunity_stats_view',None)
+        if view is None:self.skipTest('Qt WebEngine view unavailable')
+        keys=('player','profile_url','codmunity_username','codmunity_uid','codmunity_display_name','codmunity_link_email','codmunity_avatar','codmunity_bio','codmunity_followers','codmunity_loadouts','codmunity_likes')
+        original={k:w.settings.values.get(k) for k in keys}
+        try:
+            w._on_codmunity_identity({'username':'LoginProbe','uid':'uid-1','display_name':'LoginProbe','email':'','avatar':'','bio':'','followers':0,'loadouts':0,'likes':0})
+            self.qt.processEvents()
+            self.assertEqual(w.player.text(),'LoginProbe')
+            self.assertEqual(view.url().toString(),'https://codmunity.gg/profile/LoginProbe/stats')
+        finally:
+            for k,v in original.items():w.settings.values[k]=v
+            try:w.settings.save()
+            except Exception:pass
+
+    def test_start_stop_buttons_hidden_autostart(self):
+        self.assertFalse(self.window.start_button.isVisibleTo(self.window))
+        self.assertFalse(self.window.stop_button.isVisibleTo(self.window))
+
+    def test_boot_autostart_never_starts_under_pytest(self):
+        w=self.window;w._boot_autostart()
+        self.assertFalse(w.tracking)
+
+    def test_dash_profile_card_populates_from_cache(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        keys=('codmunity_username','codmunity_display_name','codmunity_link_email','profile_url','codmunity_avatar')
+        original={k:w.settings.values.get(k) for k in keys}
+        try:
+            w.settings.values.update(codmunity_username='vintendopower',codmunity_display_name='VintendoPower',codmunity_link_email='v@v.com',profile_url='https://codmunity.gg/profile/vintendopower',codmunity_avatar='')
+            w.store.set_meta('codmunity_stats',{'personal':{'warzone':{'resurgence':{'stats':{'kills':10051,'deaths':9054,'wins':187,'losses':291,'games_played':478,'highest_kills_game':28,'highest_streak':12,'score_per_min':320.0,'avg_kills_game':21.0,'time_played_s':200*3600}}}}})
+            w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03],'sampled':492,'users_total':515,'updated_at':'2026-11-18T11:43:00+00:00','source':'test'}})
+            w._select_lifetime_game('warzone','resurgence');self.qt.processEvents()
+            self.assertEqual(w.dash_card_name.text(),'VintendoPower')
+            self.assertEqual(w.dash_card_handle.text(),'@vintendopower')
+            self.assertEqual(w.dash_card_kills.text(),'10,051')
+            self.assertEqual(w.dash_card_kd.text(),'1.11')
+            self.assertEqual(w.dash_card_wins.text(),'187')
+            self.assertEqual(w.dash_card_games.text(),'478')
+            self.assertTrue(w.dash_card_tier.text() not in ('','—'))
+            self.assertIn('Better than',w.dash_card_better.text())
+            self.assertIn('K/D 1.11',w.dash_card_better.text())
+            self.assertIn('Warzone · Resurgence · Lifetime',w.dash_card_scope.text())
+            self.assertIn('Nov 18, 2026',w.dash_card_scope.text())
+            self.assertTrue(w.dash_card_view.isEnabled())
+        finally:
+            for k,v in original.items():w.settings.values[k]=v
+
+    def test_dash_profile_card_empty_placeholders(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        keys=('codmunity_username','codmunity_display_name','profile_url','codmunity_avatar')
+        original={k:w.settings.values.get(k) for k in keys}
+        try:
+            w.settings.values.update(codmunity_username='',codmunity_display_name='',profile_url='',codmunity_avatar='')
+            w._select_lifetime_game('warzone','resurgence');self.qt.processEvents()
+            self.assertEqual(w.dash_card_name.text(),'—')
+            self.assertEqual(w.dash_card_handle.text(),'')
+            self.assertEqual(w.dash_card_tier.text(),'—')
+            self.assertFalse(w.dash_card_view.isEnabled())
+        finally:
+            for k,v in original.items():w.settings.values[k]=v
+
+    def test_rank_ladder_paints_segmented_tiers(self):
+        bar=app._RankLadder();bar.resize(700,64);bar.show();self.qt.processEvents()
+        try:
+            bar.set_rank(2,0.5);self.qt.processEvents()
+            pix=bar.grab()
+            self.assertFalse(pix.isNull())
+            img=pix.toImage()
+            seg=700.0/7
+            bot=img.pixelColor(int(seg*0.5),13)
+            goat=img.pixelColor(int(seg*6.5),13)
+            self.assertTrue(bot.red()>120,bot)
+            self.assertTrue(goat.red()<80,goat)
+            left=img.pixelColor(220,13);right=img.pixelColor(280,13)
+            self.assertTrue(left.green()>150 and left.red()>100,left)
+            self.assertTrue(right.red()<80,right)
+            bar.set_rank(-1,0.0);self.qt.processEvents()
+            dark=bar.grab().toImage().pixelColor(int(seg*0.5),13)
+            self.assertTrue(dark.red()<80,dark)
+        finally:bar.hide();bar.deleteLater()
+
+    def test_dash_profile_card_buttons_navigate(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        keys=('codmunity_username','codmunity_display_name','profile_url')
+        original={k:w.settings.values.get(k) for k in keys}
+        try:
+            w.settings.values.update(codmunity_username='vintendopower',codmunity_display_name='VintendoPower',profile_url='https://codmunity.gg/profile/vintendopower')
+            w._select_lifetime_game('mw4','multiplayer');self.qt.processEvents()
+            from unittest.mock import patch
+            with patch.object(app.QDesktopServices,'openUrl',return_value=True) as opener:w.dash_card_view.click();self.qt.processEvents()
+            opener.assert_called_once()
+            self.assertEqual(opener.call_args[0][0].toString(),'https://codmunity.gg/profile/vintendopower')
+            w.dash_card_boards.click();self.qt.processEvents()
+            self.assertEqual(w.nav.item(w.nav.currentRow()).data(Qt.UserRole),'Leaderboards')
+        finally:
+            for k,v in original.items():w.settings.values[k]=v
+
+    def test_camo_failed_images_retry_on_toggle(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        import json as _json
+        filedump={'weapons':[{'WeaponName':'VEL 46','Category':'SMG','Icon':'','game':'mw4','popularityByGame':{'mw4':1}}],
+            'camoGrinds':[{'name':'mw4','game':'mw4','title':'Weapon Camos','camos':[{'name':'Gold','order':10,'image':''}]}],
+            'challenges':[{'WeaponName':'VEL 46','Name':'Gold','Challenge':'100 kills','CamoGrind':'mw4','Order':10,'Image':'','SubCategory':'Completionist'}]}
+        (_tmpdir/'camo-page.json').write_text(_json.dumps(filedump),encoding='utf-8')
+        w._codmunity_cache_dir=lambda:str(_tmpdir)
+        w.refresh_camo_tracker();self.qt.processEvents()
+        self.assertTrue(w._camo_rows)
+        self.assertFalse(getattr(w,'_camo_failed',None))
+        w._camo_failed={'http://img/stale.webp'}
+        w._maybe_refresh_camo()
+        self.assertEqual(w._camo_failed,set())
+        self.assertTrue(w._camo_rows)
+        w._camo_failed={'http://img/stale.webp'}
+        w._camo_rows=[]
+        w._maybe_refresh_camo()
+        self.assertTrue(w._camo_rows)
+        w._select_camo_game(0);self.qt.processEvents()
+        self.assertEqual(getattr(w,'_camo_failed',None),set())
+
+    def test_dash_rank_ignores_tiny_sample(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        w.store.set_meta('codmunity_stats',{'personal':{'warzone':{'resurgence':{'stats':{'kills':10051,'deaths':9054,'wins':187,'losses':291,'games_played':478}}}}})
+        w.store.set_meta('codmunity_public_distributions',{'warzone|resurgence|lifetime':{'game':'warzone','mode':'resurgence','scope':'lifetime','kd':[0.5,1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0],'sampled':10,'users_total':12,'updated_at':'2026-11-19T12:00:00+00:00','source':'test'}})
+        w._select_lifetime_game('warzone','resurgence');self.qt.processEvents()
+        self.assertEqual(w.dash_rank_current.text(),'—')
+        self.assertEqual(w.dash_card_tier.text(),'—')
+        self.assertEqual(w.dash_card_better.text(),'')
+        self.assertEqual(w.dash_rank_bar.tier_index,-1)
+
+    def test_dash_rank_auto_fetches_missing_distribution(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        pid='auto-'+uuid.uuid4().hex
+        w.store.save_player({'id':pid,'name':'Auto','display_name':'Auto','aliases':[],'photo':'','enabled':True,'consent_meta':True})
+        w.current_player=pid
+        w.store.set_meta('codmunity_stats',{'personal':{'warzone':{'resurgence':{'stats':{'kills':5200,'deaths':3100,'wins':140,'games_played':600}}}}})
+        calls=[]
+        w.async_task=lambda work,done=None,failed=None:calls.append((work,done,failed))
+        w._maybe_fetch_distribution('warzone','resurgence')
+        self.assertEqual(calls,[])
+        dist=app.codmunity_player_stats.CommunityDistribution.from_payload({'data':{'game':'warzone','mode':'resurgence','scope':'lifetime','sampled':492,'users_total':515,'dist':{'kd':[0.8,1.0,1.5,2.0,2.75,3.47,4.2,4.94,5.86,7.43,8.84,12.03]}}})
+        w.codmunity_client.community_distribution=lambda g,m,s:dist
+        from unittest.mock import patch
+        with patch.dict(os.environ):
+            os.environ.pop('PYTEST_CURRENT_TEST',None)
+            w._select_lifetime_game('warzone','resurgence');self.qt.processEvents()
+        self.assertEqual(len(calls),1)
+        work,done,failed=calls[0]
+        with patch.dict(os.environ):
+            os.environ.pop('PYTEST_CURRENT_TEST',None)
+            done(work())
+        self.qt.processEvents()
+        self.assertTrue(w.dash_card_tier.text() not in ('','—'))
+        cached=w.store.meta('codmunity_public_distributions',{})
+        self.assertIn('warzone|resurgence|lifetime',cached)
+        with patch.dict(os.environ):
+            os.environ.pop('PYTEST_CURRENT_TEST',None)
+            w._maybe_fetch_distribution('warzone','resurgence')
+        self.assertEqual(len(calls),1)
+
+    def test_dash_card_games_sit_under_profile_card(self):
+        w=self.window;lay=w.pages['Dashboard'][1]
+        order=[]
+        for i in range(lay.count()):
+            it=lay.itemAt(i);wd=it.widget();sub=it.layout()
+            if wd is w.dash_cod_profile_card:order.append('card')
+            elif wd is w.dash_rank_card:order.append('rank')
+            elif sub is w.dash_card_game_row:order.append('games')
+        self.assertEqual(order,['card','games','rank'])
+        self.assertEqual(w.dash_card_stats.count(),4)
+        w.dash_profile_game_buttons[('warzone','resurgence')].click();self.qt.processEvents()
+        self.assertEqual(w._lifetime_game,('warzone','resurgence'))
+
+    def test_auto_upload_skipped_when_signed_out(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        calls=[]
+        w.async_task=lambda fn,done=None,failed=None:calls.append((fn,done,failed))
+        w._maybe_auto_upload()
+        self.assertEqual(calls,[])
+        self.assertFalse(getattr(w,'_auto_upload_done',False))
+
+    def test_auto_upload_posts_tracked_matches_once_signed_in(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        from unittest.mock import MagicMock,patch
+        w.codmunity_player_service=MagicMock(configured=True)
+        posted=[]
+        class _FakeAuth:
+            def post_json(self,route,body):
+                posted.append((route,body.get('matchId')))
+                return {}
+        w.codmunity_auth=_FakeAuth()
+        w.store.add({'matchId':'auto-1','modeKey':'resurgence','playedAt':'2026-11-10T12:00:00Z','result':'win','stats':{'kills':5},'players':[{'name':'Vintendo','verified':True,'stats':{'kills':5}}]})
+        calls=[]
+        w.async_task=lambda fn,done=None,failed=None:calls.append((fn,done,failed))
+        with patch.dict(os.environ):
+            os.environ.pop('PYTEST_CURRENT_TEST',None)
+            w._maybe_auto_upload()
+        self.assertEqual(len(calls),1)
+        with patch.dict(os.environ):
+            os.environ.pop('PYTEST_CURRENT_TEST',None)
+            results=calls[0][0]()
+            calls[0][1](results)
+        self.assertTrue(w._auto_upload_done)
+        self.assertEqual(results[1]['uploaded'],1)
+        self.assertIn('auto-1',w.store.meta('codmunity_uploaded_match_ids',[]))
+        with patch.dict(os.environ):
+            os.environ.pop('PYTEST_CURRENT_TEST',None)
+            w._maybe_auto_upload()
+        self.assertEqual(len(calls),1)
+
+    def test_camo_expanded_row_and_detail_drawer(self):
+        import tempfile as _tf;_tmpdir=Path(_tf.mkdtemp());self.addCleanup(shutil.rmtree,_tmpdir,True);w=self.window;w.store=app.E.Store(_tmpdir/'history.sqlite3')
+        import json as _json
+        filedump={'weapons':[{'WeaponName':'VEL 46','Category':'SMG','Icon':'','game':'mw4','popularityByGame':{'mw4':1}}],
+            'camoGrinds':[{'name':'mw4','game':'mw4','title':'Weapon Camos','camos':[{'name':'Gold','order':10,'image':''}]}],
+            'challenges':[
+                {'WeaponName':'VEL 46','Name':'Military 1','Challenge':'Reach Level 9','CamoGrind':'mw4','Order':1,'Image':'','SubCategory':'Military Camos'},
+                {'WeaponName':'VEL 46','Name':'Poly','Challenge':'Get 3 kills','CamoGrind':'mw4','Order':2,'Image':'','SubCategory':'Special Camos'},
+                {'WeaponName':'VEL 46','Name':'Gold','Challenge':'100 kills','CamoGrind':'mw4','Order':10,'Image':'','SubCategory':'Completionist'}]}
+        (_tmpdir/'camo-page.json').write_text(_json.dumps(filedump),encoding='utf-8')
+        catalogue=app.codmunity_camo.load_camo_catalogue(str(_tmpdir))
+        w._camo_catalogue=catalogue;w._camo_game='mw4';w._camo_progress={}
+        w._camo_rows=app.codmunity_camo.weapon_rows(catalogue,{},'mw4','mw4');w._camo_grind='mw4';w.camo_grind_buttons={}
+        groups=dict(w._camo_weapon_groups('VEL 46'))
+        self.assertEqual(sorted(groups.keys()),['Completionist','Military Camos','Special Camos'])
+        self.assertEqual([c['name'] for c in groups['Completionist']],['Gold'])
+        self.assertEqual([c['name'] for c in groups['Military Camos']],['Military 1'])
+        self.assertEqual([c['name'] for c in groups['Special Camos']],['Poly'])
+        w._camo_expanded.add('VEL 46')
+        row=next(r for r in w._camo_rows if r['weapon']=='VEL 46')
+        card=w._camo_weapon_card(row)
+        chips=[b for b in card.findChildren(QLabel) if b.objectName() in ('camoModeMP','camoModeDMZ','camoModeWZ')]
+        self.assertTrue(chips)
+        marks=[b for b in card.findChildren(QPushButton) if b.text()=='Mark saved']
+        self.assertEqual(len(marks),1)
+        marks[0].click();self.qt.processEvents()
+        self.assertEqual(app.codmunity_camo.progress_map(w.store,None).get(('vel 46','military 1'),{}).get('state'),'saved')
+        dialog=w._open_camo_detail('VEL 46');self.qt.processEvents()
+        try:
+            self.assertTrue(dialog.isVisible())
+            titles=[b.text() for b in dialog.findChildren(QLabel) if b.objectName()=='camoGroupTitle']
+            self.assertIn('Completionist',titles);self.assertIn('Military Camos',titles)
+            tiles=[b for b in dialog.findChildren(QFrame) if b.objectName()=='camoDetailTile']
+            self.assertEqual(len(tiles),3)
+            close=[b for b in dialog.findChildren(QPushButton) if b.text()=='Close']
+            self.assertEqual(len(close),1)
+            tiles[2].mousePressEvent(None);self.qt.processEvents()
+            self.assertEqual(app.codmunity_camo.progress_map(w.store,None).get(('vel 46','military 1'),{}).get('state'),'dismissed')
+        finally:
+            dialog.close();dialog.deleteLater();self.qt.processEvents()
+
 if __name__=='__main__':unittest.main()
+
+

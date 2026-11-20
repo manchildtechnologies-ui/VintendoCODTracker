@@ -7,6 +7,8 @@ from codmunity_player_stats import (
     ModularPlayerStatsService,
     PlayerStatsUnavailable,
     ladder_rank,
+    distribution_rank,
+    parse_profile_banner,
     parse_profile_identity,
     player_kd_for_mode,
     tracked_match_kd,
@@ -32,6 +34,76 @@ class PlayerDataTests(unittest.TestCase):
     def test_profile_parser_rejects_username_mismatch(self):
         with self.assertRaises(ValueError):
             parse_profile_identity({"user": {"username": "other", "uid": "uid-1"}}, "vintendopower")
+
+    def test_profile_banner_parses_display_fields(self):
+        banner = parse_profile_banner(
+            {"user": {"username": "vintendopower", "uid": "uid-9",
+                      "displayName": "Vintendo", "description": "TIme to SMell it",
+                      "followers": 3,
+                      "imageUrl": "https://assets.codmunity.gg/profiles/pi-a.webp",
+                      "imageUrlOptimized": "https://assets.codmunity.gg/profiles/pi-b.webp"},
+             "countLoadouts": 2, "countLikes": 7},
+            "vintendopower",
+        )
+        self.assertEqual(banner["username"], "vintendopower")
+        self.assertEqual(banner["uid"], "uid-9")
+        self.assertEqual(banner["display_name"], "Vintendo")
+        self.assertEqual(banner["avatar"], "https://assets.codmunity.gg/profiles/pi-b.webp")
+        self.assertEqual(banner["bio"], "TIme to SMell it")
+        self.assertEqual(banner["followers"], 3)
+        self.assertEqual(banner["loadouts"], 2)
+        self.assertEqual(banner["likes"], 7)
+
+    def test_profile_banner_rejects_bad_identity_but_zeroes_extras(self):
+        with self.assertRaises(ValueError):
+            parse_profile_banner({"user": {"username": "other", "uid": "uid-1"}}, "vintendopower")
+        with self.assertRaises(ValueError):
+            parse_profile_banner({"user": {"username": "vintendopower"}}, "vintendopower")
+        banner = parse_profile_banner(
+            {"user": {"username": "vintendopower", "uid": "uid-9",
+                      "imageUrl": "ftp://example.com/x.webp",
+                      "followers": True, "displayName": "  "},
+             "countLoadouts": -1, "countLikes": None},
+            "vintendopower",
+        )
+        self.assertEqual(banner["avatar"], "")
+        self.assertEqual(banner["bio"], "")
+        self.assertIsNone(banner["display_name"])
+        self.assertEqual(banner["followers"], 0)
+        self.assertEqual(banner["loadouts"], 0)
+        self.assertEqual(banner["likes"], 0)
+
+    def test_distribution_keeps_optional_arrays(self):
+        from codmunity_player_stats import CommunityDistribution
+        dist = CommunityDistribution.from_payload({
+            "data": {
+                "game": "mw4", "mode": "multiplayer", "scope": "lifetime",
+                "dist": {"kd": [0.5, 0.7, 0.9, 1.1, 1.3, 1.5, 1.8, 2.2, 2.8, 3.5, 4.5, 6.0],
+                         "wl": [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4],
+                         "winRate": [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]}}})
+        self.assertEqual(len(dist.wl), 12)
+        self.assertEqual(len(dist.win_rate), 12)
+
+    def test_distribution_handles_missing_arrays(self):
+        from codmunity_player_stats import CommunityDistribution
+        dist = CommunityDistribution.from_payload({
+            "data": {
+                "game": "warzone", "mode": "resurgence", "scope": "lifetime",
+                "dist": {"kd": [0.8, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0]}}})
+        self.assertIsNone(dist.wl)
+        self.assertIsNone(dist.win_rate)
+
+    def test_percentile_and_median_helpers(self):
+        from codmunity_player_stats import median_of, percentile_of
+        values = [0.5, 0.7, 0.9, 1.1, 1.3, 1.5, 1.8, 2.2, 2.8, 3.5, 4.5, 6.0]
+        self.assertAlmostEqual(percentile_of(1.5, values), 50.0)
+        self.assertAlmostEqual(median_of(values), 1.5)
+        self.assertAlmostEqual(percentile_of(0.1, values), 5.0)
+        self.assertAlmostEqual(percentile_of(99.0, values), 99.0)
+        with self.assertRaises(ValueError):
+            percentile_of("junk", values)
+        with self.assertRaises(ValueError):
+            median_of([1.0, 2.0])
 
     def test_distribution_parser_and_resurgence_fixture(self):
         distribution = CommunityDistribution.from_payload({
@@ -161,6 +233,25 @@ class GlobalComboTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             CodmunityPublicClient(opener=bad_opener).community_distribution("mw4", "multiplayer", "lifetime")
+
+
+class DistributionRankTests(unittest.TestCase):
+    def _dist(self, sampled, kd):
+        return CommunityDistribution.from_payload({
+            "data": {"game": "mw4", "mode": "multiplayer", "scope": "lifetime",
+                     "sampled": sampled, "usersTotal": 120,
+                     "dist": {"kd": kd}}})
+
+    def test_tiny_sample_refuses_rank(self):
+        tiny = self._dist(10, [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0])
+        self.assertIsNone(distribution_rank(1.11, tiny))
+
+    def test_healthy_sample_ranks(self):
+        kd = [0.88, 0.93, 0.96, 0.98, 1.0, 1.02, 1.05, 1.08, 1.14, 1.27, 1.39, 2.09]
+        big = self._dist(841, kd)
+        rank = distribution_rank(1.11, big)
+        self.assertIsNotNone(rank)
+        self.assertEqual(rank.tier, "Sweat")
 
 
 if __name__ == "__main__":

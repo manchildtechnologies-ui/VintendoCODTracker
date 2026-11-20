@@ -5,15 +5,16 @@ from urllib.parse import quote
 from ctypes import wintypes
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from PySide6.QtCore import Qt,QUrl,QTimer,QObject,QEvent,Signal,QRunnable,QThreadPool,QRect,QAbstractNativeEventFilter,QSize,QPoint,QPointF,QPropertyAnimation,QEasingCurve
+from PySide6.QtCore import Qt,QUrl,QTimer,QObject,QEvent,Signal,QRunnable,QThreadPool,QRect,QAbstractNativeEventFilter,QSize,QPoint,QPointF,QRectF,QPropertyAnimation,QEasingCurve
 from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor,QBrush,QPalette,QAction,QFontDatabase,QLinearGradient,QDesktopServices,QMovie
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QListWidget,QListWidgetItem,QStackedWidget,QLineEdit,QComboBox,QCheckBox,QPlainTextEdit,QTableWidget,QTableWidgetItem,QHeaderView,QFileDialog,QMessageBox,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QSystemTrayIcon,QMenu,QSplitter,QGroupBox,QScrollArea,QTabWidget,QFrame,QButtonGroup,QInputDialog,QSlider,QDoubleSpinBox,QProgressBar)
+from PySide6.QtGui import QIcon,QPixmap,QImage,QPainter,QPainterPath,QPen,QColor,QBrush,QPalette,QAction,QFont,QFontDatabase,QLinearGradient,QRadialGradient,QDesktopServices,QMovie
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QGridLayout,QLabel,QPushButton,QListWidget,QListWidgetItem,QStackedWidget,QLineEdit,QComboBox,QCheckBox,QPlainTextEdit,QTableWidget,QTableWidgetItem,QHeaderView,QFileDialog,QMessageBox,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QSystemTrayIcon,QMenu,QSplitter,QGroupBox,QScrollArea,QTabWidget,QFrame,QButtonGroup,QInputDialog,QSlider,QDoubleSpinBox,QProgressBar,QSizePolicy)
 import engine as E
 import updater
 import meta_automation
 import codmunity_player_stats as codmunity_player_stats
+import codmunity_camo as codmunity_camo
 from version import APP_VERSION
 
 SCOREBOARD_HOTKEY_ID=0x5638
@@ -43,6 +44,10 @@ MULTIPLAYER_REGION_TEMPLATES={
     for size in ((1920,1080),(2560,1440),(3840,2160))
 }
 
+def worker_alive(worker):
+    """True when a background thread worker exists and is running."""
+    try:return bool(worker is not None and worker.is_alive())
+    except (AttributeError,RuntimeError):return False
 def visible_cinematic_rows(rows,selected_id=None):
     """Queue rows worth showing. Finished jobs leave the list once they have nothing left to post: completed jobs stay only while their MP4 file still exists, failed jobs stay only while selected so their error stays visible."""
     visible=[]
@@ -298,6 +303,44 @@ class Sparkline(QWidget):
         painter.setPen(QPen(QColor('#9fdc3a'),2));painter.drawPolyline(points)
         painter.setPen(QPen(QColor('#4ade80'),4));painter.drawPoint(points[-1])
 PAGE_BANNERS={'Dashboard':'dashboard.png','Scoreboard Capture':'scoreboard.png','Match History':'match-history.png','Player Roster':'roster.png','AI Studio':'ai-studio.png','ScreenShots and Videos':'screenshots.png','Tracker Browser':'browser.png','Settings':'settings.png'}
+DMZ_WEB_HOME = 'https://codmunity.gg/dmz'
+DMZ_WEB_PAGES = (
+    ('Overview', 'https://codmunity.gg/dmz'),
+    ('Map', 'https://codmunity.gg/dmz/map'),
+    ('Review pins', 'https://codmunity.gg/dmz/map/review'),
+    ('How the map works', 'https://codmunity.gg/dmz/map/how-it-works'),
+    ('Missions', 'https://codmunity.gg/dmz/missions'),
+    ('Trait Planner', 'https://codmunity.gg/dmz/traits/planner'),
+    ('Loot Tracker', 'https://codmunity.gg/dmz/loot-tracker'),
+    ('Meta', 'https://codmunity.gg/mw4-dmz'),
+    ('Traits', 'https://codmunity.gg/dmz/traits'),
+    ('Items', 'https://codmunity.gg/dmz/items'),
+    ('Crafting', 'https://codmunity.gg/dmz/crafting'),
+    ('Bosses', 'https://codmunity.gg/dmz/bosses'),
+    ('Progression', 'https://codmunity.gg/dmz/progression'),
+    ('Beginner guide', 'https://codmunity.gg/dmz/guide'),
+    ("What's New", 'https://codmunity.gg/dmz/whats-new'),
+    ('News', 'https://codmunity.gg/dmz/news'),
+)
+DMZ_NAV_SECTIONS = (
+    ('TOOLS', ('Map', 'Review pins', 'How the map works', 'Missions', 'Trait Planner', 'Loot Tracker', 'Meta')),
+    ('DATABASE', ('Traits', 'Items', 'Crafting', 'Bosses', 'Progression')),
+    ('GUIDES AND NEWS', ('Beginner guide', "What's New", 'News')),
+)
+DMZ_ADBLOCK_SUFFIXES = (
+    'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
+    'adservice.google.com', 'ads.yahoo.com', 'amazon-adsystem.com',
+    'adsrvr.org', 'criteo.com', 'criteo.net', 'outbrain.com',
+    'taboola.com', 'revcontent.com', 'mgid.com', 'pubmatic.com',
+    'rubiconproject.com', 'openx.net', 'moatads.com',
+)
+def _dmz_host_blocked(host):
+    try:h=str(host or '').lower().split(':')[0]
+    except Exception:return False
+    if not h or '.' not in h:return False
+    return any(h==d or h.endswith('.'+d) for d in DMZ_ADBLOCK_SUFFIXES)
+
+
 class ScoreboardHotkeyFilter(QAbstractNativeEventFilter):
     def __init__(self,callbacks):super().__init__();self.callbacks=callbacks
     def nativeEventFilter(self,eventType,message):
@@ -378,7 +421,7 @@ QLabel#brandName {font-size:17px;font-weight:900;color:#f4f5f7;letter-spacing:1p
 QLabel#brandSub {font-size:11px;font-weight:700;color:#9ca5b4;letter-spacing:2px;}
 QLabel#sidebarFooter {font-size:10px;font-weight:700;color:#ff3b45;letter-spacing:2px;padding:12px;}
 QWidget#dashboardHero {border:1px solid #70232c;border-radius:10px;background:transparent;}
-QLabel#livePill {background:#10251d;border:1px solid #1c754b;border-radius:18px;color:#57f19b;font-size:13px;font-weight:900;padding:10px 19px;}
+QLabel#livePill {background:#10251d;border:1px solid #1c754b;border-radius:14px;color:#57f19b;font-size:12px;font-weight:900;padding:4px 14px;}
 QFrame#metricRed {border:1px solid #8e2631;border-radius:9px;background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #37161d,stop:1 #171218);}
 QFrame#metricBlue {border:1px solid #245b95;border-radius:9px;background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #102a43,stop:1 #111721);}
 QFrame#metricPurple {border:1px solid #65409b;border-radius:9px;background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #27193c,stop:1 #15131d);}
@@ -386,14 +429,147 @@ QLabel#metricGlyph {font-size:29px;font-weight:900;color:#fa3544;}
 QLabel#metricValue {font-size:33px;font-weight:900;color:#ffffff;}
 QLabel#metricLabel {font-size:12px;font-weight:800;color:#bdc6d5;letter-spacing:1px;}
 QFrame#dashboardPanel {border:1px solid #303642;border-radius:9px;background:#0e1118;}
+QFrame#rankCard {border:1px solid #23444b;border-radius:10px;background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #0e1a1e,stop:1 #0b1116);}
 QFrame#healthRow {border:1px solid #20252d;border-radius:6px;background:#141922;}
 QLabel#healthDot {font-size:15px;color:#77818f;}
 QLabel#healthValue {font-size:11px;font-weight:800;color:#c4ccd8;}
+QLabel#dashTitle {font-size:17px;font-weight:900;color:#ffffff;letter-spacing:2px;}
+QLabel#dashVersion {font-size:11px;font-weight:700;color:#8b95a3;}
+QLabel#dashLogoSub {font-size:10px;font-weight:800;color:#ff5964;letter-spacing:3px;}
+QLabel#dashDotName {font-size:9px;font-weight:800;color:#8b95a3;letter-spacing:1px;}
+QLabel#dashDotValue {font-size:9px;font-weight:800;color:#c4ccd8;}
+QPushButton#dashGear {background:transparent;border:1px solid #303642;border-radius:14px;color:#c4ccd8;font-size:15px;font-weight:900;}
+QPushButton#dashGear:hover {border-color:#ed2938;color:#ffffff;}
+QLabel#dashSection {font-size:12px;font-weight:900;color:#f2f4f7;letter-spacing:2px;}
+QLabel#dashStatGame {font-size:11px;font-weight:700;color:#8b95a3;}
+QPushButton#dashMini {background:#141922;border:1px solid #303642;border-radius:6px;color:#c4ccd8;font-size:11px;font-weight:800;padding:4px 10px;}
+QPushButton#dashMini:hover {border-color:#ed2938;color:#ffffff;}
+QFrame#dashStat {border:1px solid #8e2631;border-radius:9px;background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2b1219,stop:1 #101218);}
+QFrame#dashStat:hover {border:1px solid #ed2938;}
+QLabel#dashStatIcon {font-size:20px;font-weight:900;color:#fa3544;}
+QLabel#dashStatValue {font-size:24px;font-weight:900;color:#ffffff;}
+QLabel#dashStatLabel {font-size:9px;font-weight:800;color:#bdc6d5;letter-spacing:1px;}
+QLabel#dashResult {font-weight:900;}
+QLabel#dashDetail {font-size:12px;font-weight:700;color:#cbd3df;}
+QLabel#dashStats {font-size:11px;color:#99a8bc;}
+QLabel#dashStatus {font-size:10px;color:#8b95a3;}
+QLabel#dashHint {font-size:10px;color:#77818f;}
+QFrame#dashSummaryRow {border:1px solid #20252d;border-radius:6px;background:#141922;}
+QLabel#dashSummaryValue {font-size:19px;font-weight:900;color:#ffffff;}
+QLabel#dashSummaryLabel {font-size:9px;font-weight:800;color:#bdc6d5;letter-spacing:1px;}
+QLabel#dashSummarySub {font-size:13px;font-weight:800;color:#c4ccd8;}
+QLabel#codmunityProfileName {font-size:20px;font-weight:900;color:#ffffff;}
+QLabel#codmunityProfileSub {font-size:11px;color:#9da8b7;}
+QLabel#codmunityProfileStats {font-size:11px;color:#c4ccd8;}
+QLabel#dashProfileName {font-size:20px;font-weight:900;color:#ffffff;}
+QLabel#dashProfileSub {font-size:11px;color:#9da8b7;}
+QLabel#dashProfileCount {font-size:17px;font-weight:900;color:#ffffff;}
+QLabel#dashProfileLabel {font-size:9px;font-weight:800;color:#bdc6d5;letter-spacing:1px;}
+QLabel#profileAvatar {font-size:34px;color:#5b6572;background:#232b33;border-radius:6px;}
 QFrame#dashboardFooter {border-top:1px solid #3a2026;background:#0d1016;}
 QFrame#historySummaryCard {border:1px solid #49313a;border-radius:8px;background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1a151b,stop:1 #10131a);}
 QLabel#historySummaryValue {font-size:25px;font-weight:900;color:#ffffff;}
 QLabel#historySummaryCaption {font-size:10px;font-weight:900;color:#ff5964;letter-spacing:1px;}
 QLabel#historySummaryDetail {font-size:10px;color:#9da8b7;}
+QFrame#boardCard {border:1px solid #1e3a2a;border-radius:10px;background:#0d1512;}
+QLabel#boardTitle {font-size:20px;font-weight:900;color:#e9f2e9;}
+QPushButton#boardGameTab {background:transparent;border:1px solid transparent;border-radius:7px;font-weight:900;color:#9aa8b8;padding:8px 14px;}
+QPushButton#boardGameTab:checked {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;}
+QPushButton#boardMetricTab {background:transparent;border:1px solid transparent;border-radius:6px;font-weight:700;color:#9aa8b8;padding:6px 12px;}
+QPushButton#boardMetricTab:checked {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;}
+QPushButton#dashGamePill {background:transparent;border:1px solid transparent;border-radius:7px;font-weight:900;color:#9aa8b8;padding:8px 14px;}
+QLabel#dashRankCurrent {color:#ffffff;font-size:13px;font-weight:900;}
+QLabel#dashCardName {color:#ffffff;font-size:32px;font-weight:900;}
+QLabel#dashCardHandle {color:#8b95a3;font-size:12px;font-weight:700;}
+QLabel#dashCardValue {color:#ffffff;font-size:26px;font-weight:900;}
+QLabel#dashCardCaption {color:#8b95a3;font-size:10px;font-weight:800;letter-spacing:1px;}
+QLabel#dashCardTier {color:#ffffff;font-size:54px;font-weight:900;}
+QLabel#dashCardSmall {color:#8b95a3;font-size:11px;font-weight:600;}
+QLabel#dashMeterTitle {font-size:10px;font-weight:800;color:#8b95a3;letter-spacing:1px;}
+QLabel#dashMeterValue {font-size:26px;font-weight:900;color:#ffffff;}
+QLabel#dashMeterSub {font-size:11px;color:#9da8b7;}
+QLabel#dashMeterCaption {font-size:10px;color:#77818f;}
+QFrame#dashMeter {background:#141922;border:1px solid #26303c;border-radius:9px;}
+QLabel#dashTileValue {font-size:19px;font-weight:900;color:#ffffff;}
+QLabel#dashTileBadge {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;border-radius:9px;font-size:10px;font-weight:800;padding:2px 8px;}
+QLabel#dashRankNext {color:#ff5d6c;font-size:11px;font-weight:800;}
+QPushButton#monitorReady {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;font-weight:700;border-radius:6px;padding:7px 12px;}
+QPushButton#dashGamePill:checked {background:#37161d;border:1px solid #8e2631;color:#ff8b93;}
+QFrame#boardYouRow {border:1px solid #2a3430;border-radius:8px;background:#141a17;}
+QLabel#boardYouBadge {background:#35c759;color:#0b1410;font-weight:900;font-size:11px;border-radius:4px;padding:3px 7px;}
+QLabel#boardYouName {font-size:17px;font-weight:900;color:#ffffff;}
+QLabel#boardYouSub {font-size:11px;color:#8fa093;}
+QLabel#boardYouCaption {font-size:10px;font-weight:800;color:#8fa093;}
+QLabel#boardYouValue {font-size:16px;font-weight:900;color:#ffffff;}
+QLabel#boardAvatar {font-size:22px;color:#5b6572;background:#232b33;border-radius:18px;}
+QLabel#boardPlayerName {font-size:13px;font-weight:800;color:#f2f4f7;}
+QLabel#boardPlayerHandle {font-size:11px;color:#8b95a3;}
+QLabel#boardMedalGold {background:#f5b942;color:#3a2a00;font-weight:900;font-size:12px;border-radius:6px;}
+QLabel#boardMedalSilver {background:#c7ccd4;color:#333a44;font-weight:900;font-size:12px;border-radius:6px;}
+QLabel#boardMedalBronze {background:#d08a4e;color:#3a2410;font-weight:900;font-size:12px;border-radius:6px;}
+QLabel#boardMedalPlain {background:#232b33;color:#9aa8b2;font-weight:800;font-size:12px;border-radius:6px;}
+QCheckBox#boardSwitch::indicator {width:44px;height:24px;border-radius:12px;background:#2b303c;}
+QCheckBox#boardSwitch::indicator:checked {background:#35c759;}
+QCheckBox#boardSwitch::indicator:disabled {background:#1a1e24;}
+QLabel#boardIdentity {font-size:12px;font-weight:800;color:#7bf0a8;}
+QLabel#boardStatus {font-size:11px;color:#99a8bc;}
+QFrame#camoStatusBar {border:1px solid #2b303c;border-radius:8px;background:#10141b;}
+QLabel#camoStatusDot {font-size:14px;color:#57f19b;}
+QLabel#camoStatusLine {font-size:14px;font-weight:900;color:#f2f4f7;}
+QLabel#camoStatusLast {font-size:12px;color:#8fa093;}
+QLabel#camoGrindLabel {font-size:11px;font-weight:900;color:#7bf0a8;}
+QPushButton#camoGrindPill {background:transparent;border:1px solid transparent;border-radius:7px;font-weight:900;color:#9aa8b8;padding:8px 14px;}
+QPushButton#camoGrindPill:checked {background:#3a2a10;border:1px solid #f0b429;color:#f0b429;}
+QLabel#camoTitle {font-size:24px;font-weight:900;color:#e9f2e9;}
+QLabel#camoSubtitle {font-size:12px;color:#8fa093;}
+QLabel#camoMasteryLabel {font-size:11px;font-weight:900;color:#8fa093;}
+QLabel#camoMasteryValue {font-size:13px;font-weight:800;color:#e9f2e9;}
+QProgressBar#camoMasteryBar {border:1px solid #2b303c;border-radius:4px;background:#141920;max-height:8px;}
+QProgressBar#camoMasteryBar::chunk {background:#7bf0a8;border-radius:4px;}
+QFrame#camoCard {border:1px solid #2b303c;border-radius:8px;background:#141920;}
+QLabel#camoCardBadge {font-size:11px;font-weight:900;color:#8b95a3;}
+QLabel#camoCardTitle {font-size:15px;font-weight:900;color:#f2f4f7;}
+QLabel#camoCardArt {font-size:18px;color:#5b6572;background:#141920;border-radius:4px;}
+QLabel#camoCardSub {font-size:11px;color:#8b95a3;}
+QLabel#camoCardCount {font-size:11px;font-weight:800;color:#7bf0a8;background:#1d3a2a;border-radius:6px;padding:2px 8px;}
+QLabel#camoCardLocked {font-size:11px;font-weight:800;color:#c9a0a6;background:#2a1215;border-radius:6px;padding:2px 8px;}
+QProgressBar#camoCardBar {border:none;background:#232b33;border-radius:3px;max-height:6px;}
+QProgressBar#camoCardBar::chunk {background:#7bf0a8;border-radius:3px;}
+QFrame#camoFilterBar {border:1px solid #2b303c;border-radius:10px;background:#10141b;}
+QPushButton#camoFilterPill {background:transparent;border:1px solid transparent;border-radius:7px;font-weight:800;color:#9aa8b8;padding:7px 12px;font-size:12px;}
+QPushButton#camoFilterPill:checked {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;}
+QPushButton#camoCategoryPill {background:#1a1f27;border:1px solid #2b303c;border-radius:6px;font-weight:700;color:#c4ccd8;padding:6px 12px;font-size:12px;}
+QPushButton#camoCategoryPill:checked {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;}
+QLineEdit#camoSearch {background:#0b0e13;border:1px solid #2b303c;border-radius:7px;padding:8px 12px;color:#e8ebf0;}
+QLabel#camoHint {font-size:11px;color:#77818f;}
+QListWidget#camoWeaponList {background:transparent;border:none;}
+QListWidget#camoWeaponList::item {background:transparent;border:none;padding:0px;margin:4px 0px;}
+QListWidget#camoWeaponList::item:selected {background:transparent;border:none;}
+QFrame#camoWeaponCard {border:1px solid #2b303c;border-radius:10px;background:#141920;}
+QLabel#camoWeaponName {font-size:15px;font-weight:900;color:#f2f4f7;}
+QLabel#camoWeaponClass {font-size:11px;color:#8b95a3;}
+QLabel#camoThumb {font-size:16px;color:#5b6572;background:#232b33;border:2px solid #343c47;border-radius:6px;}
+QLabel#camoThumb[camoState="done"] {border-color:#2ea36b;color:#7bf0a8;}
+QLabel#camoThumb[camoState="locked"] {border-color:#3a2b30;color:#5b4a4e;}
+QPushButton#camoExpander {background:#1a1f27;border:1px solid #343c47;border-radius:6px;font-weight:900;color:#c4ccd8;padding:0px;}
+QLabel#camoNextCaption {font-size:10px;font-weight:900;color:#7bf0a8;}
+QLabel#camoNextName {font-size:13px;font-weight:900;color:#f2f4f7;}
+QLabel#camoDetailTitle {color:#ffffff;font-size:16px;font-weight:900;}
+QLabel#camoGroupTitle {font-size:12px;font-weight:900;color:#f2f4f7;letter-spacing:2px;}
+QFrame#camoDetailTile {border:1px solid #2a3340;border-radius:8px;background:#10141b;}
+QLabel#camoDetailName {color:#ffffff;font-size:13px;font-weight:900;}
+QLabel#camoDetailReq {color:#8b95a3;font-size:11px;}
+QPushButton#camoDetailClose {color:#7bf0a8;border:1px solid #2ea36b;border-radius:8px;padding:8px 18px;font-weight:900;}
+QLabel#camoModeMP {background:#3b82f6;color:#ffffff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:900;}
+QLabel#camoModeDMZ {background:#22c55e;color:#ffffff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:900;}
+QLabel#camoModeWZ {background:#38bdf8;color:#ffffff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:900;}
+QLabel#camoNextLine {font-size:11px;color:#9aa8b2;}
+QLabel#camoRing {font-size:13px;font-weight:900;color:#7bf0a8;border:2px solid #2ea36b;border-radius:26px;}
+QLabel#camoChallengeLine {font-size:12px;color:#c4ccd8;}
+QLabel#camoStatusLine {font-size:11px;color:#99a8bc;}
+QPushButton#camoViewPill {background:transparent;border:1px solid #2b303c;border-radius:7px;font-weight:700;color:#9aa8b8;padding:6px 10px;font-size:13px;}
+QPushButton#camoViewPill:checked {background:#1d3a2a;border:1px solid #2ea36b;color:#7bf0a8;}
+QLabel#camoRingSmall {font-size:12px;font-weight:900;color:#7bf0a8;border:2px solid #2ea36b;border-radius:18px;min-width:36px;min-height:36px;}
 QListWidget {background:#090b10;border:none;padding:10px 8px;font-size:14px;outline:0;}
 QListWidget::item {padding:14px 12px;border:1px solid #1e222b;border-radius:7px;margin:4px 2px;color:#dce1e9;}
 QListWidget::item:hover {background:#19151a;border-color:#70222b;color:#ffffff;}
@@ -437,6 +613,8 @@ QLabel#stepTitle {font-size:13px;font-weight:900;color:#ffffff;letter-spacing:1p
 QLabel#stepDesc {font-size:11px;color:#9da8b7;}
 QLabel#stepArrow {font-size:18px;font-weight:900;color:#ed2938;padding:0 4px;}
 QLabel#hotkeyPill {background:#0d2318;border:1px solid #2ea36b;border-radius:14px;color:#7bf0a8;font-size:12px;font-weight:800;padding:7px 13px;}
+QLabel#hotkeyPillShort {background:#0d2318;border:1px solid #2ea36b;border-radius:14px;color:#7bf0a8;font-size:12px;font-weight:800;padding:7px 9px;}
+QLabel#hotkeyPillShort:hover {background:#14392a;border:1px solid #7bf0a8;color:#ffffff;}
 QFrame#cinematicTile {border:1px solid #2a2f3a;border-radius:8px;background:#0c0f15;}
 QFrame#cinematicTile[selected="true"] {border:2px solid #ed2938;background:#180d12;}
 QLabel#cinematicThumb {background:#050609;color:#77818f;border-radius:5px;}
@@ -578,15 +756,122 @@ class HotkeyEdit(QLineEdit):
         elif key in (Qt.Key_Up,Qt.Key_Down,Qt.Key_Left,Qt.Key_Right):vk={Qt.Key_Up:0x26,Qt.Key_Down:0x28,Qt.Key_Left:0x25,Qt.Key_Right:0x27}[key]
         if vk:self.set_hotkey(vk,mod);self._set_waiting(False);self.clearFocus()
         if vk and self._confirm:QMessageBox.information(self,'Hotkeys Set','Hotkey updated to '+format_hotkey(self.vk,self.mod)+'.')
+class _MeterBar(QWidget):
+    def __init__(self,color,parent=None):
+        super().__init__(parent);self.color=color;self.pct=0.0;self.setMinimumHeight(22)
+    def set_value(self,pct):
+        try:self.pct=max(0.0,min(100.0,float(pct)))
+        except (TypeError,ValueError):self.pct=0.0
+        self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing);painter.setPen(Qt.NoPen)
+        w=float(max(1,self.width()));h=8.0;y=(float(self.height())-h)/2.0
+        painter.setBrush(QColor('#232b33'));painter.drawRoundedRect(QRectF(2.0,y,w-4.0,h),4.0,4.0)
+        for tenth in range(10,100,10):
+            x=w*tenth/100.0
+            painter.setBrush(QColor('#3a4356'));painter.drawRect(QRectF(x-1.0,y+1.0,2.0,h-2.0))
+        fill=w*self.pct/100.0
+        if fill>4.0:
+            painter.setBrush(QColor(self.color));painter.drawRoundedRect(QRectF(2.0,y,fill-2.0,h),4.0,4.0)
+            knob=2.0+fill-2.0
+            painter.setBrush(QColor('#ffffff'));painter.drawEllipse(QPointF(knob,y+h/2.0),7.0,7.0)
+            painter.setBrush(QColor('#0b0d12'));painter.drawEllipse(QPointF(knob,y+h/2.0),3.5,3.5)
+        painter.end()
+
+
+class _RingMeter(QWidget):
+    def __init__(self,color,parent=None):
+        super().__init__(parent);self.color=color;self.pct=0.0;self.text='';self.setFixedSize(64,64)
+    def set_value(self,pct,text=''):
+        try:self.pct=max(0.0,min(100.0,float(pct)))
+        except (TypeError,ValueError):self.pct=0.0
+        self.text=str(text or '');self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
+        inset=5.0;size=float(min(self.width(),self.height()))-inset*2.0
+        pen=QPen(QColor('#232b33'));pen.setWidth(7);pen.setCapStyle(Qt.RoundCap);painter.setPen(pen)
+        painter.drawEllipse(QRectF(inset,inset,size,size))
+        pen.setColor(QColor(self.color));painter.setPen(pen)
+        painter.drawArc(QRectF(inset,inset,size,size),90*16,-int(self.pct/100.0*360.0*16))
+        font=QFont('Segoe UI',11);font.setBold(True);painter.setFont(font)
+        painter.setPen(QColor('#ffffff'));painter.drawText(self.rect(),Qt.AlignCenter,self.text)
+        painter.end()
+
+
+class _RankLadder(QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.tiers=list(codmunity_player_stats.LADDER_TIERS)
+        self.colors=dict(Window.LADDER_TIER_COLORS)
+        self.tier_index=-1
+        self.progress=0.0
+        self.setMinimumHeight(52)
+    def set_rank(self,tier_index,progress):
+        try:self.tier_index=int(tier_index)
+        except (TypeError,ValueError):self.tier_index=-1
+        try:self.progress=max(0.0,min(1.0,float(progress)))
+        except (TypeError,ValueError):self.progress=0.0
+        self.update()
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing);painter.setPen(Qt.NoPen)
+        count=len(self.tiers)
+        if count<1:painter.end();return
+        total=float(max(1,self.width()));gap=6.0;seg=(total-gap*(count-1))/count;bar_h=22.0;top=2.0;label_h=15.0
+        dark=QColor('#262c36')
+        for index,(_floor,name) in enumerate(self.tiers):
+            x=index*(seg+gap);rect=QRectF(x,top,seg,bar_h)
+            color=QColor(self.colors.get(name,'#e5e9ef'))
+            if 0<=self.tier_index and index<self.tier_index:
+                painter.setBrush(color);painter.drawRoundedRect(rect,6.0,6.0)
+            elif index==self.tier_index and 0<=self.tier_index:
+                painter.setBrush(dark);painter.drawRoundedRect(rect,6.0,6.0)
+                fill=max(0.0,min(1.0,self.progress))*seg
+                if fill>0.5:
+                    clip=QPainterPath();clip.addRoundedRect(rect,6.0,6.0);painter.save();painter.setClipPath(clip)
+                    painter.setBrush(color);painter.drawRect(QRectF(x,top,fill,bar_h));painter.restore()
+            else:
+                painter.setBrush(dark);painter.drawRoundedRect(rect,6.0,6.0)
+        if 0<=self.tier_index<count:
+            x=self.tier_index*(seg+gap)+max(0.0,min(1.0,self.progress))*seg
+            center=QPointF(x,top+bar_h/2.0)
+            glow=QRadialGradient(center,16.0)
+            glow.setColorAt(0.0,QColor(255,255,255,110));glow.setColorAt(0.55,QColor(140,230,255,55));glow.setColorAt(1.0,QColor(140,230,255,0))
+            painter.setBrush(glow);painter.drawEllipse(center,16.0,16.0)
+            painter.setBrush(QColor('#ffffff'));painter.drawEllipse(center,7.0,7.0)
+            painter.setBrush(QColor('#0b0d12'));painter.drawEllipse(center,3.5,3.5)
+        font=QFont('Segoe UI',8);font.setBold(True);painter.setFont(font)
+        for index,(_floor,name) in enumerate(self.tiers):
+            reached=0<=self.tier_index and index<=self.tier_index
+            painter.setPen(QColor(self.colors.get(name,'#ffffff')) if reached else QColor('#77818f'))
+            painter.drawText(QRectF(index*(seg+gap),top+bar_h+3.0,seg,label_h),Qt.AlignCenter,str(name).upper())
+        painter.end()
+
+
+class _TrendUpIcon(QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent);self.setFixedSize(16,16)
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
+        pen=QPen(QColor('#ff5d6c'));pen.setWidth(2);pen.setCapStyle(Qt.RoundCap);painter.setPen(pen)
+        painter.drawLine(QPointF(2,12),QPointF(6,8))
+        painter.drawLine(QPointF(6,8),QPointF(10,10))
+        painter.drawLine(QPointF(10,10),QPointF(14,3))
+        painter.drawLine(QPointF(14,3),QPointF(10,3))
+        painter.drawLine(QPointF(14,3),QPointF(14,7))
+        painter.end()
+
+
 class Window(QMainWindow):
 
     def __init__(self):
         super().__init__();self.settings=E.Settings();self.store=E.Store();self.pool=QThreadPool.globalInstance();self.tasks=set();self.session_started=time.time()
+        self.codmunity_client=codmunity_player_stats.CodmunityPublicClient();self.codmunity_auth=None
+        self._rebuild_player_service()
         if not self.settings.values.get('single_capture_hotkey_migrated'):
             vk,mod=self.hotkey_setting('scoreboard_hotkey_vk','scoreboard_hotkey_mod',DEFAULT_SCOREBOARD_HOTKEY)
             self.settings.values.update(scoreboard_hotkey_vk=vk,scoreboard_hotkey_mod=mod,screenshot_hotkey_vk=vk,screenshot_hotkey_mod=mod,single_capture_hotkey_migrated=True)
             self.settings.save()
-        self.tracking=False;self.paused=False;self.solo=None;self.capture=None;self.capture_busy=False;self.screenshot_busy=False;self.poll_busy=False;self.active_id=None;self.last_capture=None;self.last_frame=None;self.outputs=[];self.browser=None;self.closing=False
+        self.tracking=False;self.paused=False;self.solo=None;self.capture=None;self.capture_busy=False;self.screenshot_busy=False;self.poll_busy=False;self.active_id=None;self.last_capture=None;self.last_frame=None;self.outputs=[];self.browser=None;self.closing=False;self.autotrack_watcher=None;self.sync_worker=None;self.autotrack_state='idle';self._watcher_draft=None;self._watcher_match_id=None
         self.tab_prototype=os.environ.get('VINTENDO_TAB_PROTOTYPE')=='1'
         # Combined CODMunity + scoreboard tracking is the standard behavior every
         # install gets (the local launcher runs this way); set
@@ -612,7 +897,7 @@ class Window(QMainWindow):
         self.app_tabs=QTabWidget();self.app_tabs.setObjectName('appTabs');self.app_tabs.setDocumentMode(True);self.app_tabs.tabBar().setMinimumHeight(60);root.addWidget(self.app_tabs)
         tracker_shell=QWidget();tracker_shell_layout=QHBoxLayout(tracker_shell);tracker_shell_layout.setContentsMargins(0,0,0,0);tracker_shell_layout.setSpacing(0);self.app_tabs.addTab(tracker_shell,'Vintendo COD Tracker')
         self.sidebar=QWidget();self.sidebar.setObjectName('sidebar');self.sidebar.setFixedWidth(275);side=QVBoxLayout(self.sidebar);side.setContentsMargins(10,16,10,12);side.setSpacing(8)
-        logo_path=E.ROOT/'assets'/'vintendo-cod-tracker-logo.png'
+        logo_path=E.ROOT/'assets'/'banners'/'dashboard.png'
         logo_pixmap=QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
             self.brand_logo=QLabel();self.brand_logo.setObjectName('brandLogo');self.brand_logo.setAlignment(Qt.AlignCenter);self.brand_logo.setFixedHeight(132)
@@ -624,40 +909,51 @@ class Window(QMainWindow):
             side.addWidget(self.brand_mark);side.addWidget(self.brand_name);side.addWidget(self.brand_sub)
         side.addSpacing(20)
         self.nav=QListWidget();self.nav.setSpacing(3);self.nav.setMinimumWidth(0);self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.nav.setTextElideMode(Qt.ElideRight);self.nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.nav,1)
+        self.dmz_nav=QListWidget();self.dmz_nav.setSpacing(3);self.dmz_nav.setMinimumWidth(0);self.dmz_nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff);self.dmz_nav.setTextElideMode(Qt.ElideRight);self.dmz_nav.setFrameShape(QFrame.NoFrame);side.addWidget(self.dmz_nav,1);self.dmz_nav.hide()
+        self.dmz_back=self.button('< Back',self._dmz_exit_mode);self.dmz_back.setObjectName('dmzNavBack');self.dmz_back.setStyleSheet("background:#2563eb;color:#ffffff;font-weight:700;border:1px solid #60a5fa;border-radius:6px;padding:8px 6px;");side.insertWidget(side.indexOf(self.dmz_nav),self.dmz_back);self.dmz_back.hide()
+        self._dmz_mode=False;self._dmz_return_row=0
+        try:self.dmz_nav.currentRowChanged.connect(self._dmz_nav_changed)
+        except (AttributeError,RuntimeError):pass
+        side.addSpacing(18);self.sidebar_mw4=QLabel();self.sidebar_mw4.setAlignment(Qt.AlignCenter)
+        try:
+            mw4_pix=QPixmap(str(E.ROOT/'assets'/'vintendo-cod-tracker-logo.png'))
+            if not mw4_pix.isNull():self.sidebar_mw4.setPixmap(mw4_pix.scaledToWidth(210,Qt.SmoothTransformation))
+        except Exception:pass
+        side.addWidget(self.sidebar_mw4);self.sidebar_mw4.hide()
+        self.sidebar_usage=QFrame();self.sidebar_usage.setObjectName('dashboardPanel');usage_layout=QVBoxLayout(self.sidebar_usage);usage_layout.setContentsMargins(12,10,12,10);usage_layout.setSpacing(2)
+        usage_title=QLabel('App usage');usage_title.setObjectName('dashCardCaption');usage_layout.addWidget(usage_title)
+        self.sidebar_usage_cpu=QLabel('—');self.sidebar_usage_gpu=QLabel('—');self.sidebar_usage_ram=QLabel('—')
+        for _name,_value in (('CPU',self.sidebar_usage_cpu),('GPU',self.sidebar_usage_gpu),('RAM',self.sidebar_usage_ram)):
+            _row=QHBoxLayout();_row.setSpacing(4)
+            _lab=QLabel(_name);_lab.setStyleSheet('color:#8b95a3;font-size:11px;font-weight:700;');_row.addWidget(_lab);_row.addStretch(1)
+            _value.setStyleSheet('color:#ffffff;font-size:11px;font-weight:700;');_row.addWidget(_value)
+            usage_layout.addLayout(_row)
+        side.addWidget(self.sidebar_usage)
         self.meta_login_button=self.button('Log into Meta AI',self.open_login_window);self.meta_login_button.setObjectName('metaLoginButton');self.meta_login_button.setMinimumHeight(40);self.meta_login_button.setToolTip('Open Meta AI so you can sign in for background poster and video jobs.');side.addWidget(self.meta_login_button)
         self.meta_verify_button=self.button('Verify Meta AI login',self.verify_login);self.meta_verify_button.setMinimumHeight(36);self.meta_verify_button.hide();side.addWidget(self.meta_verify_button)
-        self.generate_sidebar_button=self.button('Generate AI End Game Picture',self.generate_and_approve,True);self.generate_sidebar_button.setMinimumHeight(44);self.generate_sidebar_button.setToolTip('Generate the AI End Game picture for the newest finished match, then approve the post.');side.addWidget(self.generate_sidebar_button)
-        self.guide_button=self.button('?  Guide',self.show_sidebar_guide);self.guide_button.setObjectName('guideButton');self.guide_button.setMinimumHeight(36);self.guide_button.setMinimumWidth(90);self.guide_button.setToolTip('Walk through the sidebar and learn what each button does.')
+        self.generate_sidebar_button=self.button('Generate AI End Game Picture',self.generate_and_approve);self.generate_sidebar_button.setObjectName('metaLoginButton');self.generate_sidebar_button.setMinimumHeight(44);self.generate_sidebar_button.setToolTip('Generate the AI End Game picture for the newest finished match, then approve the post.');side.addWidget(self.generate_sidebar_button)
+        self.guide_button=self.button('?  Guide',self.show_sidebar_guide);self.guide_button.setObjectName('guideButton');self.guide_button.setMinimumHeight(36);self.guide_button.setMinimumWidth(90);self.guide_button.setToolTip('Walk through the sidebar and learn what each button does.');self.guide_button.hide()
 
         self.stack=QStackedWidget();tracker_shell_layout.addWidget(self.sidebar);tracker_shell_layout.addWidget(self.stack,1)
         self.codmunity_host=WindowsWindowHost();self.codmunity_process=None;self.codmunity_hwnd=None
         self.browser_host=WindowsWindowHost();self.browser_hwnd=None
         self.auto_browser_host=WindowsWindowHost()
-        self.codmunity_page=QWidget();codmunity_layout=QVBoxLayout(self.codmunity_page);codmunity_layout.setContentsMargins(20,16,20,16);codmunity_layout.setSpacing(10)
-        codmunity_header=QHBoxLayout();codmunity_title=QLabel('CODMunity Desktop');codmunity_title.setObjectName('title');codmunity_header.addWidget(codmunity_title);codmunity_header.addStretch()
-        self.codmunity_status=QLabel('Select this tab to open CODMunity Desktop');self.codmunity_status.setStyleSheet('color:#99a8bc;font-weight:700;');codmunity_header.addWidget(self.codmunity_status);codmunity_layout.addLayout(codmunity_header)
-        if self.tab_prototype:
-            preview_note=QLabel('Preview uses a copy of your settings, match history, and roster photos. It will not change live tracker data. Tracking and Discord posting are disabled in this window.')
-            preview_note.setWordWrap(True);preview_note.setStyleSheet('padding:9px 12px;background:#1b2330;border-left:3px solid #ed2938;color:#cbd3df;');codmunity_layout.addWidget(preview_note)
-        self.codmunity_surface=QFrame();self.codmunity_surface.setObjectName('dashboardPanel');self.codmunity_surface.setMinimumSize(0,550);codmunity_layout.addWidget(self.codmunity_surface,1);self.app_tabs.addTab(self.codmunity_page,'CODMunity')
-        self.codmunity_loading=QLabel(self.codmunity_surface);self.codmunity_movie=QMovie(str(E.ROOT/'assets'/'loading_animated_transparent.webp'))
-        if self.codmunity_movie.isValid():
-            self.codmunity_movie.setScaledSize(QSize(560,187));self.codmunity_loading.setMovie(self.codmunity_movie);self.codmunity_movie.start();self.codmunity_loading.setFixedSize(560,187)
-        else:
-            _load_pix=QPixmap(str(E.ROOT/'assets'/'loading.png'))
-            if not _load_pix.isNull():self.codmunity_loading.setPixmap(_load_pix.scaled(560,200,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-        _load_layout=QVBoxLayout(self.codmunity_surface);_load_layout.addStretch(1);_load_layout.addWidget(self.codmunity_loading,0,Qt.AlignHCenter);_load_layout.addStretch(1)
-        self.codmunity_poll=QTimer(self);self.codmunity_poll.setInterval(500);self.codmunity_poll.timeout.connect(self.try_attach_codmunity)
+        self.app_tabs.tabBar().hide()
+        self.codmunity_poll=QTimer(self);self.codmunity_poll.setInterval(500);self.codmunity_poll.timeout.connect(lambda:None)
         self.browser_poll=QTimer(self);self.browser_poll.setInterval(500);self.browser_poll.timeout.connect(self.try_attach_tracker_chrome)
-        self.app_tabs.currentChanged.connect(self.app_tab_changed)
-        self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit)
-        corner_controls=QWidget();corner_controls.setFixedHeight(60);corner_layout=QHBoxLayout(corner_controls);corner_layout.setContentsMargins(0,4,18,8);corner_layout.setSpacing(7);corner_layout.addWidget(self.guide_button);corner_layout.addWidget(self.exit_button);self.app_tabs.setCornerWidget(corner_controls,Qt.TopRightCorner)
-        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_settings();self.build_logs()
+        self.exit_button=QPushButton('EXIT');self.exit_button.setObjectName('exitButton');self.exit_button.setToolTip('Close Vintendo COD Tracker completely');self.exit_button.clicked.connect(self.request_exit);_exit_sep=QFrame();_exit_sep.setFrameShape(QFrame.HLine);_exit_sep.setFrameShadow(QFrame.Plain);_exit_sep.setStyleSheet('color:#2a3340;');side.addWidget(_exit_sep);side.addWidget(self.exit_button)
+        self.status=QLabel('\u25cf  STANDBY');self.status.setObjectName('livePill');self.status.setAlignment(Qt.AlignCenter);self.status.setFixedHeight(40)
+        self._blink_on=True;self.blink_timer=QTimer(self);self.blink_timer.setInterval(700);self.blink_timer.timeout.connect(self._blink_live_indicator)
+        self.status.setCursor(Qt.PointingHandCursor);self.status.setToolTip('Tracking starts automatically on launch. Click to start now.');self.status.mousePressEvent=lambda _event:self.start();self.status.hide()
+        side.insertWidget(side.indexOf(self.nav),self.status)
+        self.pages={};self.build_dashboard();self.build_solo();self.build_squad();self.build_capture();self.build_roster();self.build_studio();self.build_cod_ai();self.build_tracker_browser();self.build_discord();self.build_history();self.build_camo_tracker();self.build_leaderboards();self.build_stats();self.build_settings();self.build_logs();self.build_dmz_browser();self._add_dmz_nav_entry()
         try:self._autofill_stats_dir()
         except Exception:pass
-        QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity)
+        QTimer.singleShot(4000,self._boot_refresh_distributions);QTimer.singleShot(2000,self._boot_open_codmunity);QTimer.singleShot(6000,self._boot_autostart);QTimer.singleShot(12000,self._maybe_auto_upload)
+        if os.environ.get('PYTEST_CURRENT_TEST') is None:
+            self._usage_timer=QTimer(self);self._usage_timer.setInterval(5000);self._usage_timer.timeout.connect(self.refresh_app_usage);self._usage_timer.start()
         if self.tab_prototype:
-            for control in (self.start_button,self.pause_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button,self.generate_sidebar_button):control.setEnabled(False)
+            for control in (self.start_button,self.stop_button,self.auto_post,self.full_auto,self.allow_both,self.webhook,self.send_test_button,self.approve_post_button,self.generate_poster_button,self.generate_sidebar_button):control.setEnabled(False)
             self.auto_post.setChecked(False)
             self.full_auto.setChecked(False)
         if self.track_both_startup:
@@ -670,7 +966,7 @@ class Window(QMainWindow):
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)=='Squad Night':self.nav.item(row).setHidden(True)
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex);self.nav.currentRowChanged.connect(self.on_nav_row_changed);self.nav.setCurrentRow(0)
-        for hidden_page in ('Solo Ops','Discord Settings','Match History','AI Studio'):
+        for hidden_page in ('Solo Ops','Discord Settings','Match History','AI Studio','Stats','Leaderboards'):
             for row in range(self.nav.count()):
                 if self.nav.item(row).data(Qt.UserRole)==hidden_page:self.nav.item(row).setHidden(True)
         self.tray=QSystemTrayIcon(self.windowIcon(),self);menu=QMenu();menu.addAction('Open Vintendo COD Tracker',self.showNormal);menu.addAction('Pause tracking',self.pause);menu.addAction('Quit',self.shutdown);self.tray.setContextMenu(menu);self.tray.activated.connect(lambda reason:self.showNormal() if reason==QSystemTrayIcon.DoubleClick else None)
@@ -679,6 +975,8 @@ class Window(QMainWindow):
         self.inapp_timer=QTimer(self);self.inapp_timer.timeout.connect(self.poll_inapp_cinematics);self.inapp_timer.start(10000)
         self._inapp_active=None
         self.refresh_history();self.refresh_roster();self.mode_changed(self.mode.currentText(),initial=True);self.refresh_hotkey_labels()
+        try:self._start_codmunity_identity_lookup()
+        except Exception:pass
         self.log('Ready. Combined CODMunity + scoreboard tracking will start automatically.' if self.track_both_startup else 'Ready. Solo Ops is the default. Start tracking when the old tracker is stopped.')
         if not self.tab_prototype:self.import_previous_settings()
         self.refresh_cod_ai_screenshots()
@@ -686,7 +984,14 @@ class Window(QMainWindow):
     def on_nav_row_changed(self,row):
         try:name=self.nav.item(row).data(Qt.UserRole)
         except (AttributeError,RuntimeError):return
+        if name=='DMZ Command Center':
+            try:self._dmz_enter_mode()
+            except (AttributeError,RuntimeError):pass
+            return
         if name=='Scoreboard Capture':QTimer.singleShot(0,self.setup_scoreboard_display)
+        if name=='Camo Tracker':
+            try:self._maybe_refresh_camo()
+            except (AttributeError,RuntimeError):pass
         if name=='AI Studio':
             try:
                 current=getattr(self,'active_id',None)
@@ -726,26 +1031,238 @@ class Window(QMainWindow):
             pass
 
     def app_tab_changed(self,index):
-        if self.app_tabs.widget(index) is self.codmunity_page:
-            if not self._validate_codmunity_attach():self.start_or_attach_codmunity()
-            self.codmunity_host.focus_embedded()
-            self._sync_codmunity_embed_size()
-            if not self.tab_prototype and not getattr(self,'poll_busy',False):
-                self.codmunity_status.setText('Pulling CODMunity matches into the tracker…')
-                self.poll_records(source='codmunity-tab')
-            if not getattr(self,'codmunity_hwnd',None) and hasattr(self,'codmunity_loading'):
-                self.codmunity_loading.show();self.codmunity_loading.raise_()
+        # Single-tab window: left for tests and embed shims. Sync content lives
+        # in Settings > Sync & Account and refreshes through _settings_tab_changed.
+        return
+    def _settings_tab_changed(self,index):
+        try:widget=self.settings_tabs.widget(index)
+        except (AttributeError,RuntimeError):return
+        if widget is not getattr(self,'sync_tab_page',None):return
+        if hasattr(self,'sync_state_label'):
+            try:self.refresh_codmunity_sync()
+            except (AttributeError,RuntimeError):pass
+        if not self.tab_prototype and not getattr(self,'poll_busy',False):
+            try:self.poll_records(source='sync-tab')
+            except (AttributeError,RuntimeError):pass
     def _boot_open_codmunity(self):
-        if getattr(self,'tab_prototype',False):return
-        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
-        if is_smoke_run():return
-        try:self.start_or_attach_codmunity()
-        except Exception as exc:self.log('CODMunity auto-open skipped: '+str(exc))
+        # Window embedding retired: sync content lives under Settings now.
+        # The tracker never launches the external desktop app.
+        return
     def _close_codmunity_process(self):
         try:
             proc=getattr(self,'codmunity_process',None)
             if proc is not None and proc.poll() is None:proc.terminate()
         except Exception:pass
+    def build_codmunity_sync(self,layout):
+        account=QFrame();account.setObjectName('dashboardPanel');account_box=QVBoxLayout(account);account_box.setContentsMargins(14,12,14,12);account_box.setSpacing(8)
+        account_box.addWidget(QLabel('LINKED ACCOUNT'))
+        self.sync_account_label=QLabel('');self.sync_account_label.setWordWrap(True);account_box.addWidget(self.sync_account_label)
+        account_row=QHBoxLayout()
+        self.sync_pair_button=self.button('Pair new device',self.open_pair_page);account_row.addWidget(self.sync_pair_button)
+        self.sync_profile_button=self.button('Copy profile link',self.copy_profile_link);account_row.addWidget(self.sync_profile_button)
+        self.sync_site_button=self.button('Open CODMunity site',self.open_codmunity_site);account_row.addWidget(self.sync_site_button)
+        self.sync_verify_button=self.button('Verify email',self.send_verification_email);account_row.addWidget(self.sync_verify_button);account_row.addStretch()
+        account_box.addLayout(account_row);layout.addWidget(account)
+        sync=QFrame();sync.setObjectName('dashboardPanel');sync_box=QVBoxLayout(sync);sync_box.setContentsMargins(14,12,14,12);sync_box.setSpacing(8)
+        sync_box.addWidget(QLabel('SYNC OUTBOX (LOCAL ONLY)'))
+        self.sync_state_label=QLabel('');self.sync_state_label.setWordWrap(True);sync_box.addWidget(self.sync_state_label)
+        sync_row=QHBoxLayout()
+        self.sync_now_button=self.button('Sync now',self.sync_now,True);sync_row.addWidget(self.sync_now_button)
+        self.sync_export_button=self.button('Export matches JSON',self.export_matches_json);sync_row.addWidget(self.sync_export_button)
+        self.sync_diag_button=self.button('Copy diagnostics',self.copy_diagnostics);sync_row.addWidget(self.sync_diag_button);sync_row.addStretch()
+        sync_box.addLayout(sync_row);layout.addWidget(sync)
+        self.sync_start_button=self.button('Start tracking',self.sync_start_tracking,True);self.sync_stop_button=self.button('Stop tracking',self.sync_stop_tracking);self.sync_start_button.hide();self.sync_stop_button.hide()
+        self.row(layout,self.sync_start_button,self.sync_stop_button,self.button('Open Scoreboard Capture',self.goto_tracking))
+        self.upload_pending_button=self.button('Upload pending matches',self.upload_pending_matches_ui)
+        self.upload_lifetime_button=self.button('Upload lifetime stats',self.upload_lifetime_stats_ui)
+        self.row(layout,self.upload_pending_button,self.upload_lifetime_button)
+        self.app_usage_label=QLabel('');self.app_usage_label.setWordWrap(True);self.app_usage_label.setObjectName('camoHint')
+        layout.addWidget(self.app_usage_label)
+        detect=QFrame();detect.setObjectName('dashboardPanel');detect_box=QVBoxLayout(detect);detect_box.setContentsMargins(14,12,14,12);detect_box.setSpacing(8)
+        detect_box.addWidget(QLabel('RECENT AUTO-DETECTIONS'))
+        self.sync_detect_box=QVBoxLayout();self.sync_detect_box.setSpacing(4)
+        detect_box.addLayout(self.sync_detect_box);layout.addWidget(detect)
+        layout.addStretch(1)
+        self.refresh_codmunity_sync()
+    def _sync_user_dir(self):
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:return ''
+        user_dir=str(snapshot.get('user_dir') or '')
+        return user_dir
+    def refresh_upload_button(self):
+        if not hasattr(self,'upload_pending_button'):return
+        user_dir=self._sync_user_dir()
+        try:
+            import codmunity_player_stats as _cps
+            pending=len(_cps.pending_matches(user_dir)) if user_dir else 0
+        except Exception:pending=0
+        self.upload_pending_button.setText(f'Upload pending matches ({pending})' if pending else 'Upload pending matches')
+        self.upload_pending_button.setEnabled(bool(user_dir) and self.codmunity_player_service.configured)
+        self.upload_pending_button.setToolTip('Sign in to upload.' if not self.codmunity_player_service.configured else ('Import local data first.' if not user_dir else 'POST unsent matches.json entries as your account.'))
+    def upload_pending_matches_ui(self):
+        if not self.codmunity_player_service.configured:self.notice('Sign in with your CODMunity account first.');return
+        user_dir=self._sync_user_dir()
+        if not user_dir:self.notice('Import local data first.');return
+        try:auth=self.codmunity_auth
+        except AttributeError:auth=None
+        if auth is None:self.notice('Sign in with your CODMunity account first.');return
+        self.sync_state_label.setText('Uploading pending matches…')
+        def work():
+            import codmunity_player_stats as _cps
+            return _cps.upload_pending_matches(auth,user_dir)
+        def done(summary):
+            failed=len(summary.get('failed',[]))
+            self.log(f"Upload complete: {summary.get('uploaded',0)} sent, {summary.get('skipped',0)} already sent, {failed} refused.")
+            self.refresh_codmunity_sync()
+        def failed(message):self.sync_state_label.setText(str(message));self.log('Match upload failed.')
+        self.async_task(work,done,failed)
+    def upload_lifetime_stats_ui(self):
+        if not self.codmunity_player_service.configured:self.notice('Sign in with your CODMunity account first.');return
+        user_dir=self._sync_user_dir()
+        if not user_dir:self.notice('Import local data first.');return
+        try:auth=self.codmunity_auth
+        except AttributeError:auth=None
+        if auth is None:self.notice('Sign in with your CODMunity account first.');return
+        self.sync_state_label.setText('Uploading lifetime stats…')
+        def work():
+            import codmunity_player_stats as _cps
+            return _cps.upload_lifetime_snapshot(auth,user_dir)
+        def done(summary):
+            failed=len(summary.get('failed',[]))
+            self.log(f"Lifetime upload complete: {summary.get('uploaded',0)} sent, {summary.get('skipped',0)} already sent, {failed} refused.")
+            self.refresh_codmunity_sync()
+        def failed(message):self.sync_state_label.setText(str(message));self.log('Lifetime upload failed.')
+        self.async_task(work,done,failed)
+    @staticmethod
+    def _usage_pct_text(value):
+        try:number=float(value)
+        except (TypeError,ValueError):return '—'
+        return '<0.1%' if 0<=number<0.1 else f'{number:.1f}%'
+    def refresh_app_usage(self):
+        if not hasattr(self,'app_usage_label'):return
+        try:
+            import psutil as _psutil
+            _proc=_psutil.Process()
+            cpu=_proc.cpu_percent(interval=None)
+            rss=_proc.memory_info().rss
+            total=_psutil.virtual_memory().total
+            text=f'App usage — CPU {self._usage_pct_text(cpu)} · RAM {int(rss)//1048576:,} / {int(total)//1048576:,} MB · v{APP_VERSION}'
+        except Exception:
+            cpu,rss,text=None,None,f'App usage unavailable · v{APP_VERSION}'
+        self.app_usage_label.setText(text)
+        if time.monotonic()-getattr(self,'_usage_gpu_at',0.0)>=30.0 or not hasattr(self,'_usage_gpu_text'):
+            try:
+                import subprocess as _sp
+                probe=_sp.run(['nvidia-smi','--query-gpu=utilization.gpu','--format=csv,noheader,nounits'],capture_output=True,text=True,timeout=5,creationflags=getattr(_sp,'CREATE_NO_WINDOW',0))
+                lines=(probe.stdout or '').strip().splitlines()
+                gpu=float(lines[0].strip()) if probe.returncode==0 and lines else None
+            except Exception:gpu=None
+            self._usage_gpu_text=self._usage_pct_text(gpu) if gpu is not None else '—'
+            self._usage_gpu_at=time.monotonic()
+        try:
+            if hasattr(self,'sidebar_usage_cpu'):self.sidebar_usage_cpu.setText(self._usage_pct_text(cpu) if cpu is not None else '—')
+            if hasattr(self,'sidebar_usage_gpu'):self.sidebar_usage_gpu.setText(self._usage_gpu_text)
+            if hasattr(self,'sidebar_usage_ram'):self.sidebar_usage_ram.setText(f'{int(rss)//1048576:,} MB' if isinstance(rss,(int,float)) else '—')
+        except (AttributeError,RuntimeError,TypeError,ValueError):pass
+    def sync_start_tracking(self):
+        if getattr(self,'tab_prototype',False):self.notice('Tracking is disabled in preview mode.');return
+        if self.tracking:self.log('Tracking is already running.');return
+        self.start()
+    def sync_stop_tracking(self):
+        if not self.tracking:self.log('Tracking is not running.');return
+        self.stop()
+    def share_to(self,network):
+        player=str(self.settings.values.get('player','vintendo') or 'vintendo').strip() or 'vintendo'
+        profile=f'https://codmunity.gg/profile/{player}'
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:snapshot={}
+        text=codmunity_camo.summary_line(snapshot,'mw4','multiplayer') or 'My COD stats'
+        urls=codmunity_camo.share_urls(profile,text)
+        if network not in urls:self.notice('Unknown share target.');return
+        QDesktopServices.openUrl(QUrl(urls[network]));self.log(f'Opened {network} share in the browser.')
+    def refresh_codmunity_sync(self):
+        if not hasattr(self,'sync_state_label'):return
+        snapshot=self.store.meta('codmunity_stats') or {}
+        account=codmunity_camo.linked_account(snapshot)
+        if account:self.sync_account_label.setText(f"Linked cache account {account['uid'][:12]}… — pairing and login stay on their site; this tracker never uploads to CODMunity.")
+        else:self.sync_account_label.setText('No linked cache account found. Pair on their site, then press Start tracking to import the baseline.')
+        try:pending=self.store.pending_sync(limit=50)
+        except Exception:pending=[]
+        kinds={}
+        for row in pending or []:kinds[str(row.get('kind') or '?')]=kinds.get(str(row.get('kind') or '?'),0)+1
+        try:total_matches=len(self.store.history())
+        except Exception:total_matches=0
+        detail=', '.join(f'{k}: {v}' for k,v in sorted(kinds.items())) or 'empty'
+        watcher=getattr(self,'autotrack_watcher',None)
+        watching='watching' if worker_alive(watcher) else 'idle'
+        last=codmunity_camo.last_detection(self.store,self._autotrack_feed_path() or None)
+        if last and last.get('weapon'):
+            ago=codmunity_camo.ago_text(last.get('at'))
+            tracking=f"Auto tracking: {watching}. Last: {last['weapon']} · {last.get('camo','')}" + (f' · {ago}' if ago else '')
+        else:tracking=f'Auto tracking: {watching}. No camo detections yet.'
+        self.sync_state_label.setText(f'Outbox pending: {len(pending or [])} ({detail}). Matches stored: {total_matches}. {tracking} Discord posts still go through review + reserve.')
+        self.sync_verify_button.setEnabled(self.codmunity_player_service.configured)
+        self.sync_verify_button.setToolTip('Sign in to verify your email.' if not self.codmunity_player_service.configured else 'Send the account verification email.')
+        self.refresh_upload_button()
+        self.refresh_app_usage()
+        self.refresh_detect_queue()
+    def refresh_detect_queue(self):
+        if not hasattr(self,'sync_detect_box'):return
+        while self.sync_detect_box.count():
+            child=self.sync_detect_box.takeAt(0)
+            if child.widget():child.widget().deleteLater()
+        try:rows=self.store.camo_detections(limit=8)
+        except Exception:rows=[]
+        if not rows:
+            empty=QLabel('No auto-detections yet. Play with tracking on.');empty.setObjectName('camoHint')
+            self.sync_detect_box.addWidget(empty);return
+        for row in rows:
+            if not isinstance(row,dict):continue
+            line=QHBoxLayout()
+            state=str(row.get('state') or 'saved')
+            ago=codmunity_camo.ago_text(row.get('at'))
+            label=QLabel(f"{row.get('weapon','?')} · {row.get('camo','?')} — {state}" + (f' · {ago}' if ago else ''))
+            label.setObjectName('camoChallengeLine');label.setWordWrap(True);line.addWidget(label,1)
+            if state=='saved':
+                undo=self.button('Undo',lambda _on,weapon=str(row.get('weapon','')),camo=str(row.get('camo','')),grind=str(row.get('grind','mw4')):self.undo_camo_detection(weapon,camo,grind))
+                line.addWidget(undo)
+            wrap=QWidget();wrap.setLayout(line);self.sync_detect_box.addWidget(wrap)
+    def undo_camo_detection(self,weapon,camo,grind='mw4'):
+        det=codmunity_camo.mark_progress(self.store,weapon,camo,'dismissed',grind=grind)
+        if det:
+            self.log(f'Camo detection undone: {weapon} / {camo}.')
+            self.refresh_detect_queue()
+            if hasattr(self,'camo_weapon_list'):self._camo_progress=codmunity_camo.progress_map(self.store,self._autotrack_feed_path() or None);self._camo_apply_filters()
+        else:self.notice('Could not undo that detection.')
+    def send_verification_email(self):
+        if not self.codmunity_player_service.configured:
+            self.notice('Sign in with your CODMunity account first.');return
+        try:auth=self.codmunity_auth
+        except AttributeError:auth=None
+        if auth is None:self.notice('Sign in with your CODMunity account first.');return
+        self.async_task(auth.send_email_verification,lambda _r:self.log('Verification email sent. Check your inbox.'),lambda message:self.notice(str(message)))
+    def open_pair_page(self):
+        QDesktopServices.openUrl(QUrl(codmunity_camo.PAIR_URL));self.log('Pair page opened in the browser.')
+    def sync_now(self):
+        from autotrack import SyncWorker
+        worker=SyncWorker(self.store,sender=None,on_log=self._on_autotrack_log)
+        self.async_task(worker.step,lambda n:(self.log(f'Sync pass complete: {n} local row(s) settled.'),self.refresh_codmunity_sync()))
+    def export_matches_json(self):
+        folder=E.DATA/'exports';folder.mkdir(parents=True,exist_ok=True)
+        path=folder/('matches-export-'+time.strftime('%Y-%m-%d_%H-%M-%S')+'.json')
+        try:rows=self.store.history()
+        except Exception as exc:self.notice('Export failed: '+str(exc));return
+        path.write_text(json.dumps(rows,indent=2,default=str),encoding='utf-8')
+        self.log(f'Exported {len(rows)} matches to {path.name}.')
+    def copy_diagnostics(self):
+        try:tail=self.store.autotrack_log_tail(50)
+        except Exception:tail=[]
+        try:pending=self.store.pending_sync(limit=50)
+        except Exception:pending=[]
+        try:matches=len(self.store.history())
+        except Exception:matches=0
+        text='\n'.join([f'Version {APP_VERSION}',f'Matches stored: {matches}',f'Outbox pending: {len(pending)}']+list(tail))
+        QApplication.clipboard().setText(text);self.log('Diagnostics copied to the clipboard.')
     def codmunity_executable(self):
         override=os.environ.get('CODMUNITY_DESKTOP_EXE','').strip()
         candidates=[Path(override)] if override else []
@@ -819,7 +1336,7 @@ class Window(QMainWindow):
         if (hasattr(self,'browser_host') and self.browser_host.hwnd and browser_page is not None
                 and self.stack.currentWidget() is browser_page and hasattr(self,'browser_surface')):
             self.browser_host.resize(self.browser_surface.width(),self.browser_surface.height())
-        if hasattr(self,'codmunity_host') and self.codmunity_host.hwnd and self.app_tabs.currentWidget() is self.codmunity_page:
+        if getattr(self,'codmunity_host',None) is not None and self.codmunity_host.hwnd:
             self.codmunity_host.resize(self.codmunity_surface.width(),self.codmunity_surface.height())
         if hasattr(self,'cinematic_results'):self.update_cinematic_grid()
         if hasattr(self,'cod_ai_screenshots'):self.update_screenshot_grid()
@@ -840,7 +1357,7 @@ class Window(QMainWindow):
         if not banner_pix.isNull():title.setObjectName('pageBanner');title.setPixmap(banner_pix.scaled(QSize(520,170),Qt.KeepAspectRatio,Qt.SmoothTransformation));title.setProperty('bannerFile',banner_file)
         else:title.setObjectName('title');title.setText(name)
         layout.addWidget(title,0,Qt.AlignHCenter if title.objectName()=='pageBanner' else Qt.Alignment());desc=QLabel(subtitle);desc.setWordWrap(True);desc.setStyleSheet('color:#99a8bc');layout.addWidget(desc)
-        glyph={'Dashboard':'⌂','Solo Ops':'◎','Squad Night':'◈','Scoreboard Capture':'⊙','Player Roster':'♟','AI Studio':'▧','ScreenShots and Videos':'>','Discord Settings':'⚙','Match History':'☷','Settings':'⚙','Tracker Browser':'▣'}.get(name,'›')
+        glyph={'Dashboard':'⌂','Solo Ops':'◎','Squad Night':'◈','Scoreboard Capture':'⊙','Player Roster':'♟','AI Studio':'▧','ScreenShots and Videos':'>','Discord Settings':'⚙','Match History':'☷','Settings':'⚙','Tracker Browser':'▣','Camo Tracker':'◍','Leaderboards':'♛','Stats':'◔'}.get(name,'›')
         item=QListWidgetItem(glyph+'   '+name);item.setData(Qt.UserRole,name);self.nav.addItem(item);self.stack.addWidget(page);self.pages[name]=(page,layout);return layout
     def button(self,text,fn,accent=False):
         b=QPushButton(text);b.clicked.connect(fn)
@@ -965,62 +1482,430 @@ class Window(QMainWindow):
         task.signals.done.connect(finish);task.signals.failed.connect(error);self.pool.start(task)
     def build_dashboard(self):
         l=self.page('Dashboard','')
-        self.status=QLabel('●  STANDBY');self.status.setObjectName('livePill');self.status.setAlignment(Qt.AlignCenter)
-        self.status.setMinimumWidth(200)
-        self._blink_on=True;self.blink_timer=QTimer(self);self.blink_timer.setInterval(700);self.blink_timer.timeout.connect(self._blink_live_indicator)
-
-        top=QWidget();f=QHBoxLayout(top);f.setSpacing(10);f.setContentsMargins(0,0,0,0)
-        f.addWidget(self.status,1)
-        self.start_button=self.button('▶   START TRACKING',self.start,True);self.start_button.setMinimumHeight(42)
-        self.pause_button=self.button('Ⅱ   PAUSE TRACKING',self.pause);self.pause_button.setMinimumHeight(42);self.pause_button.setEnabled(False)
-        self.stop_button=self.button('■   STOP',self.stop);self.stop_button.setMinimumHeight(42);self.stop_button.setEnabled(False)
-        f.addWidget(self.start_button,1);f.addWidget(self.pause_button,1);f.addWidget(self.stop_button,1);l.addWidget(top)
-
-        cards=QHBoxLayout();cards.setSpacing(12);self.dashboard_metrics={}
-        for key,title,glyph,color in (('matches','MATCH RECORDS','◎','metricRed'),('squad_posts','SQUAD POSTS','♟','metricBlue'),('reviews','REVIEW JOBS','▧','metricPurple'),('games','GAMES','◉','metricBlue'),('win_rate','WIN RATE','★','metricPurple'),('kd','K/D RATIO','⬢','metricRed'),('kills_per_game','KILLS / GAME','⬣','metricBlue')):
-            card=QFrame();card.setObjectName(color);card_layout=QHBoxLayout(card);card_layout.setContentsMargins(18,13,18,13);card_layout.setSpacing(14)
-            mark=QLabel(glyph);mark.setObjectName('metricGlyph');card_layout.addWidget(mark)
-            text_layout=QVBoxLayout();value=QLabel('0');value.setObjectName('metricValue');label=QLabel(title);label.setObjectName('metricLabel');text_layout.addWidget(value);text_layout.addWidget(label);card_layout.addLayout(text_layout,1);cards.addWidget(card,1);self.dashboard_metrics[key]=value
-        l.addLayout(cards)
-
-        body=QGridLayout();body.setHorizontalSpacing(14);body.setVerticalSpacing(12)
-        center=QFrame();center.setObjectName('dashboardPanel');center_layout=QVBoxLayout(center);center_layout.setContentsMargins(13,12,13,13);center_layout.setSpacing(9)
-        center_header=QHBoxLayout();center_title=QLabel('\u25b0  MATCH CENTER');center_title.setStyleSheet('font-size:16px;font-weight:900;color:#f2f4f7;');center_header.addWidget(center_title);center_header.addStretch();self.center_count=QLabel('0 matches tracked');self.center_count.setStyleSheet('color:#aab4c3');center_header.addWidget(self.center_count);center_layout.addLayout(center_header)
-        self.latest_job_id=None
-        self.latest_card=QFrame();self.latest_card.setObjectName('latestMatch');latest_layout=QVBoxLayout(self.latest_card);latest_layout.setContentsMargins(13,12,13,13);latest_layout.setSpacing(6)
-        self.latest_result=QLabel('-');self.latest_result.setStyleSheet('font-size:22px;font-weight:900;color:#f2f4f7;');latest_layout.addWidget(self.latest_result)
-        self.latest_detail=QLabel('No matches tracked yet.');self.latest_detail.setWordWrap(True);self.latest_detail.setStyleSheet('color:#99a8bc;');latest_layout.addWidget(self.latest_detail)
-        self.latest_stats=QLabel('');self.latest_stats.setWordWrap(True);self.latest_stats.setStyleSheet('color:#cbd3df;');latest_layout.addWidget(self.latest_stats)
-        self.latest_status=QLabel('');self.latest_status.setWordWrap(True);self.latest_status.setStyleSheet('font-size:11px;color:#aab4c3;');latest_layout.addWidget(self.latest_status)
-        latest_layout.addStretch(1)
-        self.latest_review=self.button('START FULL AUTO JOB',self.start_latest_auto_job,True);self.latest_review.setObjectName('latestAutoJobButton');self.latest_review.setEnabled(False);latest_layout.addWidget(self.latest_review)
-        self.latest_auto_pulse_timer=QTimer(self);self.latest_auto_pulse_timer.setInterval(360);self.latest_auto_pulse_timer.timeout.connect(self._pulse_latest_auto_button);self._latest_auto_job_id=None;self._latest_auto_no_discord=False
-        center_layout.addWidget(self.latest_card,1);body.addWidget(center,0,0,2,2)
-
-        health=QFrame();health.setObjectName('dashboardPanel');health_layout=QVBoxLayout(health);health_layout.setContentsMargins(13,12,13,13);health_layout.setSpacing(10)
-        health_title=QLabel('▮  SYSTEM STATUS');health_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');health_layout.addWidget(health_title)
+        banner=l.itemAt(0).widget()
+        if banner is not None and banner.objectName()=='pageBanner':banner.hide()
+        desc=l.itemAt(1).widget()
+        if desc is not None:desc.hide()
+        header=QHBoxLayout();header.setSpacing(10)
+        header.addStretch(1)
+        header.addStretch(1)
         self.dashboard_health={}
-        for key,label in (('codmunity','CODMunity data'),('ocr','Screenshot'),('discord','Discord')):
-            line=QFrame();line.setObjectName('healthRow');row=QHBoxLayout(line);row.setContentsMargins(9,7,9,7);indicator=QLabel('●');indicator.setObjectName('healthDot');name=QLabel(label);value=QLabel('Checking');value.setObjectName('healthValue');row.addWidget(indicator);row.addWidget(name,1);row.addWidget(value);health_layout.addWidget(line);self.dashboard_health[key]=(indicator,value)
-        body.addWidget(health,0,2)
-
-        tools=QFrame();tools.setObjectName('dashboardPanel');tools_layout=QVBoxLayout(tools);tools_layout.setContentsMargins(13,12,13,13);tools_layout.setSpacing(8)
-        tools_title=QLabel('⚡  QUICK TOOLS');tools_title.setStyleSheet('font-size:15px;font-weight:900;color:#f2f4f7;');tools_layout.addWidget(tools_title)
-        review=self.button('🏆   REVIEW LATEST MATCH',self.open_latest,True);capture=self.button('◉   OPEN SCOREBOARD CAPTURE',lambda:self.nav.setCurrentRow(3));poster=self.button('▧   GENERATE AI END GAME PICTURE',self.generate_and_approve,True)
-        tools_layout.addWidget(review);tools_layout.addWidget(capture);tools_layout.addWidget(poster);body.addWidget(tools,1,2)
-        self.hotkey_hint=QLabel('At match end, press the capture hotkey to save a screenshot and prepare scoreboard OCR.');self.hotkey_hint.setWordWrap(True);self.hotkey_hint.setStyleSheet('font-size:11px;color:#aab4c3;padding:5px 2px;');tools_layout.addWidget(self.hotkey_hint)
-        body.setColumnStretch(0,1);body.setColumnStretch(1,1);body.setColumnStretch(2,0);body.setRowStretch(0,3);body.setRowStretch(1,2);l.addLayout(body,1)
-
-        footer=QFrame();footer.setObjectName('dashboardFooter');footer_layout=QHBoxLayout(footer);footer_layout.setContentsMargins(13,8,13,8)
-        self.footer_tracking=QLabel('●  STANDBY');self.footer_tracking.setStyleSheet('font-weight:800;color:#9da7b5');self.footer_match=QLabel('Last match: —');self.footer_mode_label=QLabel('Mode:');self.footer_mode_label.setStyleSheet('font-weight:800;color:#9da7b5');self.mode=QComboBox();self.mode.addItems(['Solo Ops','Squad Night']);self.mode.setCurrentText(self.settings.values.get('mode','Solo Ops'));self.mode.currentTextChanged.connect(self.mode_changed);self.mode.setVisible(not self.track_both_startup);footer_layout.addWidget(self.footer_tracking);footer_layout.addSpacing(14);footer_layout.addWidget(self.footer_match);footer_layout.addStretch();footer_layout.addWidget(self.footer_mode_label);footer_layout.addWidget(self.mode);l.addWidget(footer)
+        self.dash_gear=self.button('',self._goto_settings);self.dash_gear.setObjectName('dashGear');self.dash_gear.setFixedSize(30,30);self.dash_gear.setToolTip('Open Settings');self.dash_gear.setIcon(self._gear_icon());self.dash_gear.setIconSize(QSize(20,20));self.dash_gear.hide()
+        l.addLayout(header)
+        toolbar=QHBoxLayout();toolbar.setSpacing(8)
+        toolbar.addStretch(1)
+        self.mode=QComboBox();self.mode.addItems(['Solo Ops','Squad Night']);self.mode.setCurrentText(self.settings.values.get('mode','Solo Ops'));self.mode.currentTextChanged.connect(self.mode_changed);self.mode.setVisible(not self.track_both_startup)
+        toolbar.addWidget(self.mode)
+        l.addLayout(toolbar)
+        self.dash_stat_head=stat_head=QHBoxLayout();stat_head.setSpacing(8)
+        self._lifetime_game=('mw4','multiplayer')
+        stat_head.addStretch(1)
+        self.start_button=self.button('\u25b6   START',self.start,True);self.start_button.setFixedWidth(150);stat_head.addWidget(self.start_button);self.start_button.hide()
+        self.stop_button=self.button('\u25a0   STOP',self.stop);self.stop_button.setFixedWidth(150);stat_head.addWidget(self.stop_button);self.stop_button.hide()
+        self.dash_refresh_button=self._dash_mini('Refresh',self._refresh_dashboard_stats_view)
+        l.addLayout(stat_head)
+        self.dash_cod_profile_card=QFrame();self.dash_cod_profile_card.setObjectName('dashboardPanel');card_layout=QHBoxLayout(self.dash_cod_profile_card);card_layout.setContentsMargins(14,12,14,12);card_layout.setSpacing(12)
+        self.dash_profile_avatar=QLabel('◉');self.dash_profile_avatar.setFixedSize(96,96);self.dash_profile_avatar.setAlignment(Qt.AlignCenter);self.dash_profile_avatar.setObjectName('profileAvatar');self.dash_profile_avatar.setStyleSheet('background:transparent;border:none;')
+        card_layout.addWidget(self.dash_profile_avatar)
+        idbox=QVBoxLayout();idbox.setSpacing(2)
+        self.dash_card_name=QLabel('—');self.dash_card_name.setObjectName('dashCardName');idbox.addWidget(self.dash_card_name)
+        self.dash_card_handle=QLabel('');self.dash_card_handle.setObjectName('dashCardHandle');idbox.addWidget(self.dash_card_handle)
+        self.dash_card_stats=QHBoxLayout();self.dash_card_stats.setSpacing(14)
+        for _attr,_caption in (('dash_card_kills','KILLS'),('dash_card_kd','K/D RATIO'),('dash_card_wins','WINS'),('dash_card_games','GAMES PLAYED')):
+            _cell=QVBoxLayout();_cell.setSpacing(2)
+            _value=QLabel('—');_value.setObjectName('dashCardValue');_cell.addWidget(_value)
+            setattr(self,_attr,_value)
+            _cap=QLabel(_caption);_cap.setObjectName('dashCardCaption');_cell.addWidget(_cap)
+            self.dash_card_stats.addLayout(_cell)
+        idbox.addLayout(self.dash_card_stats);card_layout.addLayout(idbox)
+        card_layout.addStretch(1)
+        rightbox=QVBoxLayout();rightbox.setSpacing(2)
+        rank_cap=QLabel('YOUR LADDER RANK');rank_cap.setObjectName('dashCardCaption');rank_cap.setAlignment(Qt.AlignRight);rightbox.addWidget(rank_cap)
+        self.dash_card_tier=QLabel('—');self.dash_card_tier.setObjectName('dashCardTier');self.dash_card_tier.setAlignment(Qt.AlignRight);rightbox.addWidget(self.dash_card_tier)
+        self.dash_card_better=QLabel('');self.dash_card_better.setObjectName('dashCardSmall');self.dash_card_better.setAlignment(Qt.AlignRight);rightbox.addWidget(self.dash_card_better)
+        self.dash_card_scope=QLabel('');self.dash_card_scope.setObjectName('dashCardSmall');self.dash_card_scope.setAlignment(Qt.AlignRight);rightbox.addWidget(self.dash_card_scope)
+        card_btns=QHBoxLayout();card_btns.setSpacing(8);card_btns.addStretch(1)
+        self.dash_card_refresh=self.button('Refresh',self._refresh_dashboard_stats_view);card_btns.addWidget(self.dash_card_refresh)
+        self.dash_card_view=self.button('View on codmunity.gg',self._open_dash_profile);card_btns.addWidget(self.dash_card_view)
+        self.dash_card_boards=self.button('Leaderboards',lambda:self._goto_nav_page('Leaderboards'));card_btns.addWidget(self.dash_card_boards)
+        rightbox.addLayout(card_btns);card_layout.addLayout(rightbox)
+        for _btn in (self.dash_card_refresh,self.dash_card_view,self.dash_card_boards):_btn.hide()
+        l.addWidget(self.dash_cod_profile_card)
+        self.dash_card_game_row=QHBoxLayout();self.dash_card_game_row.setSpacing(6)
+        self.dash_profile_game_buttons={}
+        for game,mode,label in codmunity_camo.LIFETIME_GAMES:
+            pill=self.button(label,lambda _on=False,game=game,mode=mode:self._select_lifetime_game(game,mode));pill.setCheckable(True);pill.setObjectName('dashGamePill')
+            if (game,mode)==('mw4','multiplayer'):pill.setChecked(True)
+            self.dash_profile_game_buttons[(game,mode)]=pill;self.dash_card_game_row.addWidget(pill)
+        self.dash_card_game_row.addStretch(1)
+        l.addLayout(self.dash_card_game_row)
+        self.dash_rank_card=QFrame();self.dash_rank_card.setObjectName('rankCard');rank_layout=QVBoxLayout(self.dash_rank_card);rank_layout.setContentsMargins(12,10,12,10);rank_layout.setSpacing(4)
+        rank_title=QLabel('Your rank');rank_title.setObjectName('dashSection');rank_layout.addWidget(rank_title)
+        self.dash_rank_bar=_RankLadder();rank_layout.addWidget(self.dash_rank_bar)
+        self.dash_rank_current=QLabel('—');self.dash_rank_current.setObjectName('dashRankCurrent');rank_layout.addWidget(self.dash_rank_current)
+        next_row=QHBoxLayout();next_row.setSpacing(6)
+        self.dash_rank_trend=_TrendUpIcon();next_row.addWidget(self.dash_rank_trend)
+        self.dash_rank_next=QLabel('');self.dash_rank_next.setObjectName('dashRankNext');next_row.addWidget(self.dash_rank_next,1)
+        rank_layout.addLayout(next_row)
+        l.addWidget(self.dash_rank_card)
+        bottom=QHBoxLayout();bottom.setSpacing(12)
+        center=QFrame();center.setObjectName('dashboardPanel');center_layout=QVBoxLayout(center);center_layout.setContentsMargins(12,10,12,10);center_layout.setSpacing(6)
+        center_header=QHBoxLayout();center_title=QLabel('MATCH CENTER');center_title.setObjectName('dashSection');center_header.addWidget(center_title);center_header.addStretch(1);self.center_count=QLabel('0 matches tracked');self.center_count.setObjectName('dashStatGame');center_header.addWidget(self.center_count);center_layout.addLayout(center_header)
+        self.latest_job_id=None
+        self.latest_card=QFrame();self.latest_card.setObjectName('latestMatch');self.latest_card.setMaximumHeight(180)
+        latest_layout=QHBoxLayout(self.latest_card);latest_layout.setContentsMargins(10,8,10,8);latest_layout.setSpacing(10)
+        self.latest_result=QLabel('-');self.latest_result.setObjectName('dashResult');self.latest_result.setAlignment(Qt.AlignCenter);self.latest_result.setMinimumWidth(110);latest_layout.addWidget(self.latest_result,0)
+        mid=QVBoxLayout();mid.setSpacing(2)
+        self.latest_detail=QLabel('No matches tracked yet.');self.latest_detail.setObjectName('dashDetail');self.latest_detail.setWordWrap(True);mid.addWidget(self.latest_detail)
+        self.latest_stats=QLabel('');self.latest_stats.setObjectName('dashStats');self.latest_stats.setWordWrap(True);mid.addWidget(self.latest_stats)
+        latest_layout.addLayout(mid,1)
+        right=QVBoxLayout();right.setSpacing(4)
+        self.latest_status=QLabel('');self.latest_status.setObjectName('dashStatus');self.latest_status.setWordWrap(True);right.addWidget(self.latest_status)
+        self.latest_review=self.button('START FULL AUTO JOB',self.start_latest_auto_job,True);self.latest_review.setObjectName('latestAutoJobButton');self.latest_review.setEnabled(False)
+        details=self.button('Details',self.open_latest_match)
+        right.addWidget(self.latest_review);right.addWidget(details)
+        latest_layout.addLayout(right,0)
+        center_layout.addWidget(self.latest_card)
+        self.latest_auto_pulse_timer=QTimer(self);self.latest_auto_pulse_timer.setInterval(360);self.latest_auto_pulse_timer.timeout.connect(self._pulse_latest_auto_button);self._latest_auto_job_id=None;self._latest_auto_no_discord=False
+        self.dash_profile_card=QFrame();self.dash_profile_card.setObjectName('dashboardPanel');profile_layout=QVBoxLayout(self.dash_profile_card);profile_layout.setContentsMargins(12,10,12,10);profile_layout.setSpacing(8)
+        self.dash_profile_pages=QStackedWidget()
+        meter_page=QWidget();meter_page_layout=QVBoxLayout(meter_page);meter_page_layout.setContentsMargins(0,0,0,0);meter_page_layout.setSpacing(8)
+        self.dash_meters={}
+        for key,title,color in (('kd','K/D RATIO','#f76b8a'),('wl','W/L RATIO','#62cdff'),('wr','WIN RATE','#62cdff')):
+            card=QFrame();card.setObjectName('dashMeter');card_layout=QVBoxLayout(card);card_layout.setContentsMargins(12,10,12,10);card_layout.setSpacing(4)
+            title_label=QLabel(title);title_label.setObjectName('dashMeterTitle');card_layout.addWidget(title_label)
+            mid=QHBoxLayout();mid.setSpacing(10)
+            value=QLabel('\u2014');value.setObjectName('dashMeterValue');value.setStyleSheet('color:'+color+';');mid.addWidget(value)
+            ring=None
+            if key=='wr':
+                ring=_RingMeter(color);mid.addWidget(ring)
+            mid.addStretch(1)
+            card_layout.addLayout(mid)
+            sub=QLabel('');sub.setWordWrap(True);sub.setObjectName('dashMeterSub');card_layout.addWidget(sub)
+            bar=_MeterBar(color);card_layout.addWidget(bar)
+            cap=QLabel('');cap.setWordWrap(True);cap.setObjectName('dashMeterCaption');card_layout.addWidget(cap)
+            meter_page_layout.addWidget(card)
+            self.dash_meters[key]={'value':value,'sub':sub,'bar':bar,'cap':cap,'ring':ring}
+        self.dash_profile_pages.addWidget(meter_page)
+        tile_page=QWidget();tile_grid=QGridLayout(tile_page);tile_grid.setContentsMargins(0,0,0,0);tile_grid.setSpacing(8)
+        self.dash_profile_tiles={}
+        for index,(key,title) in enumerate((('kills','KILLS'),('deaths','DEATHS'),('wins','WINS'),('losses','LOSSES'),('games','GAMES PLAYED'),('time','TIME PLAYED'),('streak','HIGHEST STREAK'),('best','MOST KILLS IN A GAME'),('spm','SCORE / MIN'),('avg','KILLS PER GAME'))):
+            cell=QFrame();cell.setObjectName('dashMeter');cell_layout=QVBoxLayout(cell);cell_layout.setContentsMargins(12,8,12,8);cell_layout.setSpacing(2)
+            lab=QLabel(title);lab.setObjectName('dashMeterTitle');cell_layout.addWidget(lab)
+            row=QHBoxLayout();row.setSpacing(8)
+            value=QLabel('\u2014');value.setObjectName('dashTileValue');row.addWidget(value)
+            badge=QLabel('');badge.setObjectName('dashTileBadge');badge.setVisible(False);row.addWidget(badge)
+            row.addStretch(1)
+            cell_layout.addLayout(row)
+            tile_grid.addWidget(cell,int(index/2),index%2)
+            self.dash_profile_tiles[key]={'value':value,'badge':badge}
+        self.dash_profile_pages.addWidget(tile_page)
+        profile_layout.addWidget(self.dash_profile_pages)
+        pager=QHBoxLayout();pager.setSpacing(8)
+        pager.addStretch(1)
+        self.dash_profile_prev=self.button('\u2039',lambda:self._dash_profile_page(-1));self.dash_profile_prev.setObjectName('dashMini');pager.addWidget(self.dash_profile_prev)
+        self.dash_profile_next=self.button('\u203a',lambda:self._dash_profile_page(1));self.dash_profile_next.setObjectName('dashMini');pager.addWidget(self.dash_profile_next)
+        pager.addStretch(1)
+        profile_layout.addLayout(pager)
+        refresh_row=QHBoxLayout();refresh_row.setSpacing(8);refresh_row.addStretch(1);refresh_row.addWidget(self.dash_refresh_button);profile_layout.addLayout(refresh_row)
+        right=QWidget();right_layout=QVBoxLayout(right);right_layout.setContentsMargins(0,0,0,0);right_layout.setSpacing(12)
+        right_layout.addWidget(self.dash_profile_card,1)
+        self._match_holder=QWidget();self._match_holder.hide()
+        match_holder_layout=QVBoxLayout(self._match_holder);match_holder_layout.setContentsMargins(0,0,0,0);match_holder_layout.setSpacing(0)
+        center.setParent(self._match_holder);match_holder_layout.addWidget(center)
+        bottom.addWidget(right,30)
+        self.dash_bottom=bottom
+        self.dash_right=right
+        self._profile_avatar_url='';self._profile_avatar_failed=set()
+        self._metrics_holder=QWidget();self._metrics_holder.hide()
+        self.dashboard_metrics={}
+        for key,initial in (('matches','0'),('squad_posts','0'),('reviews','0'),('games','\u2014'),('win_rate','\u2014'),('kd','\u2014'),('kills_per_game','\u2014')):label=QLabel(initial,self._metrics_holder);self.dashboard_metrics[key]=label
+        l.addLayout(bottom,1)
+        self.hotkey_hint=QLabel('At match end, press the capture hotkey to save a screenshot and prepare scoreboard OCR.');self.hotkey_hint.setObjectName('dashHint');self.hotkey_hint.setWordWrap(True);l.addWidget(self.hotkey_hint);self.hotkey_hint.hide()
+        self._refresh_dashboard_stats()
+    def _gear_icon(self,size=22):
+        from math import cos,pi,sin
+        pix=QPixmap(size,size);pix.fill(Qt.transparent)
+        painter=QPainter(pix);painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen);painter.setBrush(QBrush(QColor('#c4ccd8')))
+        center=size/2;outer=size/2-1.5
+        for index in range(8):
+            painter.save();painter.translate(center,center);painter.rotate(index*45.0)
+            painter.drawRect(QRect(-2,-int(outer),4,6));painter.restore()
+        painter.drawEllipse(QPointF(center,center),outer-3.5,outer-3.5)
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.drawEllipse(QPointF(center,center),3.5,3.5)
+        painter.end()
+        return QIcon(pix)
+    def _goto_settings(self):
+        for row in range(self.nav.count()):
+            try:
+                if self.nav.item(row).data(Qt.UserRole)=='Settings':self.nav.setCurrentRow(row);break
+            except (AttributeError,RuntimeError):break
+    def _goto_nav_page(self,name):
+        for row in range(self.nav.count()):
+            try:
+                if self.nav.item(row).data(Qt.UserRole)==name:self.nav.setCurrentRow(row);break
+            except (AttributeError,RuntimeError):break
+    @staticmethod
+    def _dmz_web_url(label):
+        try:return dict(DMZ_WEB_PAGES).get(str(label or ''),DMZ_WEB_HOME)
+        except Exception:return DMZ_WEB_HOME
+    def build_dmz_browser(self):
+        page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(30,25,30,25);layout.setSpacing(10)
+        bar=QHBoxLayout();bar.setSpacing(8)
+        hist_back=self.button('<',lambda:self._dmz_web_go(-1));hist_back.setObjectName('dmzBrowserHistBack');bar.addWidget(hist_back)
+        hist_fwd=self.button('>',lambda:self._dmz_web_go(1));hist_fwd.setObjectName('dmzBrowserHistFwd');bar.addWidget(hist_fwd)
+        reload_btn=self.button('Reload',self._dmz_web_reload);reload_btn.setObjectName('dmzBrowserReload');bar.addWidget(reload_btn)
+        home_btn=self.button('Overview',lambda:self._dmz_open_page('Overview'));home_btn.setObjectName('dmzBrowserHome');bar.addWidget(home_btn)
+        bar.addStretch(1);layout.addLayout(bar)
+        self.dmz_status=QLabel('Live DMZ: open a page from the DMZ menu.');self.dmz_status.setWordWrap(True);self.dmz_status.setObjectName('dmzBrowserStatus');layout.addWidget(self.dmz_status)
+        self.dmz_view=None;self.dmz_view_fallback=None
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            from PySide6.QtWebEngineCore import QWebEnginePage,QWebEngineProfile
+            profile=QWebEngineProfile('dmz',self)
+            try:
+                store_path=str(E.DATA/'dmz-webprofile');profile.setPersistentStoragePath(store_path);profile.setCachePath(store_path+'/cache')
+                try:profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
+                except (AttributeError,RuntimeError):pass
+                try:
+                    from PySide6.QtWebEngineCore import QWebEngineUrlRequestInterceptor as _BlockerBase
+                    class _DmzRequestBlocker(_BlockerBase):
+                        def interceptRequest(self,info):
+                            try:host=info.requestUrl().host()
+                            except (AttributeError,RuntimeError):return
+                            if _dmz_host_blocked(host):
+                                try:info.block(True)
+                                except (AttributeError,RuntimeError):pass
+                    self.dmz_adblock=_DmzRequestBlocker(profile)
+                    profile.setUrlRequestInterceptor(self.dmz_adblock)
+                except Exception:pass
+            except Exception:pass
+            view=QWebEngineView(page);view.setMinimumHeight(480)
+            view.setPage(QWebEnginePage(profile,view))
+            try:view.page().loadFinished.connect(lambda _ok: self._dmz_hide_site_rail())
+            except (AttributeError,RuntimeError):pass
+            layout.addWidget(view,1);self.dmz_view=view
+        except Exception:
+            self.dmz_view=None
+            fallback=QLabel('Embedded browser unavailable: Qt WebEngine is not installed.');fallback.setWordWrap(True)
+            fallback.setObjectName('dmzBrowserFallback');layout.addWidget(fallback,1);self.dmz_view_fallback=fallback
+        self.stack.addWidget(page);self.pages['DMZ Browser']=(page,layout)
+    def _add_dmz_nav_entry(self):
+        try:
+            item=QListWidgetItem('DMZ Command Center');item.setData(Qt.UserRole,'DMZ Command Center');self.nav.addItem(item)
+        except (AttributeError,RuntimeError):pass
+    def _dmz_enter_mode(self):
+        try:
+            if getattr(self,'_dmz_mode',False):return
+            self._dmz_return_row=0
+            for row in range(self.nav.count()):
+                try:
+                    if str(self.nav.item(row).data(Qt.UserRole) or '')=='Dashboard':self._dmz_return_row=row;break
+                except (AttributeError,RuntimeError):continue
+        except (AttributeError,RuntimeError):self._dmz_return_row=0
+        try:
+            self._dmz_mode=True
+            nav=self.dmz_nav;nav.blockSignals(True);nav.clear()
+            pass
+            head=QListWidgetItem('DMZ');head.setData(Qt.UserRole,'__dmz_header');head.setFlags(head.flags()&~Qt.ItemIsEnabled&~Qt.ItemIsSelectable);nav.addItem(head)
+            over=QListWidgetItem('Overview');over.setData(Qt.UserRole,'Overview');nav.addItem(over)
+            for section,labels in DMZ_NAV_SECTIONS:
+                h=QListWidgetItem(section);h.setData(Qt.UserRole,'__dmz_header');h.setFlags(h.flags()&~Qt.ItemIsEnabled&~Qt.ItemIsSelectable);nav.addItem(h)
+                for label in labels:
+                    it=QListWidgetItem(label);it.setData(Qt.UserRole,label);nav.addItem(it)
+            nav.blockSignals(False)
+            for _row in range(nav.count()):
+                try:
+                    if str(nav.item(_row).data(Qt.UserRole) or '')=='Overview':nav.setCurrentRow(_row);break
+                except (AttributeError,RuntimeError):continue
+            self.nav.hide();nav.show();self.dmz_back.show()
+            self.stack.setCurrentWidget(self.pages['DMZ Browser'][0])
+        except (AttributeError,RuntimeError,KeyError):pass
+    def _dmz_exit_mode(self):
+        try:
+            if not getattr(self,'_dmz_mode',False):return
+            self._dmz_mode=False
+            try:self.dmz_nav.hide();self.dmz_back.hide()
+            except (AttributeError,RuntimeError):pass
+            try:self.nav.show()
+            except (AttributeError,RuntimeError):pass
+            try:
+                row=int(getattr(self,'_dmz_return_row',0) or 0)
+                if 0<=row<self.nav.count():self.nav.setCurrentRow(row)
+                else:row=0;self.nav.setCurrentRow(row)
+                shown=str(self.nav.item(row).data(Qt.UserRole) or '')
+                if shown in self.pages:self.stack.setCurrentWidget(self.pages[shown][0])
+            except (AttributeError,RuntimeError,TypeError,KeyError):pass
+        except (AttributeError,RuntimeError):pass
+    def _dmz_nav_changed(self,row):
+        try:item=self.dmz_nav.item(row)
+        except (AttributeError,RuntimeError):return
+        if item is None:return
+        try:data=item.data(Qt.UserRole)
+        except (AttributeError,RuntimeError):return
+        if not data or str(data).startswith('__dmz_'):
+            if str(data)=='__dmz_back__':self._dmz_exit_mode()
+            return
+        self._dmz_open_page(str(data))
+    def _dmz_hide_site_rail(self):
+        try:page=self.dmz_view.page()
+        except AttributeError:return
+        if page is None:return
+        js="(function(){function hide(){var s=document.getElementById('vintendo-hide-rail');if(!s){try{s=document.createElement('style');s.id='vintendo-hide-rail';s.textContent='.cm-side-menu{display:none!important}';(document.documentElement||document.head||document.body).appendChild(s);}catch(e){}}var bars=document.querySelectorAll?document.querySelectorAll('.cm-side-menu'):[];for(var i=0;i<bars.length;i++){try{bars[i].style.setProperty('display','none','important');}catch(e){}try{bars[i].setAttribute('hidden','');}catch(e){}}}hide();if(window.MutationObserver&&document.documentElement){try{new MutationObserver(hide).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}}})()"
+        try:page.runJavaScript(js)
+        except (AttributeError,RuntimeError,TypeError):pass
+    def _dmz_open_page(self,label):
+        try:url=self._dmz_web_url(label)
+        except Exception:url=DMZ_WEB_HOME
+        try:self.dmz_status.setText('Live: '+str(label)+' - codmunity.gg')
+        except (AttributeError,RuntimeError):pass
+        try:view=self.dmz_view
+        except AttributeError:view=None
+        if view is None:return
+        self._dmz_hide_site_rail()
+        try:
+            from PySide6.QtCore import QUrl
+            view.load(QUrl(url))
+        except (AttributeError,RuntimeError):pass
+        try:self.stack.setCurrentWidget(self.pages['DMZ Browser'][0])
+        except (AttributeError,RuntimeError,KeyError):pass
+    def _dmz_web_go(self,delta):
+        try:view=self.dmz_view
+        except AttributeError:return
+        if view is None:return
+        try:
+            if delta and delta<0:view.back()
+            else:view.forward()
+        except (AttributeError,RuntimeError):pass
+    def _dmz_web_reload(self):
+        try:
+            if self.dmz_view is not None:self.dmz_view.reload()
+        except (AttributeError,RuntimeError):pass
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    @staticmethod
+    def _dash_game_label(game,mode):
+        head='Modern Warfare 4' if str(game)=='mw4' else ('Warzone' if str(game)=='warzone' else str(game))
+        tail={'multiplayer':'Multiplayer','resurgence':'Resurgence','battle_royale':'Battle Royale'}.get(str(mode),str(mode))
+        return (head+' · '+tail).strip(' ·')
+    def _dash_profile_url(self):
+        try:url=str(self.settings.values.get('profile_url') or '').strip()
+        except (AttributeError,RuntimeError):url=''
+        if url:return url
+        try:username=str(self.settings.values.get('codmunity_username') or '').strip()
+        except (AttributeError,RuntimeError):username=''
+        return f'https://codmunity.gg/profile/{username}' if username else ''
+    def _open_dash_profile(self):
+        url=self._dash_profile_url()
+        if not url:self.notice('Sign in with your CODMunity account to link the profile.');return
+        QDesktopServices.openUrl(QUrl(url));self.log('Opened '+url[:120]+'.')
+    def _refresh_dash_profile_card(self,game,mode,stats,rank):
+        if not hasattr(self,'dash_card_name'):return
+        try:username=str(self.settings.values.get('codmunity_username') or '').strip()
+        except (AttributeError,RuntimeError):username=''
+        try:display=str(self.settings.values.get('codmunity_display_name') or '').strip()
+        except (AttributeError,RuntimeError):display=''
+        try:self.dash_card_name.setText(display or username or '—')
+        except (AttributeError,RuntimeError):pass
+        try:self.dash_card_handle.setText('@'+username if username else '')
+        except (AttributeError,RuntimeError):pass
+        def _count(key):
+            try:value=self._known_number(stats,key)
+            except (AttributeError,RuntimeError,TypeError):value=None
+            return value
+        kills=_count('kills');wins=_count('wins')
+        raw_games=(stats.get('games_played',stats.get('games')) if isinstance(stats,dict) else None)
+        games=float(raw_games) if isinstance(raw_games,(int,float)) and not isinstance(raw_games,bool) and raw_games>=0 else None
+        try:kd=codmunity_camo.lifetime_kd(stats or {})
+        except Exception:kd=None
+        def _fmt(number):
+            return f'{int(number):,}' if isinstance(number,(int,float)) and not isinstance(number,bool) and number>=0 else '—'
+        for label,text in ((self.dash_card_kills,_fmt(kills)),(self.dash_card_wins,_fmt(wins)),(self.dash_card_games,_fmt(int(games)) if games is not None else '—')):
+            try:label.setText(text)
+            except (AttributeError,RuntimeError):pass
+        try:self.dash_card_kd.setText(f'{kd:.2f}' if kd is not None else '—')
+        except (AttributeError,RuntimeError):pass
+        try:self.dash_card_tier.setText(rank.tier if rank is not None else '—')
+        except (AttributeError,RuntimeError):pass
+        better=f"Better than {rank.percentile:.0f}% of CODMunity players · K/D {kd:.2f}" if (rank is not None and kd is not None) else ''
+        try:self.dash_card_better.setText(better)
+        except (AttributeError,RuntimeError):pass
+        updated=''
+        try:
+            rec=(self.store.meta('codmunity_public_distributions') or {}).get('|'.join((str(game),str(mode),'lifetime'))) or {}
+            stamp=rec.get('updated_at') if isinstance(rec,dict) else None
+            parsed=datetime.fromisoformat(str(stamp).replace('Z','+00:00'))
+            if parsed.tzinfo is None:parsed=parsed.replace(tzinfo=timezone.utc)
+            local=parsed.astimezone()
+            updated=f"{local:%b} {local.day}, {local:%Y}, {local.hour%12 or 12}:{local.minute:02d} {'AM' if local.hour<12 else 'PM'}"
+        except Exception:updated=''
+        line=f'{self._dash_game_label(game,mode)} · Lifetime'+(f' · Updated {updated}' if updated else '')
+        try:self.dash_card_scope.setText(line if (stats or username) else '')
+        except (AttributeError,RuntimeError):pass
+        try:self.dash_card_view.setEnabled(bool(self._dash_profile_url()))
+        except (AttributeError,RuntimeError):pass
+        try:
+            avatar_url=str(self.settings.values.get('codmunity_avatar') or '')
+            pix=self.dash_profile_avatar.pixmap()
+            if avatar_url and (pix is None or pix.isNull()):self._fetch_profile_avatar(avatar_url)
+        except (AttributeError,RuntimeError,TypeError):pass
+    def _dash_mini(self,text,fn):
+        b=self.button(text,fn);b.setObjectName('dashMini');return b
     def build_solo(self):
         self.page('Solo Ops','CODMunity integration settings are available under Settings.')
-        self.solo_settings_panel=QWidget();l=QVBoxLayout(self.solo_settings_panel);l.setContentsMargins(12,12,12,12);l.setSpacing(12)
-        form=QFormLayout();self.player=self.edit(self.settings.values['player']);self.stats_dir=self.edit(self.settings.values['stats_dir']);self.warzone=QCheckBox('Enable confirmed Warzone reports in Solo Ops');self.warzone.setChecked(self.settings.values.get('warzone_enabled',False))
-        form.addRow('Your CODMunity / COD username',self.player);form.addRow('CODMunity stats folder',self.stats_dir);form.addRow('',self.button('Browse stats folder',self.pick_stats));form.addRow('',self.warzone)
-        self.profile=self.edit(self.settings.values.get('profile_url',''));form.addRow('Optional CODMunity profile URL',self.profile);l.addLayout(form)
-        self.row(l,self.button('Test local data',self.test_data))
-        self.data_status=QPlainTextEdit();self.data_status.setReadOnly(True);l.addWidget(self.data_status,1)
+        self.solo_settings_panel=QWidget();l=QVBoxLayout(self.solo_settings_panel);l.setContentsMargins(12,12,12,12);l.setSpacing(10)
+        self.player=self.edit(self.settings.values['player']);self.player.setFixedWidth(320);self.player.textChanged.connect(lambda _text:self._refresh_codmunity_stats_frame())
+        self.stats_dir=self.edit(self.settings.values['stats_dir']);self.stats_dir.setFixedWidth(320)
+        self.profile=self.edit(self.settings.values.get('profile_url',''))
+        top=QHBoxLayout();top.setSpacing(10)
+        account=QFrame();account.setObjectName('dashboardPanel');abox=QVBoxLayout(account);abox.setContentsMargins(14,12,14,12);abox.setSpacing(8)
+        abox.addWidget(QLabel('CODMUNITY ACCOUNT'))
+        cols=QHBoxLayout();cols.setSpacing(12)
+        creds=QFormLayout();creds.setSpacing(8)
+        self.codmunity_email_edit=self.edit(self.settings.codmunity_email());self.codmunity_email_edit.setPlaceholderText('you@example.com');self.codmunity_email_edit.setFixedWidth(300)
+        self.codmunity_password_edit=self.edit('');self.codmunity_password_edit.setEchoMode(QLineEdit.Password);self.codmunity_password_edit.setPlaceholderText('Password (never stored)');self.codmunity_password_edit.setFixedWidth(300)
+        creds.addRow('CODMunity account email',self.codmunity_email_edit);creds.addRow('CODMunity password',self.codmunity_password_edit)
+        cols.addLayout(creds)
+        actions=QVBoxLayout();actions.setSpacing(6)
+        self.codmunity_signin_button=self.button('Sign in',self.codmunity_sign_in,True)
+        self.codmunity_signout_button=self.button('Sign out',self.codmunity_sign_out)
+        self.codmunity_reset_button=self.button('Reset password',self.codmunity_reset_password)
+        for action_button in (self.codmunity_signin_button,self.codmunity_signout_button,self.codmunity_reset_button):action_button.setMinimumWidth(150);actions.addWidget(action_button)
+        actions.addStretch(1)
+        cols.addLayout(actions);cols.addStretch(1)
+        abox.addLayout(cols)
+        self.codmunity_account_status=QLabel('');self.codmunity_account_status.setWordWrap(True);self.codmunity_account_status.setStyleSheet('color:#99a8bc');abox.addWidget(self.codmunity_account_status)
+        top.addWidget(account,1)
+        l.addLayout(top)
+        profile=QFrame();profile.setObjectName('dashboardPanel');pbox=QVBoxLayout(profile);pbox.setContentsMargins(14,12,14,12);pbox.setSpacing(6)
+        pbox.addWidget(QLabel('CODMUNITY PROFILE'))
+        self.codmunity_profile_status=QLabel('Sign in to load the CODMunity profile.');self.codmunity_profile_status.setWordWrap(True);self.codmunity_profile_status.setObjectName('dashStatGame');pbox.addWidget(self.codmunity_profile_status)
+        self.codmunity_profile_name=QLabel('—');self.codmunity_profile_name.setObjectName('codmunityProfileName');pbox.addWidget(self.codmunity_profile_name)
+        self.codmunity_profile_sub=QLabel('');self.codmunity_profile_sub.setWordWrap(True);self.codmunity_profile_sub.setObjectName('codmunityProfileSub');pbox.addWidget(self.codmunity_profile_sub)
+        self.codmunity_profile_stats=QLabel('');self.codmunity_profile_stats.setWordWrap(True);self.codmunity_profile_stats.setObjectName('codmunityProfileStats');pbox.addWidget(self.codmunity_profile_stats)
+        l.addWidget(profile)
+        configbox=QFrame();configbox.setObjectName('dashboardPanel');cbox=QVBoxLayout(configbox);cbox.setContentsMargins(14,12,14,12);cbox.setSpacing(8)
+        cform=QFormLayout();cform.setSpacing(8)
+        cform.addRow('CODMunity Name',self.player)
+        cform.addRow('CODMunity stats folder',self.stats_dir)
+        cform.addRow('',self.button('Browse stats folder',self.pick_stats))
+        cbox.addLayout(cform);cbox.addStretch(1)
+        top.addWidget(configbox)
+        form=QFormLayout()
+        self.settings.values['warzone_enabled']=True
+        try:self.settings.save()
+        except Exception:pass
+        form.addRow('CODMunity Profile',self.profile);l.addLayout(form)
+        l.addStretch(1)
+        self.refresh_codmunity_account_status()
     def squad_game_changed(self,*_):
         if not hasattr(self,'squad_mode'):return
         game=self.squad_game.currentData()
@@ -1117,12 +2002,12 @@ class Window(QMainWindow):
     def build_capture(self):
         l=self.page('Scoreboard Capture','At The End of a match Capture a Screenshot using your hotkey and once loaded you can Generate a Ai picture to discord');self.capture_subtitle=l.itemAt(1).widget()
         self.monitor=QComboBox();self.monitor.hide()
-        self.capture_display_status=QLabel('Game display will be selected during first-time setup.');self.capture_display_status.setStyleSheet('font-size:11px;color:#aab4c3;font-weight:700;padding:3px;')
-        self.capture_setup_button=self.button('Capture Setup',lambda:self.setup_scoreboard_display(force=True))
+        self.capture_setup_button=self.button('Pick Game Monitor',lambda:self.setup_scoreboard_display(force=True))
         self.hotkey_status=QLabel('Global hotkey: starting…');self.hotkey_status.setStyleSheet('color:#99a8bc;font-weight:700;');self.hotkey_status.setCursor(Qt.PointingHandCursor);self.hotkey_status.setToolTip('Click to set the scoreboard hotkey');self.hotkey_status.mousePressEvent=lambda _event:self.open_hotkey_dialog('scoreboard')
         self.capture_now_button=self.button('Capture Now',self.capture_once,True)
-        hotkey_row=QHBoxLayout();hotkey_row.addStretch(1);hotkey_row.addWidget(self.hotkey_status);l.addLayout(hotkey_row)
-        display_row=QHBoxLayout();display_row.addWidget(self.capture_display_status,3);display_row.addWidget(self.capture_setup_button,1);display_row.addWidget(self.capture_now_button,1);l.addLayout(display_row)
+        try:self.sidebar.layout().insertWidget(self.sidebar.layout().indexOf(self.nav)+1,self.hotkey_status)
+        except (AttributeError,RuntimeError):self.sidebar.layout().addWidget(self.hotkey_status)
+        display_row=QHBoxLayout();display_row.addWidget(self.capture_setup_button,2);display_row.addWidget(self.capture_now_button,1);l.addLayout(display_row)
         if str(self.settings.values.get('scoreboard_profile','auto'))!='auto':self.settings.values['scoreboard_profile']='auto';self.settings.save()
         self.capture_subtitle.setText(self._scoreboard_capture_instruction())
 
@@ -1216,6 +2101,9 @@ class Window(QMainWindow):
         self.codmunity_username_help=self.button('?',self.show_codmunity_username_help);self.codmunity_username_help.setObjectName('miniHelpButton');self.codmunity_username_help.setFixedSize(20,20);self.codmunity_username_help.setToolTip('Show where to find your CODMunity username.');username_label_layout.addWidget(self.codmunity_username_help);username_label_layout.addStretch(1)
         info_form.addRow(username_label,self.codmunity_username)
         info_form.addRow('CODMunity profile link',self.roster_profile_url)
+        self.roster_profile_url.hide()
+        try:info_form.labelForField(self.roster_profile_url).hide()
+        except (AttributeError,RuntimeError):pass
         info_form.addRow('',self.roster_enabled)
         self.photo_consent=self.roster_switch('This player agreed to their photo being used with Meta AI')
         info_form.addRow('',self.photo_consent)
@@ -1266,7 +2154,8 @@ class Window(QMainWindow):
         codmunity_layout.addWidget(self.codmunity_distribution_label);codmunity_layout.addStretch(1)
         self._codmunity_live_key=None
         self.codmunity_client=codmunity_player_stats.CodmunityPublicClient()
-        self.codmunity_player_service=codmunity_player_stats.ModularPlayerStatsService()
+        self.codmunity_auth=None
+        self._rebuild_player_service()
         self._codmunity_tab_index=self.roster_tabs.addTab(codmunity_tab,'CODMUNITY')
         self.codmunity_game.currentIndexChanged.connect(self.codmunity_game_changed)
         self.codmunity_mode.currentIndexChanged.connect(self._codmunity_comparison_changed)
@@ -1334,7 +2223,7 @@ class Window(QMainWindow):
         index=self.codmunity_mode.findData(old)
         self.codmunity_mode.setCurrentIndex(index if index>=0 else 0);self.codmunity_mode.blockSignals(False)
         self.refresh_codmunity_panel()
-        if hasattr(self,'consent_status'):self.refresh_roster()
+        if hasattr(self,'consent_status') and hasattr(self,'photo_path'):self.refresh_roster()
     def _codmunity_player_record(self,pid=None):
         pid=str(pid or getattr(self,'current_player',None) or '')
         if not pid:return None
@@ -1428,6 +2317,356 @@ class Window(QMainWindow):
         self.async_task(lambda:self.codmunity_client.community_distribution(game,mode,scope),
                         lambda distribution,pid=pid,key=key:self.on_codmunity_distribution(pid,key,distribution),
                         lambda message,pid=pid,key=key:self.on_codmunity_failure(pid,'distribution',message,key))
+    def _rebuild_player_service(self):
+        try:token=self.settings.codmunity_refresh_token()
+        except Exception:token=''
+        if token:
+            self.codmunity_auth=codmunity_player_stats.CodmunityAuthClient(refresh_token=token)
+            self.codmunity_player_service=codmunity_player_stats.ModularPlayerStatsService(
+                codmunity_player_stats.build_authorized_fetcher(self.codmunity_auth))
+        else:
+            self.codmunity_auth=codmunity_player_stats.CodmunityAuthClient()
+            self.codmunity_player_service=codmunity_player_stats.ModularPlayerStatsService()
+    def refresh_codmunity_account_status(self):
+        if not hasattr(self,'codmunity_account_status'):return
+        try:signed_in=bool(self.settings.codmunity_refresh_token())
+        except Exception:signed_in=False
+        email=self.settings.codmunity_email()
+        if signed_in:self.codmunity_account_status.setText(f"Signed in as {email or 'your CODMunity account'}. Live player stats use your account.")
+        else:self.codmunity_account_status.setText('Not signed in. Live player stats stay unavailable until sign-in.')
+    def startup_offline_requirements(self):
+        issues=[]
+        try:token=self.settings.codmunity_refresh_token()
+        except Exception:token=''
+        if not token:
+            issues.append({'id':'codmunity','mode':'sign_in','title':'CODMunity sign-in required','detail':'Sign in with your CODMunity email and password so match uploads, lifetime stats, and profile linking keep working.'})
+        try:meta_needed=bool(self.settings.values.get('meta_login_needed',False))
+        except Exception:meta_needed=False
+        if meta_needed:
+            issues.append({'id':'meta_ai','mode':'browser_login','title':'Meta AI login required','detail':'Poster and video automation needs a Meta AI sign-in. Open the Meta AI login window, sign in there, then verify.'})
+        return issues
+    def startup_session_issue(self,validate=None):
+        try:token=self.settings.codmunity_refresh_token()
+        except Exception:token=''
+        if not token:return None
+        client=getattr(self,'codmunity_auth',None)
+        try:
+            if validate is not None:validate(client)
+            elif client is not None:client.id_token()
+            else:return None
+        except Exception as exc:
+            return {'id':'codmunity','mode':'relogin','title':'CODMunity session expired','detail':'Your saved CODMunity session no longer works. Sign in again below. ('+str(exc)[:140]+')'}
+        return None
+    def maybe_show_startup_requirements(self):
+        if getattr(self,'tab_prototype',False):return False
+        if is_smoke_run():return False
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return False
+        issues=self.startup_offline_requirements()
+        if any(item.get('id')=='codmunity' for item in issues):
+            self.show_startup_requirements_dialog(issues,select='codmunity')
+            return True
+        def work():return (self.startup_session_issue(),[item for item in self.startup_offline_requirements() if item.get('id')!='codmunity'])
+        def done(result):
+            try:session_issue,rest=result
+            except Exception:return
+            if session_issue:self.show_startup_requirements_dialog([session_issue]+list(rest or []),select='codmunity')
+            elif rest:self.show_startup_requirements_dialog(list(rest),select=rest[0].get('id'))
+        try:self.async_task(work,done)
+        except Exception:pass
+        return True
+    def build_startup_requirements_dialog(self,issues,select=None):
+        dialog=QDialog(self);dialog.setWindowTitle('Startup requirements');dialog.setModal(True);dialog.setMinimumWidth(480)
+        layout=QVBoxLayout(dialog);layout.setContentsMargins(22,20,22,18);layout.setSpacing(12)
+        heading=QLabel('Finish signing in');heading.setStyleSheet('font-size:18px;font-weight:900;color:#ffffff;');layout.addWidget(heading)
+        note=QLabel('The tracker found something that needs your login before everything works. Fix it here, or press Continue to skip for now.');note.setWordWrap(True);note.setStyleSheet('font-size:13px;color:#cbd3df;');layout.addWidget(note)
+        codmunity_status=QLabel('');codmunity_status.setWordWrap(True);codmunity_status.setStyleSheet('font-size:13px;color:#99a8bc;')
+        for issue in issues or []:
+            if issue.get('id')=='codmunity':
+                box=QFrame();box.setObjectName('dashboardPanel');form=QVBoxLayout(box);form.setContentsMargins(14,12,14,12);form.setSpacing(8)
+                title=QLabel(str(issue.get('title') or 'CODMunity sign-in'));title.setStyleSheet('font-size:15px;font-weight:800;color:#ffffff;');form.addWidget(title)
+                detail=QLabel(str(issue.get('detail') or ''));detail.setWordWrap(True);detail.setStyleSheet('font-size:13px;color:#cbd3df;');form.addWidget(detail)
+                grid=QFormLayout();grid.setSpacing(8)
+                email_edit=QLineEdit(str(self.settings.codmunity_email()));email_edit.setPlaceholderText('you@example.com');grid.addRow('CODMunity email',email_edit)
+                password_edit=QLineEdit();password_edit.setEchoMode(QLineEdit.Password);password_edit.setPlaceholderText('Password (never stored)');grid.addRow('Password',password_edit)
+                form.addLayout(grid);form.addWidget(codmunity_status)
+                def do_sign_in(_checked=False):
+                    email=email_edit.text().strip();password=password_edit.text()
+                    if not email or not password:codmunity_status.setText('Enter your CODMunity email and password.');return
+                    codmunity_status.setText('Signing in...')
+                    def ok():
+                        try:password_edit.clear()
+                        except (AttributeError,RuntimeError):pass
+                        try:dialog.accept()
+                        except (AttributeError,RuntimeError):pass
+                    self.codmunity_sign_in(email=email,password=password,on_signed_in=ok,on_failed=codmunity_status.setText)
+                sign_button=self.button('Sign in',do_sign_in,True)
+                row=QHBoxLayout();row.addStretch(1);row.addWidget(sign_button);form.addLayout(row)
+                layout.addWidget(box)
+                if select=='codmunity':
+                    try:email_edit.setFocus()
+                    except (AttributeError,RuntimeError):pass
+            elif issue.get('id')=='meta_ai':
+                box=QFrame();box.setObjectName('dashboardPanel');form=QVBoxLayout(box);form.setContentsMargins(14,12,14,12);form.setSpacing(8)
+                title=QLabel(str(issue.get('title') or 'Meta AI login'));title.setStyleSheet('font-size:15px;font-weight:800;color:#ffffff;');form.addWidget(title)
+                detail=QLabel(str(issue.get('detail') or ''));detail.setWordWrap(True);detail.setStyleSheet('font-size:13px;color:#cbd3df;');form.addWidget(detail)
+                meta_row=QHBoxLayout();meta_row.addStretch(1)
+                meta_row.addWidget(self.button('Open Meta AI login',self.open_login_window))
+                meta_row.addWidget(self.button('Verify Meta AI login',self.verify_login))
+                form.addLayout(meta_row)
+                layout.addWidget(box)
+        buttons=QDialogButtonBox(QDialogButtonBox.Ok);buttons.button(QDialogButtonBox.Ok).setText('Continue');buttons.accepted.connect(dialog.accept);layout.addWidget(buttons)
+        return dialog
+    def show_startup_requirements_dialog(self,issues,select=None):
+        try:dialog=self.build_startup_requirements_dialog(issues,select=select)
+        except (AttributeError,RuntimeError):return False
+        try:dialog.exec()
+        except (AttributeError,RuntimeError):return False
+        return True
+    def codmunity_sign_in(self,email=None,password=None,on_signed_in=None,on_failed=None):
+        if email is None or isinstance(email,bool):email=self.codmunity_email_edit.text().strip() if hasattr(self,'codmunity_email_edit') else ''
+        if password is None or isinstance(password,bool):password=self.codmity_password_edit.text() if hasattr(self,'codmunity_password_edit') else ''
+        if not email or not password:
+            if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Enter your CODMunity email and password.')
+            return
+        if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Signing in…')
+        def work():
+            auth=codmunity_player_stats.CodmunityAuthClient()
+            info=auth.sign_in(email,password)
+            return auth,info
+        def done(result):
+            auth,info=result
+            self.settings.values['codmunity_email']=info.get('email') or email
+            self.settings.set_codmunity_refresh_token(auth.refresh_token)
+            self.settings.save()
+            if hasattr(self,'codmunity_email_edit'):self.codmunity_email_edit.setText(self.settings.values['codmunity_email'])
+            if hasattr(self,'codmunity_password_edit'):self.codmunity_password_edit.clear()
+            self._rebuild_player_service();self.refresh_codmunity_account_status()
+            self.log('CODMunity sign-in complete; only the session token is stored.');self.refresh_codmunity_panel();self._start_codmunity_identity_lookup();self._auto_upload_done=False;self._maybe_auto_upload()
+            if on_signed_in is not None:
+                try:on_signed_in()
+                except Exception:pass
+        def failed(message):
+            if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText(str(message))
+            self.log('CODMunity sign-in failed.')
+            if on_failed is not None:
+                try:on_failed(str(message))
+                except Exception:pass
+        self.async_task(work,done,failed)
+    def codmunity_reset_password(self):
+        email=self.codmunity_email_edit.text().strip() if hasattr(self,'codmunity_email_edit') else ''
+        if not email:
+            if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Enter your CODMunity email first.')
+            return
+        if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Sending reset email…')
+        def work():
+            import codmunity_player_stats as _cps
+            _cps.request_password_reset(email)
+            return True
+        def done(_result):
+            if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText('Reset email sent. Check your inbox.')
+            self.log('Password reset email sent.')
+        def failed(message):
+            if hasattr(self,'codmunity_account_status'):self.codmunity_account_status.setText(str(message))
+            self.log('Password reset failed.')
+        self.async_task(work,done,failed)
+    def codmunity_sign_out(self):
+        try:
+            self.settings.values['protected_codmunity_refresh']='';self.settings.save()
+        except Exception:pass
+        self._rebuild_player_service();self.refresh_codmunity_account_status();self._clear_codmunity_identity()
+        if hasattr(self,'codmunity_password_edit'):self.codmunity_password_edit.clear()
+        self.log('Signed out of CODMunity in this tracker.')
+    def _stored_codmunity_identity(self):
+        email=self.settings.codmunity_email()
+        username=str(self.settings.values.get('codmunity_username') or '').strip()
+        if not username:return None
+        if str(self.settings.values.get('codmunity_link_email') or '').casefold()!=email.casefold():return None
+        def _num(key):
+            try:value=int(self.settings.values.get(key) or 0)
+            except (TypeError,ValueError):value=0
+            return value if value>=0 else 0
+        return {'username':username,'uid':str(self.settings.values.get('codmunity_uid') or ''),
+                'display_name':str(self.settings.values.get('codmunity_display_name') or '') or None,'email':email,
+                'avatar':str(self.settings.values.get('codmunity_avatar') or ''),
+                'bio':str(self.settings.values.get('codmunity_bio') or ''),
+                'followers':_num('codmunity_followers'),'loadouts':_num('codmunity_loadouts'),'likes':_num('codmunity_likes')}
+    def _start_codmunity_identity_lookup(self):
+        if getattr(self,'tab_prototype',False):return
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        if not hasattr(self,'codmunity_profile_status'):return
+        if not self.settings.codmunity_refresh_token():
+            self._clear_codmunity_identity();return
+        stored=self._stored_codmunity_identity()
+        if stored:
+            self._apply_codmunity_identity(stored)
+            if stored.get('avatar'):
+                return
+        ordered=self._identity_candidates()
+        if stored and stored.get('username'):
+            ordered=list(dict.fromkeys([stored['username']]+ordered))
+        if not ordered:
+            self.codmunity_profile_status.setText('Signed in. Set CODMunity Name to link the profile automatically.');return
+        self.codmunity_profile_status.setText('Loading profile…')
+        email=self.settings.codmunity_email()
+        def work():return self._fetch_codmunity_identity(ordered,email)
+        self.async_task(work,self._on_codmunity_identity,self._on_codmunity_identity_failed)
+    def _identity_candidates(self):
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:snapshot={}
+        candidates=[]
+        if isinstance(snapshot,dict):
+            for hit in ((snapshot.get('identity') or {}).get('hits') or []):
+                if isinstance(hit,dict) and str(hit.get('username') or '').strip():candidates.append(str(hit['username']).strip())
+        player=(self.player.text().strip() if hasattr(self,'player') else '') or str(self.settings.values.get('player') or '')
+        if player.strip():candidates.append(player.strip())
+        return list(dict.fromkeys(candidates))
+    def _fetch_codmunity_identity(self,candidates,email):
+        for username in candidates:
+            try:banner=self.codmunity_client.profile_banner(username)
+            except Exception:banner=None
+            if banner:
+                banner['email']=email
+                return banner
+            try:ident=self.codmunity_client.profile_identity(username)
+            except Exception:continue
+            return {'username':ident.username,'uid':ident.uid,'display_name':ident.display_name,'email':email,
+                    'avatar':'','bio':'','followers':0,'loadouts':0,'likes':0}
+        raise RuntimeError('No matching CODMunity profile found')
+    def _on_codmunity_identity(self,ident):
+        username=str(ident.get('username') or '').strip()
+        if not username:return
+        email=self.settings.codmunity_email()
+        def _count(value):
+            return value if isinstance(value,int) and not isinstance(value,bool) and value>=0 else 0
+        self.settings.values.update(codmunity_username=username,codmunity_uid=str(ident.get('uid') or ''),
+            codmunity_display_name=str(ident.get('display_name') or ''),codmunity_link_email=email,
+            codmunity_avatar=str(ident.get('avatar') or ''),codmunity_bio=str(ident.get('bio') or ''),
+            codmunity_followers=_count(ident.get('followers')),codmunity_loadouts=_count(ident.get('loadouts')),codmunity_likes=_count(ident.get('likes')))
+        url=f'https://codmunity.gg/profile/{username}'
+        self.settings.values.update(player=username,profile_url=url)
+        try:
+            if hasattr(self,'player'):self.player.setText(username)
+            if hasattr(self,'profile'):self.profile.setText(url)
+            self.settings.save()
+        except Exception:pass
+        self._apply_codmunity_identity({'username':username,'uid':str(ident.get('uid') or ''),
+            'display_name':str(ident.get('display_name') or '') or None,'email':email,
+            'avatar':str(ident.get('avatar') or ''),'bio':str(ident.get('bio') or ''),
+            'followers':ident.get('followers') if isinstance(ident.get('followers'),int) else 0,
+            'loadouts':ident.get('loadouts') if isinstance(ident.get('loadouts'),int) else 0,
+            'likes':ident.get('likes') if isinstance(ident.get('likes'),int) else 0})
+        self.log('CODMunity profile linked for '+username+'.')
+    def _on_codmunity_identity_failed(self,message):
+        if hasattr(self,'codmunity_profile_status'):self.codmunity_profile_status.setText('Signed in, but profile lookup failed: '+str(message or 'unknown error'))
+        self.log('CODMunity profile lookup failed: '+str(message or 'unknown error'))
+    def _clear_codmunity_identity(self):
+        try:
+            self.settings.values.update(codmunity_username='',codmunity_uid='',codmunity_display_name='',codmunity_link_email='',codmunity_avatar='',codmunity_bio='',codmunity_followers=0,codmunity_loadouts=0,codmunity_likes=0)
+            self.settings.save()
+        except Exception:pass
+        for attr,empty in (('codmunity_profile_name','—'),('codmunity_profile_sub',''),('codmunity_profile_stats','')):
+            try:
+                if hasattr(self,attr):getattr(self,attr).setText(empty)
+            except (AttributeError,RuntimeError):pass
+        for attr,empty in (('dash_profile_name','—'),('dash_profile_handle',''),('dash_profile_bio','')):
+            try:
+                if hasattr(self,attr):getattr(self,attr).setText(empty)
+            except (AttributeError,RuntimeError):pass
+        for slot in getattr(self,'dash_meters',{}).values():
+            if not isinstance(slot,dict):continue
+            for widget,key in ((slot.get('value'),'—'),(slot.get('sub'),'—'),(slot.get('cap'),'')):
+                try:widget.setText(key)
+                except (AttributeError,RuntimeError):pass
+            try:slot['bar'].set_value(0)
+            except (AttributeError,RuntimeError):pass
+            if slot.get('ring') is not None:
+                try:slot['ring'].set_value(0,'')
+                except (AttributeError,RuntimeError):pass
+        try:
+            if hasattr(self,'dash_profile_avatar'):self.dash_profile_avatar.setPixmap(QPixmap());self.dash_profile_avatar.setText('◉')
+        except (AttributeError,RuntimeError):pass
+        for tile in getattr(self,'dash_profile_tiles',{}).values():
+            if not isinstance(tile,dict):continue
+            try:tile['value'].setText('\u2014')
+            except (AttributeError,RuntimeError):pass
+            try:
+                if tile.get('badge') is not None:tile['badge'].setText('');tile['badge'].setVisible(False)
+            except (AttributeError,RuntimeError):pass
+        try:self._profile_avatar_url=''
+        except (AttributeError,RuntimeError):pass
+        try:
+            if hasattr(self,'codmunity_profile_status'):self.codmunity_profile_status.setText('Sign in to load the CODMunity profile.')
+        except (AttributeError,RuntimeError):pass
+    def _apply_codmunity_identity(self,ident):
+        username=str(ident.get('username') or '')
+        display=str(ident.get('display_name') or '')
+        uid=str(ident.get('uid') or '')
+        url=f'https://codmunity.gg/profile/{username}' if username else ''
+        try:
+            if hasattr(self,'codmunity_profile_status'):self.codmunity_profile_status.setText('Profile linked'+(' for '+str(ident.get('email') or '') if ident.get('email') else '')+'.')
+            if hasattr(self,'codmunity_profile_name'):self.codmunity_profile_name.setText(username or '—')
+            if hasattr(self,'codmunity_profile_sub'):self.codmunity_profile_sub.setText(' · '.join(p for p in [display,'UID '+uid if uid else '',url] if p))
+            if hasattr(self,'codmunity_profile_stats'):self.codmunity_profile_stats.setText(self._codmunity_identity_stats(username))
+            if hasattr(self,'dash_profile_name'):self.dash_profile_name.setText(display or username or '—')
+            if hasattr(self,'dash_profile_handle'):self.dash_profile_handle.setText('@'+username if username else '')
+            if hasattr(self,'dash_profile_bio'):self.dash_profile_bio.setText(str(ident.get('bio') or ''))
+            self._refresh_dashboard_stats()
+            self._fetch_profile_avatar(str(ident.get('avatar') or ''))
+        except (AttributeError,RuntimeError):pass
+    def _fetch_profile_avatar(self,url):
+        if not hasattr(self,'dash_profile_avatar'):return
+        try:
+            if not url or url in self._profile_avatar_failed:return
+            if getattr(self,'_profile_avatar_url','')==url:
+                current=self.dash_profile_avatar.pixmap()
+                if current is not None and not current.isNull():return
+        except (AttributeError,RuntimeError):return
+        self._profile_avatar_url=url
+        def work():
+            import hashlib as _hashlib
+            from urllib.request import Request as _Request,urlopen as _urlopen
+            folder=E.DATA/'avatars';folder.mkdir(parents=True,exist_ok=True)
+            path=folder/(_hashlib.sha256(url.encode()).hexdigest()[:24]+'.img')
+            if not path.is_file():
+                headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) VintendoCODTracker','Referer':'https://codmunity.gg/'}
+                with _urlopen(_Request(url,headers=headers),timeout=20) as response:body=response.read(2*1024*1024)
+                if not body:raise ValueError('empty avatar')
+                path.write_bytes(body)
+            return str(path)
+        def done(path):
+            try:label=self.dash_profile_avatar
+            except (AttributeError,RuntimeError):return
+            pixmap=QPixmap(path)
+            if pixmap.isNull():
+                try:self._profile_avatar_failed.add(url)
+                except (AttributeError,RuntimeError):pass
+                return
+            size=96
+            framed=QPixmap(size,size);framed.fill(Qt.transparent)
+            painter=QPainter(framed);painter.setRenderHint(QPainter.Antialiasing)
+            clip=QPainterPath();clip.addEllipse(3,3,size-6,size-6);painter.setClipPath(clip)
+            painter.drawPixmap(0,0,size,size,pixmap.scaled(size,size,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+            painter.setClipping(False);painter.setPen(QPen(QColor('#ed2938'),3));painter.drawEllipse(2,2,size-4,size-4)
+            painter.end()
+            try:label.setPixmap(framed);label.setText('')
+            except (AttributeError,RuntimeError):pass
+        self.async_task(work,done,lambda _message:getattr(self,'_profile_avatar_failed',set()).add(url))
+    def _codmunity_identity_stats(self,username):
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:return ''
+        if not isinstance(snapshot,dict):return ''
+        lines=[]
+        for hit in ((snapshot.get('identity') or {}).get('hits') or []):
+            if isinstance(hit,dict) and str(hit.get('username') or '').casefold()==username.casefold():
+                lines.append(f"{hit.get('leaderboard')}: rank #{hit.get('rank')}")
+        for game,mode,label in (('mw4','multiplayer','MW4 Multiplayer'),('warzone','resurgence','Warzone Resurgence')):
+            try:stats=codmunity_camo.lifetime_stats(snapshot,game,mode)
+            except Exception:stats={}
+            if not stats:continue
+            kd=codmunity_camo.lifetime_kd(stats)
+            games=stats.get('games_played',stats.get('games'))
+            lines.append(f"{label}: {codmunity_camo.format_count(games)} games, {codmunity_camo.format_count(stats.get('wins'))} wins"+(f", {kd:.2f} K/D" if kd is not None else ""))
+        return '\n'.join(lines) if lines else 'No lifetime stats cached yet.'
     def refresh_codmunity_player_stats(self):
         player=self._codmunity_player_record()
         if player is None:
@@ -1436,7 +2675,7 @@ class Window(QMainWindow):
         if not uid:
             self.codmunity_status.setText('Resolve the public profile first to save its UID.');return
         if not self.codmunity_player_service.configured:
-            self.codmunity_status.setText('Live player stats need an approved provider.')
+            self.codmunity_status.setText('Sign in with your CODMunity account to load live player stats.')
             return
         pid=str(player['id']);self.codmunity_status.setText('Checking configured provider.')
         # The default service has no endpoint or credentials. This only calls a
@@ -1457,6 +2696,13 @@ class Window(QMainWindow):
         record={'game':distribution.game,'mode':distribution.mode,'scope':distribution.scope,
             'kd':list(distribution.kd),'sampled':distribution.sampled,'users_total':distribution.users_total,
             'updated_at':updated_at,'source':'public_global_endpoint'}
+        for attr,record_key in (('wl','wl'),('win_rate','winRate')):
+            extra=getattr(distribution,attr,None)
+            if extra:record[record_key]=list(extra)
+        for extra_key,values in (getattr(distribution,'extra',None) or ()):
+            if isinstance(extra_key,str) and isinstance(values,(list,tuple)) and len(values)==12:
+                try:record[extra_key]=[float(v) for v in values]
+                except (TypeError,ValueError):continue
         cached=dict(self.store.meta('codmunity_public_distributions',{}) or {});cached[key]=record
         self.store.set_meta('codmunity_public_distributions',cached)
         self._codmunity_live_key=(pid,key)
@@ -1548,11 +2794,15 @@ class Window(QMainWindow):
             self.codmunity_median_value.setText(f'{distribution.kd[codmunity_player_stats.PERCENTILE_ANCHORS.index(50)]:.2f}')
             self.codmunity_updated_value.setText(self._codmunity_timestamp(saved.get('updated_at')))
             if kd_value is not None:
-                rank=codmunity_player_stats.ladder_rank(kd_value,distribution)
-                self.codmunity_rank_value.setText(f'{rank.tier} · {kd_source}')
-                self.codmunity_percentile_value.setText(f'{rank.percentile:.1f}%')
-                self.codmunity_progress_value.setText(f'{rank.progress_percent:.1f}% toward {rank.next_tier}' if rank.next_tier else 'Top tier')
-                self.codmunity_next_kd_value.setText(f'{rank.next_tier_kd:.2f}' if rank.next_tier_kd is not None else '—')
+                rank=codmunity_player_stats.distribution_rank(kd_value,distribution)
+                if rank is None:
+                    self.codmunity_rank_value.setText('—');self.codmunity_percentile_value.setText('—')
+                    self.codmunity_progress_value.setText('Sample too small — refresh community data');self.codmunity_next_kd_value.setText('—')
+                else:
+                    self.codmunity_rank_value.setText(f'{rank.tier} · {kd_source}')
+                    self.codmunity_percentile_value.setText(f'{rank.percentile:.1f}%')
+                    self.codmunity_progress_value.setText(f'{rank.progress_percent:.1f}% toward {rank.next_tier}' if rank.next_tier else 'Top tier')
+                    self.codmunity_next_kd_value.setText(f'{rank.next_tier_kd:.2f}' if rank.next_tier_kd is not None else '—')
         if player_kd.updated_at and player_kd.kd is not None:
             self.codmunity_updated_value.setText(self._codmunity_timestamp(player_kd.updated_at))
         if isinstance(stored_stats,dict):
@@ -1693,7 +2943,7 @@ class Window(QMainWindow):
             if index<2:
                 arrow=QLabel(chr(187));arrow.setObjectName('stepArrow');steps_layout.addWidget(arrow);steps_layout.addStretch(1)
         hotkey_bar=QHBoxLayout();hotkey_bar.setContentsMargins(0,0,0,0);hotkey_bar.setSpacing(10);hotkey_bar.addStretch(1)
-        self.cod_ai_hotkey_status=QLabel('Hotkey: Down');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);self.cod_ai_hotkey_status.setCursor(Qt.PointingHandCursor);self.cod_ai_hotkey_status.setToolTip('Click to set the screenshot hotkey');self.cod_ai_hotkey_status.mousePressEvent=lambda _event:self.open_hotkey_dialog('screenshot');hotkey_bar.addWidget(self.cod_ai_hotkey_status)
+        self.cod_ai_hotkey_status=QLabel('Hotkey: Down');self.cod_ai_hotkey_status.setObjectName('hotkeyPill');self.cod_ai_hotkey_status.setAlignment(Qt.AlignCenter);self.cod_ai_hotkey_status.setCursor(Qt.PointingHandCursor);self.cod_ai_hotkey_status.setToolTip('Click to set the screenshot hotkey');self.cod_ai_hotkey_status.mousePressEvent=lambda _event:self.open_hotkey_dialog('screenshot');hotkey_bar.addWidget(self.cod_ai_hotkey_status);self.cod_ai_hotkey_status.hide()
         hotkey_wrap=QWidget();hotkey_wrap.setLayout(hotkey_bar);l.addWidget(hotkey_wrap)
         l.addWidget(steps)
         actions=QHBoxLayout();actions.setSpacing(10)
@@ -1983,6 +3233,8 @@ class Window(QMainWindow):
         try:self.login_card.hide()
         except (AttributeError,RuntimeError):pass
         self.set_automation_stage('ready')
+        try:self.settings.values['meta_login_needed']=False;self.settings.save()
+        except Exception:pass
         try:self.statusBar().showMessage('Meta AI login verified. Poster and video jobs will run in the background.',10000)
         except (AttributeError,RuntimeError):pass
         self.log('Meta AI login verified; poster and video jobs will run in the background.')
@@ -2083,6 +3335,8 @@ class Window(QMainWindow):
         try:self.browser_status.setText(message[:240]);self.browser_status.setStyleSheet('color:#fdba74;font-weight:700;')
         except (AttributeError,RuntimeError):pass
         self.set_automation_stage('failed',message)
+        try:self.settings.values['meta_login_needed']=True;self.settings.save()
+        except Exception:pass
     def _driver_stage(self,stage,detail=''):
         try:stage_queue=self._stage_queue
         except AttributeError:stage_queue=self._stage_queue=queue.Queue()
@@ -2259,9 +3513,996 @@ class Window(QMainWindow):
 
     def set_history_period(self,period):
         self.history_period=period;self.refresh_history()
+    def _codmunity_cache_dir(self):
+        cache=codmunity_camo.default_cache_dir();return str(cache) if cache else ''
+    def _autotrack_feed_path(self):
+        try:base=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'CODMunity'/'autotrack-feed.json'
+        except Exception:return ''
+        return str(base) if base.is_file() else ''
+    def build_camo_tracker(self):
+        l=self.page('Camo Tracker','Weapon camos, prestige and mastery from the cached catalogue, with progress from the tracker and the desktop feed mirror. Manual ticks stay local.')
+        status_bar=QFrame();status_bar.setObjectName('camoStatusBar')
+        status_layout=QHBoxLayout(status_bar);status_layout.setContentsMargins(14,10,14,10);status_layout.setSpacing(10)
+        self.camo_status_dot=QLabel('●');self.camo_status_dot.setObjectName('camoStatusDot');status_layout.addWidget(self.camo_status_dot)
+        self.camo_status_line=QLabel('Waiting for Call of Duty');self.camo_status_line.setObjectName('camoStatusLine');status_layout.addWidget(self.camo_status_line)
+        self.camo_last_line=QLabel('');self.camo_last_line.setObjectName('camoStatusLast');status_layout.addWidget(self.camo_last_line,1)
+        self.camo_open_tracking_button=self.button('Open Auto tracking',self.goto_tracking);status_layout.addWidget(self.camo_open_tracking_button)
+        l.addWidget(status_bar)
+        self.camo_games_row=QHBoxLayout();self.camo_games_row.setSpacing(4);l.addLayout(self.camo_games_row)
+        self.camo_game_group=QButtonGroup(self);self.camo_game_group.setExclusive(True)
+        self.camo_game_buttons={}
+        self.camo_grind_row=QHBoxLayout();self.camo_grind_row.setSpacing(6);l.addLayout(self.camo_grind_row)
+        self.camo_grind_group=QButtonGroup(self);self.camo_grind_group.setExclusive(True)
+        self.camo_grind_buttons={}
+        title_row=QHBoxLayout()
+        title_box=QVBoxLayout();title_box.setSpacing(2)
+        self.camo_title_label=QLabel('Weapon Camos');self.camo_title_label.setObjectName('camoTitle');title_box.addWidget(self.camo_title_label)
+        self.camo_subtitle_label=QLabel('');self.camo_subtitle_label.setObjectName('camoSubtitle');title_box.addWidget(self.camo_subtitle_label)
+        title_row.addLayout(title_box,1)
+        mastery_box=QVBoxLayout();mastery_box.setSpacing(2)
+        self.camo_mastery_label=QLabel('MASTERY PROGRESSION');self.camo_mastery_label.setObjectName('camoMasteryLabel');mastery_box.addWidget(self.camo_mastery_label,0,Qt.AlignRight)
+        self.camo_mastery_value=QLabel('');self.camo_mastery_value.setObjectName('camoMasteryValue');mastery_box.addWidget(self.camo_mastery_value,0,Qt.AlignRight)
+        self.camo_mastery_bar=QProgressBar();self.camo_mastery_bar.setObjectName('camoMasteryBar');self.camo_mastery_bar.setTextVisible(False);self.camo_mastery_bar.setFixedWidth(180)
+        mastery_box.addWidget(self.camo_mastery_bar,0,Qt.AlignRight)
+        title_row.addLayout(mastery_box)
+        l.addLayout(title_row)
+        self.camo_cards_row=QHBoxLayout();self.camo_cards_row.setSpacing(10);l.addLayout(self.camo_cards_row)
+        self._camo_game='mw4';self._camo_grind='';self._camo_catalogue={};self._camo_rows=[];self._camo_images={};self._camo_expanded=set()
+        self._camo_filter='all';self._camo_category='ALL';self._camo_search='';self._camo_sort='popular'
+        filter_frame=QFrame();filter_frame.setObjectName('camoFilterBar')
+        filter_layout=QVBoxLayout(filter_frame);filter_layout.setContentsMargins(14,12,14,12);filter_layout.setSpacing(10)
+        pills_row=QHBoxLayout();pills_row.setSpacing(6)
+        self.camo_filter_group=QButtonGroup(self);self.camo_filter_group.setExclusive(True)
+        self.camo_filter_buttons={}
+        for index,(key,label) in enumerate((('all','ALL WEAPONS'),('progress','IN PROGRESS'),('todo','NOT STARTED'),('mastered','MASTERY'))):
+            button=QPushButton(label);button.setCheckable(True);button.setObjectName('camoFilterPill')
+            if key=='all':button.setChecked(True)
+            self.camo_filter_group.addButton(button,index);button.setProperty('filter',key)
+            self.camo_filter_buttons[key]=button;pills_row.addWidget(button)
+        self.camo_filter_group.idClicked.connect(lambda _i:self._camo_apply_filters())
+        pills_row.addStretch()
+        self.camo_sort_combo=QComboBox();self.camo_sort_combo.addItem('MOST POPULAR','popular');self.camo_sort_combo.addItem('NAME A–Z','name')
+        self.camo_sort_combo.currentIndexChanged.connect(lambda _i:self._camo_apply_filters())
+        pills_row.addWidget(self.camo_sort_combo)
+        self.camo_view_group=QButtonGroup(self);self.camo_view_group.setExclusive(True)
+        self.camo_view_buttons={}
+        for index,(key,label) in enumerate((('list','☰'),('grid','⊞'))):
+            button=QPushButton(label);button.setCheckable(True);button.setObjectName('camoViewPill')
+            if key=='list':button.setChecked(True)
+            self.camo_view_group.addButton(button,index);button.setProperty('view',key)
+            self.camo_view_buttons[key]=button;pills_row.addWidget(button)
+        self.camo_view_group.idClicked.connect(lambda _i:self._camo_apply_filters())
+        self._camo_view='list'
+        filter_layout.addLayout(pills_row)
+        search_row=QHBoxLayout();search_row.setSpacing(8)
+        self.camo_search_edit=QLineEdit();self.camo_search_edit.setPlaceholderText('Search a weapon...');self.camo_search_edit.setObjectName('camoSearch')
+        self.camo_search_edit.textChanged.connect(lambda text:self._camo_apply_filters())
+        search_row.addWidget(self.camo_search_edit,2)
+        self.camo_category_row=QHBoxLayout();self.camo_category_row.setSpacing(6)
+        self.camo_category_group=QButtonGroup(self);self.camo_category_group.setExclusive(True)
+        self.camo_category_buttons={}
+        search_row.addLayout(self.camo_category_row,5)
+        filter_layout.addLayout(search_row)
+        hint_row=QHBoxLayout()
+        hint=QLabel('Your camo progress across all weapons.');hint.setObjectName('camoHint');hint_row.addWidget(hint,1)
+        self.camo_showing_label=QLabel('');self.camo_showing_label.setObjectName('camoHint');hint_row.addWidget(self.camo_showing_label)
+        filter_layout.addLayout(hint_row)
+        l.addWidget(filter_frame)
+        self.camo_weapon_list=QListWidget();self.camo_weapon_list.setObjectName('camoWeaponList');l.addWidget(self.camo_weapon_list,1)
+        self.camo_status=QLabel('');self.camo_status.setWordWrap(True);self.camo_status.setObjectName('camoStatusLine');l.addWidget(self.camo_status)
+        self.row(l,self.button('Refresh catalogue',lambda:self._maybe_refresh_camo(True)))
+        self.refresh_camo_tracker()
+    def goto_tracking(self):
+        for row in range(self.nav.count()):
+            if self.nav.item(row).data(Qt.UserRole)=='Scoreboard Capture':
+                self.nav.setCurrentRow(row);return
+        self.nav.setCurrentRow(0)
+    def _select_camo_game(self,index):
+        try:button=self.camo_game_group.button(index)
+        except (AttributeError,RuntimeError):button=None
+        if button is not None:
+            code=button.property('game')
+            if code:self._camo_game=str(code)
+        self._maybe_refresh_camo(True)
+    def _maybe_refresh_camo(self,force=False):
+        try:
+            if not hasattr(self,'camo_weapon_list'):return
+            if not force and getattr(self,'_camo_rows',None) and not getattr(self,'_camo_failed',None):return
+            self._camo_failed=set()
+            self.refresh_camo_tracker()
+        except (AttributeError,RuntimeError):pass
+    def refresh_camo_tracker(self):
+        if not hasattr(self,'camo_games_row'):return
+        catalogue=codmunity_camo.load_camo_catalogue(self._codmunity_cache_dir() or None)
+        tabs=codmunity_camo.tracked_game_tabs(catalogue)
+        if not tabs:tabs=[('mw4','MW4')]
+        wanted={code for code,_ in tabs}
+        if getattr(self,'_camo_game','mw4') not in wanted:self._camo_game=tabs[0][0]
+        while self.camo_games_row.count():
+            child=self.camo_games_row.takeAt(0)
+            if child.widget():child.widget().deleteLater()
+        self.camo_game_group=QButtonGroup(self);self.camo_game_group.setExclusive(True)
+        self.camo_game_buttons={}
+        for index,(code,label) in enumerate(tabs):
+            button=QPushButton(('◉  ' if code==self._camo_game else '◎  ')+label)
+            button.setCheckable(True);button.setChecked(code==self._camo_game);button.setObjectName('boardGameTab')
+            self.camo_game_group.addButton(button,index);button.setProperty('game',code)
+            self.camo_game_buttons[code]=button;self.camo_games_row.addWidget(button)
+        self.camo_game_group.idClicked.connect(lambda index:self._select_camo_game(index))
+        self.camo_games_row.addStretch()
+        game=next((key for key,button in self.camo_game_buttons.items() if button.isChecked()),tabs[0][0])
+        self._camo_game=game
+        for key,button in self.camo_game_buttons.items():
+            label=dict(tabs).get(key,key)
+            button.setText(('◉  ' if button.isChecked() else '◎  ')+label)
+        grinds=codmunity_camo.grinds_for_game(catalogue,game)
+        while self.camo_grind_row.count():
+            child=self.camo_grind_row.takeAt(0)
+            if child.widget():child.widget().deleteLater()
+        grind_label=QLabel('● GRIND');grind_label.setObjectName('camoGrindLabel');self.camo_grind_row.addWidget(grind_label)
+        self.camo_grind_group=QButtonGroup(self);self.camo_grind_group.setExclusive(True)
+        self.camo_grind_buttons={}
+        for index,grind in enumerate(grinds):
+            button=QPushButton(str(grind.get('title') or grind.get('name') or '').upper());button.setCheckable(True);button.setObjectName('camoGrindPill')
+            if index==0:button.setChecked(True)
+            self.camo_grind_group.addButton(button,index);button.setProperty('grind',grind.get('name'))
+            self.camo_grind_buttons[grind.get('name')]=button;self.camo_grind_row.addWidget(button)
+        self.camo_grind_group.idClicked.connect(lambda _i:self.refresh_camo_weapons())
+        self.camo_grind_row.addStretch()
+        self._camo_catalogue=catalogue
+        progress=codmunity_camo.progress_map(self.store,self._autotrack_feed_path() or None)
+        self._camo_progress=progress
+        last=codmunity_camo.last_detection(self.store,self._autotrack_feed_path() or None)
+        if last and last.get('weapon'):
+            ago=codmunity_camo.ago_text(last.get('at'))
+            self.camo_status_line.setText('Tracking your camos')
+            self.camo_last_line.setText(f"Last: {last.get('weapon')} · {last.get('camo')}" + (f' · {ago}' if ago else ''))
+        else:
+            self.camo_status_line.setText('Waiting for Call of Duty')
+            self.camo_last_line.setText('')
+        if grinds:self.refresh_camo_weapons()
+        else:self.camo_status.setText('No camo catalogue cached yet. Progress still records locally while tracking.')
+    def refresh_camo_weapons(self):
+        if not hasattr(self,'camo_weapon_list'):return
+        catalogue=getattr(self,'_camo_catalogue',{})
+        game=getattr(self,'_camo_game','mw4')
+        grind=next((key for key,button in self.camo_grind_buttons.items() if button.isChecked()),None)
+        grinds=codmunity_camo.grinds_for_game(catalogue,game)
+        if grind not in [g.get('name') for g in grinds]:grind=grinds[0].get('name') if grinds else ''
+        self._camo_grind=grind or ''
+        current_grind=next((g for g in grinds if g.get('name')==grind),{})
+        self.camo_title_label.setText(str(current_grind.get('title') or grind or 'Weapon Camos'))
+        progress=getattr(self,'_camo_progress',{})
+        rows=codmunity_camo.weapon_rows(catalogue,progress,game,grind)
+        self._camo_rows=rows
+        self.camo_subtitle_label.setText(f'{self._camo_game_label()} · {len(rows)} weapons')
+        done,total=codmunity_camo.mastery_progress(catalogue,progress,game)
+        self.camo_mastery_value.setText(f'{done} / {total} camos' if total else '—')
+        try:self.camo_mastery_bar.setMaximum(max(1,total));self.camo_mastery_bar.setValue(done)
+        except (AttributeError,RuntimeError):pass
+        self._render_camo_cards(current_grind)
+        self._render_camo_categories(rows)
+        self._camo_apply_filters()
+        self._fetch_camo_images()
+    def _camo_game_label(self):
+        for code,label in codmunity_camo.game_tabs(getattr(self,'_camo_catalogue',{})):
+            if code==getattr(self,'_camo_game','mw4'):return label
+        return self._camo_game.upper()
+    def _render_camo_cards(self,grind):
+        while self.camo_cards_row.count():
+            child=self.camo_cards_row.takeAt(0)
+            if child.widget():child.widget().deleteLater()
+        tiers=codmunity_camo.tier_order(getattr(self,'_camo_catalogue',{}),self._camo_grind)
+        art=codmunity_camo.tier_images(getattr(self,'_camo_catalogue',{}),self._camo_grind)
+        prev_done,prev_total=None,None
+        for order,name in enumerate(tiers):
+            done,total=codmunity_camo.class_completion(self._camo_rows,name)
+            locked=order>0 and prev_total and prev_done<prev_total and done==0
+            self.camo_cards_row.addWidget(self._camo_card_widget(order+1,name,f'{done} / {total}',locked,done,total,image=art.get(name,'')))
+            prev_done,prev_total=done,total
+        self.camo_cards_row.addStretch()
+    def _camo_card_widget(self,order,name,progress_text,locked,done,total,sub='',image=''):
+        card=QFrame();card.setObjectName('camoCard');card.setFixedSize(220,190)
+        overlay=QVBoxLayout(card);overlay.setContentsMargins(12,10,12,10);overlay.setSpacing(4)
+        art_label=self._camo_card_art(image)
+        overlay.addWidget(art_label)
+        top=QHBoxLayout();badge=QLabel(str(order));badge.setObjectName('camoCardBadge');top.addWidget(badge);top.addStretch()
+        if locked:lock=QLabel('LOCKED');lock.setObjectName('camoCardLocked');top.addWidget(lock)
+        else:count=QLabel(progress_text);count.setObjectName('camoCardCount');top.addWidget(count)
+        overlay.addLayout(top)
+        title=QLabel(name);title.setObjectName('camoCardTitle');title.setWordWrap(True);overlay.addWidget(title)
+        if sub:sub_label=QLabel(sub);sub_label.setObjectName('camoCardSub');overlay.addWidget(sub_label)
+        bar=QProgressBar();bar.setObjectName('camoCardBar');bar.setTextVisible(False);bar.setMaximum(max(1,total));bar.setValue(done)
+        overlay.addWidget(bar)
+        return card
+
+    def _camo_card_art(self,url):
+        label=QLabel();label.setFixedSize(196,56);label.setAlignment(Qt.AlignCenter);label.setObjectName('camoCardArt')
+        pixmap=self._camo_images.get(url) if url else None
+        if pixmap is not None and not pixmap.isNull():
+            label.setPixmap(pixmap.scaled(196,56,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+        else:label.setText('—')
+        return label
+
+    def _render_camo_categories(self,rows):
+        while self.camo_category_row.count():
+            child=self.camo_category_row.takeAt(0)
+            if child.widget():child.widget().deleteLater()
+        self.camo_category_group=QButtonGroup(self);self.camo_category_group.setExclusive(True)
+        self.camo_category_buttons={}
+        categories=sorted({row['category'] for row in rows if row.get('category')})
+        for index,label in enumerate(['ALL']+categories):
+            button=QPushButton(label);button.setCheckable(True);button.setObjectName('camoCategoryPill')
+            if label=='ALL':button.setChecked(True)
+            self.camo_category_group.addButton(button,index);button.setProperty('category',label)
+            self.camo_category_buttons[label]=button;self.camo_category_row.addWidget(button)
+        self.camo_category_group.idClicked.connect(lambda _i:self._camo_apply_filters())
+        self._camo_category='ALL'
+        counts={'all':len(rows),'progress':0,'todo':0,'mastered':0}
+        for row in rows:
+            if row['total'] and row['done']>=row['total']:counts['mastered']+=1
+            elif row['done']>0:counts['progress']+=1
+            else:counts['todo']+=1
+        labels={'all':f"ALL WEAPONS {counts['all']}",'progress':f"IN PROGRESS {counts['progress']}",'todo':f"NOT STARTED {counts['todo']}",'mastered':f"MASTERY {counts['mastered']}"}
+        for key,button in self.camo_filter_buttons.items():button.setText(labels.get(key,key.upper()))
+    def _camo_apply_filters(self):
+        if not hasattr(self,'camo_weapon_list'):return
+        view=next((key for key,button in self.camo_view_buttons.items() if button.isChecked()),'list')
+        self._camo_view=view
+        filt=next((key for key,button in self.camo_filter_buttons.items() if button.isChecked()),'all')
+        category=next((key for key,button in self.camo_category_buttons.items() if button.isChecked()),'ALL')
+        query=self.camo_search_edit.text().strip().casefold() if hasattr(self,'camo_search_edit') else ''
+        sort=str(self.camo_sort_combo.currentData() or 'popular') if hasattr(self,'camo_sort_combo') else 'popular'
+        rows=list(getattr(self,'_camo_rows',[]))
+        if category!='ALL':rows=[r for r in rows if r.get('category')==category]
+        if query:rows=[r for r in rows if query in r.get('weapon','').casefold()]
+        if filt=='progress':rows=[r for r in rows if 0<r['done']<r['total']]
+        elif filt=='todo':rows=[r for r in rows if r['done']==0]
+        elif filt=='mastered':rows=[r for r in rows if r['total']>0 and r['done']>=r['total']]
+        if sort=='name':rows.sort(key=lambda r:r.get('weapon','').casefold())
+        else:rows.sort(key=lambda r:(-(r.get('popularity') or 0),r.get('weapon','').casefold()))
+        self.camo_weapon_list.clear();self._camo_expanded={w for w in self._camo_expanded if any(r['weapon']==w for r in rows)}
+        if view=='grid':
+            from PySide6.QtWidgets import QListView as _QListView
+            self.camo_weapon_list.setViewMode(_QListView.IconMode);self.camo_weapon_list.setResizeMode(_QListView.Adjust);self.camo_weapon_list.setMovement(_QListView.Static);self.camo_weapon_list.setGridSize(QSize(190,190));self.camo_weapon_list.setSpacing(8)
+            for row in rows:
+                item=QListWidgetItem();item.setData(Qt.UserRole,row['weapon']);item.setSizeHint(QSize(180,180))
+                self.camo_weapon_list.addItem(item);self.camo_weapon_list.setItemWidget(item,self._camo_grid_card(row))
+        else:
+            from PySide6.QtWidgets import QListView as _QListView
+            self.camo_weapon_list.setViewMode(_QListView.ListMode)
+            for row in rows:
+                item=QListWidgetItem();item.setData(Qt.UserRole,row['weapon']);item.setSizeHint(QSize(0,118))
+                card=self._camo_weapon_card(row)
+                self.camo_weapon_list.addItem(item);self.camo_weapon_list.setItemWidget(item,card)
+                try:item.setSizeHint(QSize(0,max(118,card.sizeHint().height()+4)))
+                except (AttributeError,RuntimeError,TypeError):pass
+        total=len(getattr(self,'_camo_rows',[]))
+        self.camo_showing_label.setText(f'SHOWING {len(rows)} / {total}')
+        self.camo_status.setText(f'{len(rows)} of {total} weapons shown.')
+    def _camo_thumb(self,url,size=30):
+        label=QLabel('◉');label.setFixedSize(size,size);label.setAlignment(Qt.AlignCenter);label.setObjectName('camoThumb')
+        pixmap=self._camo_images.get(url) if url else None
+        if pixmap is not None and not pixmap.isNull():
+            label.setPixmap(pixmap.scaled(size,size,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+            label.setText('')
+        return label
+    def _camo_lock_icon(self,size=16):
+        cache=getattr(self,'_camo_lock_icons',None)
+        if cache is None:cache=self._camo_lock_icons={}
+        if size not in cache:
+            pix=QPixmap(size,size);pix.fill(Qt.transparent)
+            painter=QPainter(pix);painter.setRenderHint(QPainter.Antialiasing)
+            pen=QPen(QColor('#c4ccd8'));pen.setWidth(max(2,size//6));pen.setCapStyle(Qt.RoundCap);painter.setPen(pen);painter.setBrush(Qt.NoBrush)
+            painter.drawArc(QRectF(size*0.28,size*0.08,size*0.44,size*0.40),0,180*16)
+            painter.setPen(Qt.NoPen);painter.setBrush(QColor('#c4ccd8'))
+            painter.drawRoundedRect(QRectF(size*0.20,size*0.42,size*0.60,size*0.48),3,3)
+            painter.end();cache[size]=pix
+        return cache[size]
+    def _camo_badge_thumb(self,url,size,done,locked):
+        box=QWidget();box.setFixedSize(size,size)
+        base=self._camo_thumb(url,size);base.setParent(box);base.move(0,0);base.show()
+        if done:
+            badge=QLabel('✓',box);badge.setFixedSize(14,14);badge.move(size-14,0)
+            badge.setStyleSheet('background:#22c55e;color:#ffffff;border-radius:7px;font-size:10px;font-weight:900;')
+            badge.setAlignment(Qt.AlignCenter);badge.setAttribute(Qt.WA_TransparentForMouseEvents);badge.show()
+        elif locked:
+            lock=QLabel(box);lock.setFixedSize(16,16);lock.move((size-16)//2,(size-16)//2)
+            lock.setPixmap(self._camo_lock_icon(16));lock.setAttribute(Qt.WA_TransparentForMouseEvents);lock.show()
+        return box
+    def _fetch_camo_images(self):
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        urls=set()
+        for row in getattr(self,'_camo_rows',[]):
+            if row.get('icon'):urls.add(row['icon'])
+            for camo in row.get('camos',[]):
+                if camo.get('image'):urls.add(camo['image'])
+        for _name,_url in codmunity_camo.tier_images(getattr(self,'_camo_catalogue',{}),getattr(self,'_camo_grind','')).items():
+            if _url:urls.add(_url)
+        failed_known=getattr(self,'_camo_failed',None)
+        if failed_known is None:failed_known=self._camo_failed=set()
+        urls=[u for u in urls if u and u not in self._camo_images and u not in failed_known]
+        if not urls:return
+        folder=E.DATA/'camo-images';folder.mkdir(parents=True,exist_ok=True)
+        import hashlib as _hashlib
+        cached={url:folder/(_hashlib.sha256(url.encode()).hexdigest()[:24]+'.img') for url in urls}
+        for url,path in cached.items():
+            if path.is_file():
+                pixmap=QPixmap(str(path))
+                if not pixmap.isNull():self._camo_images[url]=pixmap
+        todo=[url for url in urls if url not in self._camo_images]
+        if not todo:return
+        def work():
+            from urllib.request import Request as _Request,urlopen as _urlopen
+            _h={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) VintendoCODTracker','Referer':'https://codmunity.gg/'}
+            saved=[];failed=[]
+            for url in todo[:12]:
+                try:
+                    with _urlopen(_Request(url,headers=_h),timeout=20) as response:body=response.read(2*1024*1024)
+                    if not body:failed.append(url);continue
+                    path=cached[url];path.write_bytes(body);saved.append(url)
+                except Exception:failed.append(url);continue
+            return saved,failed
+        def done(result):
+            saved,failed=result
+            for url in saved:
+                pixmap=QPixmap(str(cached[url]))
+                if not pixmap.isNull():self._camo_images[url]=pixmap
+            if failed:
+                failed_known.update(u for u in failed if u not in self._camo_images)
+                self.log(f'Camo artwork: {len(failed)} image(s) failed to download; showing placeholders.')
+            if saved and hasattr(self,'camo_weapon_list'):
+                self.refresh_camo_weapons()
+            self._fetch_camo_images()
+        self.async_task(work,done,lambda _message:None)
+
+    def _camo_weapon_card(self,row):
+        card=QFrame();card.setObjectName('camoWeaponCard')
+        outer=QVBoxLayout(card);outer.setContentsMargins(10,10,10,10);outer.setSpacing(8)
+        top=QHBoxLayout();top.setSpacing(10)
+        expander=QPushButton('+');expander.setObjectName('camoExpander');expander.setFixedSize(28,28)
+        expander.setToolTip('Open full camo details')
+        expander.clicked.connect(lambda _on,weapon=row['weapon']:self._open_camo_detail(weapon))
+        top.addWidget(expander)
+        top.addWidget(self._camo_thumb(row.get('icon'),52))
+        name_box=QVBoxLayout();name_box.setSpacing(0)
+        name=QLabel(row['weapon']);name.setObjectName('camoWeaponName')
+        name.setCursor(Qt.PointingHandCursor);name.setToolTip('Click to expand')
+        name.mousePressEvent=lambda _event,weapon=row['weapon']:self._toggle_camo_expanded(weapon)
+        name_box.addWidget(name)
+        sub=QLabel((row.get('category') or '').upper());sub.setObjectName('camoWeaponClass');name_box.addWidget(sub)
+        if row['weapon'] in self._camo_expanded:
+            segrow=QHBoxLayout();segrow.setSpacing(2)
+            for _i in range(max(0,int(row.get('total') or 0))):
+                _seg=QLabel();_seg.setFixedSize(10,6)
+                _seg.setStyleSheet('background:#22c55e;border-radius:2px;' if _i<int(row.get('done') or 0) else 'background:#262c36;border-radius:2px;')
+                segrow.addWidget(_seg)
+            segrow.addStretch(1);name_box.addLayout(segrow)
+        top.addLayout(name_box)
+        strip=QHBoxLayout();strip.setSpacing(3)
+        show_badges=row['weapon'] in self._camo_expanded
+        for camo in row.get('camos',[]):
+            tip=f"{camo.get('name')}: {camo.get('challenge') or ('done' if camo.get('done') else 'locked' if camo.get('locked') else 'todo')}"
+            if show_badges:
+                thumb=self._camo_badge_thumb(camo.get('image'),30,bool(camo.get('done')),bool(camo.get('locked')))
+            else:
+                thumb=self._camo_thumb(camo.get('image'),30)
+                if camo.get('done'):thumb.setProperty('camoState','done')
+                elif camo.get('locked'):thumb.setProperty('camoState','locked')
+                else:thumb.setProperty('camoState','todo')
+                thumb.style().unpolish(thumb);thumb.style().polish(thumb)
+            thumb.setToolTip(tip)
+            strip.addWidget(thumb)
+        strip.addWidget(QLabel(f"{row['done']}/{row['total']}"))
+        top.addLayout(strip,1)
+        next_box=QVBoxLayout();next_box.setSpacing(2)
+        caption=QLabel('NEXT CAMO');caption.setObjectName('camoNextCaption');next_box.addWidget(caption)
+        nxt=row.get('next')
+        if nxt:
+            next_name=QLabel(nxt['name']);next_name.setObjectName('camoNextName');next_box.addWidget(next_name)
+            for tag,text,obj in (('MP',nxt.get('challenge'),'camoModeMP'),('DMZ',nxt.get('challenge_dm'),'camoModeDMZ'),('WZ',nxt.get('challenge_wz'),'camoModeWZ')):
+                if not text:continue
+                _r=QHBoxLayout();_r.setSpacing(6)
+                _chip=QLabel(tag);_chip.setObjectName(obj);_r.addWidget(_chip)
+                _ln=QLabel(str(text));_ln.setWordWrap(True);_ln.setObjectName('camoNextLine');_r.addWidget(_ln,1)
+                next_box.addLayout(_r)
+            if row['weapon'] in self._camo_expanded:
+                _mark=self.button('Mark saved',lambda _on,weapon=row['weapon'],camo=nxt.get('name',''):self.mark_camo_challenge(weapon,camo))
+                _mark_row=QHBoxLayout();_mark_row.addStretch(1);_mark_row.addWidget(_mark);next_box.addLayout(_mark_row)
+        else:
+            done_label=QLabel('MASTERED');done_label.setObjectName('camoNextName');next_box.addWidget(done_label)
+        top.addLayout(next_box,2)
+        ring=QLabel(f"{row['done']}/{row['total']}");ring.setObjectName('camoRing');ring.setAlignment(Qt.AlignCenter);ring.setFixedSize(52,52)
+        top.addWidget(ring)
+        outer.addLayout(top)
+        return card
+    def _camo_grid_card(self,row):
+        card=QFrame();card.setObjectName('camoWeaponCard')
+        layout=QVBoxLayout(card);layout.setContentsMargins(10,10,10,10);layout.setSpacing(6)
+        layout.addWidget(self._camo_thumb(row.get('icon'),64),0,Qt.AlignHCenter)
+        name=QLabel(row['weapon']);name.setObjectName('camoWeaponName');name.setAlignment(Qt.AlignCenter);name.setWordWrap(True);layout.addWidget(name)
+        ring=QLabel(f"{row['done']}/{row['total']}");ring.setObjectName('camoRingSmall');ring.setAlignment(Qt.AlignCenter);layout.addWidget(ring,0,Qt.AlignCenter)
+        return card
+    def _toggle_camo_expanded(self,weapon):
+        if weapon in self._camo_expanded:self._camo_expanded.discard(weapon)
+        else:self._camo_expanded.add(weapon)
+        self._camo_apply_filters()
+    _CAMO_GROUP_ORDER=('Completionist','Special Camos','Military Camos','Mastery Camos','Mastery','Base Camos','Unique Camos','Weapon Prestige','Prestige 1','Prestige 2','Prestige Legend')
+    def _camo_weapon_groups(self,weapon):
+        catalogue=getattr(self,'_camo_catalogue',None) or {}
+        game=getattr(self,'_camo_game','mw4') or 'mw4'
+        try:progress=codmunity_camo.progress_map(self.store,self._autotrack_feed_path() or None)
+        except Exception:progress=getattr(self,'_camo_progress',{}) or {}
+        groups={}
+        seen=set()
+        for grind in codmunity_camo.grinds_for_game(catalogue,game):
+            for row in codmunity_camo.weapon_rows(catalogue,progress,game,grind.get('name')):
+                if str(row.get('weapon','')).casefold()!=str(weapon).casefold():continue
+                for camo in row.get('camos',[]) or []:
+                    key=str(camo.get('name') or '').casefold()
+                    if not key or key in seen:continue
+                    seen.add(key)
+                    group=str(camo.get('subcategory') or 'Other').strip() or 'Other'
+                    groups.setdefault(group,[]).append(camo)
+        ordered=[g for g in self._CAMO_GROUP_ORDER if g in groups]
+        ordered.extend(sorted(k for k in groups if k not in self._CAMO_GROUP_ORDER))
+        return [(name,groups[name]) for name in ordered]
+    def _camo_detail_tile(self,weapon,camo):
+        tile=QFrame();tile.setObjectName('camoDetailTile')
+        done=bool(camo.get('done'))
+        tile.setToolTip('Click to unmark' if done else 'Click to mark as saved')
+        tile.setCursor(Qt.PointingHandCursor)
+        box=QVBoxLayout(tile);box.setContentsMargins(10,10,10,10);box.setSpacing(6)
+        art_row=QHBoxLayout();art_row.addStretch(1)
+        art_row.addWidget(self._camo_badge_thumb(camo.get('image'),64,done,bool(camo.get('locked'))))
+        art_row.addStretch(1);box.addLayout(art_row)
+        name=QLabel(str(camo.get('name') or ''));name.setObjectName('camoDetailName');name.setWordWrap(True);name.setAlignment(Qt.AlignCenter);box.addWidget(name)
+        req=str(camo.get('challenge') or camo.get('challenge_dm') or camo.get('challenge_wz') or '')
+        req_label=QLabel(req);req_label.setWordWrap(True);req_label.setAlignment(Qt.AlignCenter);req_label.setObjectName('camoDetailReq');box.addWidget(req_label)
+        tile.mousePressEvent=lambda _event,w=weapon,c=str(camo.get('name','')),d=done:self._toggle_camo_mark(w,c,d)
+        return tile
+    def _toggle_camo_mark(self,weapon,camo,done):
+        try:self.mark_camo_challenge(weapon,camo,'dismissed' if done else 'saved')
+        except Exception as exc:self.notice(str(exc));return
+        try:self._open_camo_detail(weapon)
+        except Exception:pass
+    def _open_camo_detail(self,weapon):
+        try:
+            old=getattr(self,'_camo_detail_dialog',None)
+            if old is not None:old.close()
+        except (AttributeError,RuntimeError):pass
+        catalogue=getattr(self,'_camo_catalogue',None) or {}
+        game=getattr(self,'_camo_game','mw4') or 'mw4'
+        icon=next((r.get('icon','') for r in getattr(self,'_camo_rows',[]) if str(r.get('weapon','')).casefold()==str(weapon).casefold()),'')
+        groups=self._camo_weapon_groups(weapon)
+        done=sum(1 for _,camos in groups for c in camos if c.get('done'))
+        total=sum(len(camos) for _,camos in groups)
+        dialog=QDialog(self);dialog.setWindowTitle(str(weapon)+' — Camos');dialog.setModal(False)
+        dialog.setMinimumSize(720,600)
+        layout=QVBoxLayout(dialog);layout.setContentsMargins(18,14,18,14);layout.setSpacing(10)
+        head=QHBoxLayout();head.setSpacing(12)
+        head.addWidget(self._camo_thumb(icon,48))
+        title_box=QVBoxLayout();title_box.setSpacing(0)
+        title=QLabel(str(weapon));title.setObjectName('camoDetailTitle');title_box.addWidget(title)
+        count=QLabel(f'{done} / {total}');count.setObjectName('camoDetailReq');title_box.addWidget(count)
+        head.addLayout(title_box);head.addStretch(1)
+        close_button=self.button('Close',dialog.close);close_button.setObjectName('camoDetailClose');head.addWidget(close_button)
+        layout.addLayout(head)
+        scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        host=QWidget();host_layout=QVBoxLayout(host);host_layout.setSpacing(12)
+        for group_name,camos in groups:
+            ghead=QHBoxLayout()
+            glabel=QLabel(group_name);glabel.setObjectName('camoGroupTitle');ghead.addWidget(glabel);ghead.addStretch(1)
+            gcount=QLabel(str(len(camos)));gcount.setObjectName('camoGroupTitle');ghead.addWidget(gcount)
+            host_layout.addLayout(ghead)
+            grid=QGridLayout();grid.setSpacing(10)
+            for index,camo in enumerate(camos):
+                grid.addWidget(self._camo_detail_tile(weapon,camo),index//4,index%4)
+            host_layout.addLayout(grid)
+        scroll.setWidget(host);layout.addWidget(scroll,1)
+        dialog.show();dialog.raise_();dialog.activateWindow()
+        self._camo_detail_dialog=dialog
+        return dialog
+    def mark_camo_challenge(self,weapon,camo,state='saved'):
+        grind=getattr(self,'_camo_grind','') or getattr(self,'_camo_game','mw4')
+        det=codmunity_camo.mark_progress(self.store,weapon,camo,state,grind=grind)
+        if det:
+            self.log(f'Camo tick recorded: {weapon} / {camo} → {state}.')
+            self._camo_progress=codmunity_camo.progress_map(self.store,self._autotrack_feed_path() or None)
+            self.refresh_camo_weapons()
+        else:self.notice('Could not record the tick.')
+    def build_leaderboards(self):
+        l=self.page('Leaderboards','The best CODMunity players, per game and mode. Only players who chose to appear are listed.')
+        board_left=QFrame();board_left.setObjectName('dashboardPanel');board_layout=QVBoxLayout(board_left);board_layout.setContentsMargins(12,10,12,10);board_layout.setSpacing(8)
+        games_row=QHBoxLayout()
+        self.board_game_group=QButtonGroup(self);self.board_game_group.setExclusive(True)
+        self.board_warzone_button=QPushButton('◎  WARZONE');self.board_warzone_button.setCheckable(True);self.board_warzone_button.setObjectName('boardGameTab')
+        self.board_mw4_button=QPushButton('▤  MW4');self.board_mw4_button.setCheckable(True);self.board_mw4_button.setChecked(True);self.board_mw4_button.setObjectName('boardGameTab')
+        self.board_game_group.addButton(self.board_warzone_button,0);self.board_game_group.addButton(self.board_mw4_button,1)
+        self.board_game_group.idClicked.connect(lambda _i:self.refresh_leaderboards())
+        games_row.addWidget(self.board_warzone_button);games_row.addWidget(self.board_mw4_button)
+        self.board_mode_combo=QComboBox()
+        for value,label in codmunity_camo.WARZONE_MODES:self.board_mode_combo.addItem(label,value)
+        self.board_mode_combo.currentIndexChanged.connect(lambda _i:self.refresh_leaderboards())
+        games_row.addWidget(self.board_mode_combo);games_row.addStretch();board_layout.addLayout(games_row)
+        self._board_card=QFrame();self._board_card.setObjectName('boardCard')
+        card_layout=QVBoxLayout(self._board_card);card_layout.setContentsMargins(18,14,18,14);card_layout.setSpacing(12)
+        header_row=QHBoxLayout()
+        self.board_title_label=QLabel('♛ MW4 · Multiplayer');self.board_title_label.setObjectName('boardTitle');header_row.addWidget(self.board_title_label);header_row.addStretch()
+        self.board_metric_group=QButtonGroup(self);self.board_metric_group.setExclusive(True)
+        self.board_metric_buttons={}
+        for index,(key,label) in enumerate(codmunity_camo.BOARD_METRICS):
+            button=QPushButton(label);button.setCheckable(True);button.setObjectName('boardMetricTab')
+            self.board_metric_group.addButton(button,index);button.setProperty('metric',key)
+            if key=='kd':button.setChecked(True)
+            self.board_metric_buttons[key]=button;header_row.addWidget(button)
+        self.board_metric_group.idClicked.connect(lambda _i:self.refresh_board_table())
+        card_layout.addLayout(header_row)
+        self.board_you_frame=QFrame();self.board_you_frame.setObjectName('boardYouRow')
+        you_layout=QHBoxLayout(self.board_you_frame);you_layout.setContentsMargins(12,10,12,10);you_layout.setSpacing(12)
+        self.board_you_avatar=QLabel('◉');self.board_you_avatar.setFixedSize(52,52);self.board_you_avatar.setAlignment(Qt.AlignCenter);self.board_you_avatar.setObjectName('boardAvatar');you_layout.addWidget(self.board_you_avatar)
+        you_text=QVBoxLayout();you_text.setSpacing(2)
+        you_name_row=QHBoxLayout()
+        self.board_you_badge=QLabel('YOU');self.board_you_badge.setObjectName('boardYouBadge');you_name_row.addWidget(self.board_you_badge)
+        self.board_you_name=QLabel('—');self.board_you_name.setObjectName('boardYouName');you_name_row.addWidget(self.board_you_name,1)
+        you_text.addLayout(you_name_row)
+        self.board_you_sub=QLabel('');self.board_you_sub.setObjectName('boardYouSub');self.board_you_sub.setWordWrap(True);you_text.addWidget(self.board_you_sub)
+        you_layout.addLayout(you_text,1)
+        for caption,attr in (('K/D RATIO','board_you_kd'),('WINS','board_you_wins'),('GAMES','board_you_games')):
+            cell=QVBoxLayout();cell.setSpacing(2)
+            title=QLabel(caption);title.setObjectName('boardYouCaption');title.setAlignment(Qt.AlignCenter);cell.addWidget(title)
+            value=QLabel('—');value.setObjectName('boardYouValue');value.setAlignment(Qt.AlignCenter);cell.addWidget(value)
+            setattr(self,attr,value);you_layout.addLayout(cell)
+        visibility_box=QVBoxLayout();visibility_box.setSpacing(4)
+        visibility_label=QLabel('Public');visibility_label.setObjectName('boardYouCaption');visibility_label.setAlignment(Qt.AlignCenter);visibility_box.addWidget(visibility_label)
+        self.board_visibility_toggle=QCheckBox();self.board_visibility_toggle.setObjectName('boardSwitch');self.board_visibility_toggle.setChecked(True)
+        self.board_visibility_toggle.toggled.connect(lambda _on:self.flip_board_visibility())
+        visibility_box.addWidget(self.board_visibility_toggle,0,Qt.AlignCenter)
+        you_layout.addLayout(visibility_box)
+        card_layout.addWidget(self.board_you_frame)
+        self.board_table=QTableWidget(0,5);self.board_table.setHorizontalHeaderLabels(['#','PLAYER','K/D RATIO','WINS','GAMES']);self.board_table.setSelectionBehavior(QTableWidget.SelectRows);self.board_table.setEditTriggers(QTableWidget.NoEditTriggers);self.board_table.setAlternatingRowColors(True);self.board_table.verticalHeader().setDefaultSectionSize(56);self.board_table.verticalHeader().hide();self.board_table.horizontalHeader().setSectionResizeMode(1,QHeaderView.Stretch);self.board_table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Interactive);self.board_table.setColumnWidth(0,72);self.board_table.horizontalHeaderItem(0).setTextAlignment(Qt.AlignCenter)
+        card_layout.addWidget(self.board_table,1)
+        self.board_identity=QLabel('');self.board_identity.setWordWrap(True);self.board_identity.setObjectName('boardIdentity');card_layout.addWidget(self.board_identity)
+        self.board_status=QLabel('');self.board_status.setWordWrap(True);self.board_status.setObjectName('boardStatus');card_layout.addWidget(self.board_status)
+        board_layout.addWidget(self._board_card,1)
+        self._board_game='mw4';self._board_mode='resurgence';self._board_metric='kd';self._board_entries=[];self._board_avatars={}
+        self.row(board_layout,self.button('Refresh',self.refresh_leaderboards),self.button('Copy profile link',self.copy_profile_link),self.button('Open CODMunity site',self.open_codmunity_site))
+        self.refresh_leaderboards()
+        self.dash_bottom.insertWidget(0,board_left,70)
+    def board_snapshot(self):
+        try:return self.store.meta('codmunity_stats') or {}
+        except Exception:return {}
+    def refresh_leaderboards(self):
+        if not hasattr(self,'board_table'):return
+        game='warzone' if self.board_warzone_button.isChecked() else 'mw4'
+        mode=str(self.board_mode_combo.currentData() or 'resurgence')
+        self.board_mode_combo.setVisible(game=='warzone')
+        snapshot=self.board_snapshot()
+        _,label,entries=codmunity_camo.board_for(game,mode,snapshot)
+        self._board_game=game;self._board_mode=mode;self._board_entries=list(entries)
+        self.board_title_label.setText(f'♛ {label}')
+        hits=codmunity_camo.identity_hits(snapshot)
+        if hits:self.board_identity.setText(' · '.join(f"#{h.get('rank')} {h.get('leaderboard')}" for h in hits[:4]))
+        else:self.board_identity.setText('')
+        self.refresh_you_row(snapshot)
+        self.refresh_board_table()
+        self._fetch_board_avatars()
+    def refresh_you_row(self,snapshot):
+        stats=codmunity_camo.you_row_stats(snapshot,self._board_game,self._board_mode)
+        name=str(self.settings.values.get('player','vintendo') or 'vintendo').strip() or 'vintendo'
+        self.board_you_name.setText(name)
+        if stats['kd'] is not None:self.board_you_kd.setText(f"{stats['kd']:.2f}")
+        else:self.board_you_kd.setText('—')
+        self.board_you_wins.setText(codmunity_camo.format_count(stats['wins']))
+        self.board_you_games.setText(codmunity_camo.format_count(stats['games']))
+        if stats['has_stats']:
+            parts=[]
+            if stats['kills'] is not None:parts.append(f"{codmunity_camo.format_count(stats['kills'])} kills")
+            if stats['games'] is not None:parts.append(f"{codmunity_camo.format_count(stats['games'])} games")
+            self.board_you_sub.setText('Local lifetime: '+', '.join(parts)+'.')
+        else:self.board_you_sub.setText('No stats yet: play a match with the app open.')
+        self.board_you_avatar.setText('◉')
+        photo=self._you_headshot()
+        if photo:
+            pixmap=QPixmap(str(photo))
+            if not pixmap.isNull():
+                self.board_you_avatar.setPixmap(pixmap.scaled(52,52,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+        listed=any(isinstance(h,dict) for h in codmunity_camo.identity_hits(snapshot))
+        self.board_visibility_toggle.blockSignals(True);self.board_visibility_toggle.setChecked(bool(listed));self.board_visibility_toggle.blockSignals(False)
+        self.board_visibility_toggle.setEnabled(self.codmunity_player_service.configured)
+        self.board_visibility_toggle.setToolTip('Sign in to change visibility.' if not self.codmunity_player_service.configured else 'Toggle leaderboard visibility.')
+    def _you_headshot(self):
+        try:
+            name=str(self.settings.values.get('player','vintendo') or '').casefold()
+            for player in self.store.roster():
+                aliases=[str(player.get('name',''))]+[str(a) for a in (player.get('aliases') or [])]
+                if any(a.casefold()==name for a in aliases if a):
+                    photo=player.get('photo') or ''
+                    if photo and Path(photo).is_file():return photo
+        except Exception:pass
+        return None
+    def flip_board_visibility(self):
+        if self.board_visibility_toggle.signalsBlocked():return
+        wanted=self.board_visibility_toggle.isChecked()
+        if not self.codmunity_player_service.configured:
+            self.board_visibility_toggle.blockSignals(True);self.board_visibility_toggle.setChecked(not wanted);self.board_visibility_toggle.blockSignals(False)
+            self.board_status.setText('Sign in with your CODMunity account to change visibility.')
+            return
+        def work():
+            import codmunity_player_stats as _cps
+            auth=self.codmunity_auth
+            if auth is None:raise RuntimeError('Not signed in')
+            return _cps.set_visibility(auth,wanted)
+        def done(_result):
+            self.log('Leaderboard visibility updated.');self.board_status.setText('Visibility updated.')
+        def failed(message):
+            self.board_visibility_toggle.blockSignals(True);self.board_visibility_toggle.setChecked(not wanted);self.board_visibility_toggle.blockSignals(False)
+            self.board_status.setText(str(message));self.log('Visibility update failed.')
+        self.async_task(work,done,failed)
+    def _rank_badge(self,position):
+        label=QLabel(str(position));label.setAlignment(Qt.AlignCenter);label.setFixedSize(40,30)
+        tier=codmunity_camo.medal(position)
+        if tier=='gold':label.setText(f'♛ {position}');label.setObjectName('boardMedalGold')
+        elif tier=='silver':label.setObjectName('boardMedalSilver')
+        elif tier=='bronze':label.setObjectName('boardMedalBronze')
+        else:label.setObjectName('boardMedalPlain')
+        return label
+    def _player_cell(self,entry):
+        widget=QWidget();layout=QHBoxLayout(widget);layout.setContentsMargins(4,2,4,2);layout.setSpacing(10)
+        avatar=QLabel('◉');avatar.setFixedSize(36,36);avatar.setAlignment(Qt.AlignCenter);avatar.setObjectName('boardAvatar')
+        url=str(entry.get('avatar') or '')
+        pixmap=self._board_avatars.get(url) if url else None
+        if pixmap is not None and not pixmap.isNull():
+            avatar.setPixmap(pixmap.scaled(36,36,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+            avatar.setText('')
+        layout.addWidget(avatar)
+        text=QVBoxLayout();text.setSpacing(0)
+        name=QLabel(str(entry.get('displayName') or entry.get('username') or '—'));name.setObjectName('boardPlayerName')
+        handle=QLabel('@'+str(entry.get('username') or '—'));handle.setObjectName('boardPlayerHandle')
+        text.addWidget(name);text.addWidget(handle);layout.addLayout(text,1)
+        return widget
+    def refresh_board_table(self):
+        if not hasattr(self,'board_table'):return
+        metric=next((key for key,button in self.board_metric_buttons.items() if button.isChecked()),'kd')
+        self._board_metric=metric
+        entries=codmunity_camo.sort_entries(self._board_entries,metric)[:100]
+        self.board_table.setRowCount(0)
+        bold=QFont();bold.setBold(True)
+        for position,entry in enumerate(entries,1):
+            row=self.board_table.rowCount();self.board_table.insertRow(row)
+            rank_cell=QWidget();rank_layout=QHBoxLayout(rank_cell);rank_layout.setContentsMargins(0,0,0,0);rank_layout.addWidget(self._rank_badge(position),0,Qt.AlignCenter)
+            self.board_table.setCellWidget(row,0,rank_cell)
+            self.board_table.setCellWidget(row,1,self._player_cell(entry))
+            kd=codmunity_camo.metric_value(entry,'kd');wins=codmunity_camo.metric_value(entry,'wins');games=entry.get('gamesPlayed')
+            kd_item=QTableWidgetItem(f'{kd:.2f}' if kd is not None else '—');kd_item.setTextAlignment(Qt.AlignCenter);kd_item.setFont(bold);kd_item.setForeground(QBrush(QColor('#f0b429')))
+            wins_item=QTableWidgetItem(codmunity_camo.format_count(wins));wins_item.setTextAlignment(Qt.AlignCenter)
+            games_item=QTableWidgetItem(codmunity_camo.format_count(games));games_item.setTextAlignment(Qt.AlignCenter)
+            self.board_table.setItem(row,2,kd_item);self.board_table.setItem(row,3,wins_item);self.board_table.setItem(row,4,games_item)
+        if entries:self.board_status.setText(f'{len(entries)} cached entries shown, sorted by {dict(codmunity_camo.BOARD_METRICS).get(metric,metric)}.')
+        else:self.board_status.setText('No cached entries for this board yet. Boards appear after the next stats import.')
+    def _fetch_board_avatars(self):
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        urls=list({str(e.get('avatar') or '') for e in self._board_entries if e.get('avatar')})
+        missing=[url for url in urls if url and url not in self._board_avatars]
+        if not missing:return
+        folder=E.DATA/'avatars';folder.mkdir(parents=True,exist_ok=True)
+        import hashlib as _hashlib
+        cached={url:folder/(_hashlib.sha256(url.encode()).hexdigest()[:24]+'.img') for url in missing}
+        for url,path in cached.items():
+            if path.is_file():
+                pixmap=QPixmap(str(path))
+                if not pixmap.isNull():self._board_avatars[url]=pixmap
+        todo=[url for url in missing if url not in self._board_avatars]
+        if not todo:return
+        def work():
+            from urllib.request import Request as _Request,urlopen as _urlopen
+            _h={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) VintendoCODTracker','Referer':'https://codmunity.gg/'}
+            saved=[]
+            for url in todo[:25]:
+                try:
+                    with _urlopen(_Request(url,headers=_h),timeout=20) as response:body=response.read(2*1024*1024)
+                    if not body:continue
+                    path=cached[url];path.write_bytes(body);saved.append(url)
+                except Exception:continue
+            return saved
+        def done(saved):
+            for url in saved:
+                pixmap=QPixmap(str(cached[url]))
+                if not pixmap.isNull():self._board_avatars[url]=pixmap
+            if saved and hasattr(self,'board_table'):self.refresh_board_table()
+        self.async_task(work,done,lambda _message:None)
+    def copy_profile_link(self):
+        player=str(self.settings.values.get('player','vintendo') or 'vintendo').strip() or 'vintendo'
+        QApplication.clipboard().setText(f'https://codmunity.gg/profile/{player}');self.log('Profile link copied to the clipboard.')
+    def open_codmunity_site(self):
+        QDesktopServices.openUrl(QUrl('https://codmunity.gg/'))
+    def build_stats(self):
+        l=self.page('Stats','Lifetime stats per game and mode from the cached snapshot, plus community benchmarks.')
+        top=QHBoxLayout()
+        top.addWidget(self.button('Refresh',self.refresh_stats))
+        top.addWidget(self.button('Copy summary',self.copy_stats_summary,True))
+        l.addLayout(top)
+        grid=QGridLayout();grid.setSpacing(10)
+        self.stats_cards={}
+        for index,(key,caption) in enumerate((('kd','K / D RATIO'),('wins','WINS'),('games','GAMES'),('kills','KILLS'),('deaths','DEATHS'),('avg','AVG / GAME'),('best','BEST GAME'),('streak','BEST STREAK'),('spm','SCORE / MIN'),('time','TIME PLAYED'))):
+            card=QFrame();card.setObjectName('dashboardPanel')
+            box=QVBoxLayout(card);box.setContentsMargins(14,11,14,11);box.setSpacing(3)
+            value=QLabel('—');value.setObjectName('historySummaryValue');box.addWidget(value)
+            caption_label=QLabel(caption);caption_label.setObjectName('historySummaryCaption');box.addWidget(caption_label)
+            grid.addWidget(card,index//5,index%5);self.stats_cards[key]=value
+        l.addLayout(grid)
+        self.stats_modes_label=QLabel('');self.stats_modes_label.setWordWrap(True);self.stats_modes_label.setObjectName('camoHint');l.addWidget(self.stats_modes_label)
+        self.stats_benchmark_label=QLabel('');self.stats_benchmark_label.setWordWrap(True);self.stats_benchmark_label.setObjectName('camoHint');l.addWidget(self.stats_benchmark_label)
+        self.stats_status=QLabel('');self.stats_status.setWordWrap(True);self.stats_status.setObjectName('camoStatusLine');l.addWidget(self.stats_status)
+        l.addStretch(1)
+        self.refresh_stats()
+    def _select_lifetime_game(self,game,mode):
+        self._lifetime_game=(game,mode)
+        for group in (getattr(self,'stats_game_buttons',{}),getattr(self,'dash_profile_game_buttons',{})):
+            for key,button in group.items():
+                try:button.setChecked(tuple(key)==(game,mode))
+                except (AttributeError,RuntimeError):pass
+        self.refresh_stats()
+    def _stats_selection(self):
+        selection=getattr(self,'_lifetime_game',None)
+        if isinstance(selection,tuple) and len(selection)==2:return selection
+        return 'mw4','multiplayer'
+    def _lifetime_stat_values(self,game=None,mode=None):
+        if game is None or mode is None:game,mode=self._stats_selection()
+        snapshot={}
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:snapshot={}
+        stats=codmunity_camo.lifetime_stats(snapshot,game,mode)
+        kd=codmunity_camo.lifetime_kd(stats)
+        games=stats.get('games_played',stats.get('games'))
+        values={'kd':f'{kd:.2f}' if kd is not None else '\u2014',
+                'wins':codmunity_camo.format_count(stats.get('wins')),
+                'games':codmunity_camo.format_count(games),
+                'kills':codmunity_camo.format_count(stats.get('kills')),
+                'deaths':codmunity_camo.format_count(stats.get('deaths')),
+                'avg':f"{stats['avg_kills_game']:.1f}" if isinstance(stats.get('avg_kills_game'),(int,float)) else (f"{stats.get('avg_elims')}" if stats.get('avg_elims') is not None else '\u2014'),
+                'best':codmunity_camo.format_count(stats.get('highest_kills_game')),
+                'streak':codmunity_camo.format_count(stats.get('highest_streak')),
+                'spm':f"{stats['score_per_min']:.0f}" if isinstance(stats.get('score_per_min'),(int,float)) else '\u2014',
+                'time':codmunity_camo.format_time(stats.get('time_played_s',stats.get('hours_played')*3600 if isinstance(stats.get('hours_played'),(int,float)) else None))}
+        return game,mode,stats,values
+    def refresh_stats(self):
+        if not hasattr(self,'dash_profile_game_buttons'):return
+        game,mode,stats,values=self._lifetime_stat_values()
+        for key,label in self.stats_cards.items():label.setText(values.get(key,'\u2014'))
+        wins_by_mode=stats.get('wins_by_mode') if isinstance(stats.get('wins_by_mode'),dict) else {}
+        if wins_by_mode:self.stats_modes_label.setText('Wins by mode: '+', '.join(f'{k} {v}' for k,v in sorted(wins_by_mode.items())))
+        else:self.stats_modes_label.setText('')
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:snapshot={}
+        benchmarks=(snapshot.get('benchmarks') or {}) if isinstance(snapshot,dict) else {}
+        bench_key={'mw4':'mw4_multiplayer','warzone':'warzone_resurgence' if mode=='resurgence' else 'warzone_battle_royale'}.get(game,'mw4_multiplayer')
+        bench=benchmarks.get(bench_key) or {}
+        if isinstance(bench.get('kdMedian'),(int,float)) and isinstance(bench.get('kdP90'),(int,float)):
+            self.stats_benchmark_label.setText(f"Community benchmark: median K/D {bench['kdMedian']:g} \u00b7 P90 {bench['kdP90']:g} (cached)")
+        else:self.stats_benchmark_label.setText('')
+        if stats:self.stats_status.setText(f"{len([v for v in values.values() if v != '\u2014'])} lifetime stats shown.")
+        else:self.stats_status.setText('No lifetime stats cached for this game and mode yet.')
+        self._refresh_dashboard_stats()
+    def _refresh_dashboard_stats(self):
+        if not hasattr(self,'dash_meters'):return
+        try:game,mode,stats,values=self._lifetime_stat_values()
+        except Exception:return
+        self._refresh_dash_meters(game,mode,stats)
+        self._refresh_dash_rank(game,mode,stats)
+
+    @staticmethod
+    def _set_meter(slot,text,sub,pct,med_text,ring_text=''):
+        if not isinstance(slot,dict):return
+        try:slot['value'].setText(text)
+        except (AttributeError,RuntimeError):pass
+        try:slot['sub'].setText(sub)
+        except (AttributeError,RuntimeError):pass
+        try:slot['bar'].set_value(pct or 0)
+        except (AttributeError,RuntimeError):pass
+        ring=slot.get('ring')
+        if ring is not None:
+            try:ring.set_value(pct or 0,ring_text)
+            except (AttributeError,RuntimeError):pass
+        if pct is None or med_text is None:caption='Refresh community data for comparison.'
+        else:caption=f"Better than {pct:.0f}% of players \u00b7 Median {med_text}"
+        try:slot['cap'].setText(caption)
+        except (AttributeError,RuntimeError):pass
+    def _dash_profile_page(self,step):
+        try:pages=self.dash_profile_pages
+        except (AttributeError,RuntimeError):return
+        try:count=pages.count()
+        except (AttributeError,RuntimeError):return
+        if not count:return
+        try:pages.setCurrentIndex((pages.currentIndex()+step)%count)
+        except (AttributeError,RuntimeError):pass
+
+    def _refresh_dash_meters(self,game,mode,stats):
+        meters=getattr(self,'dash_meters',None)
+        if not meters:return
+        try:snapshot=self.store.meta('codmunity_public_distributions') or {}
+        except Exception:snapshot={}
+        dists=snapshot.get('|'.join((str(game),str(mode),'lifetime'))) if isinstance(snapshot,dict) else None
+        dists=dists if isinstance(dists,dict) else {}
+        kills=self._known_number(stats,'kills');deaths=self._known_number(stats,'deaths')
+        wins=self._known_number(stats,'wins')
+        raw_games=stats.get('games_played',stats.get('games'))
+        games=float(raw_games) if isinstance(raw_games,(int,float)) and not isinstance(raw_games,bool) and raw_games>=0 else None
+        kd=codmunity_camo.lifetime_kd(stats)
+        losses=self._known_number(stats,'losses')
+        if losses is None and wins is not None and games is not None:losses=games-wins
+        wl=(wins/losses) if wins is not None and losses else None
+        wr=(wins/games*100.0) if wins is not None and games else None
+        def _pct(value,key):
+            try:return codmunity_player_stats.percentile_of(value,dists.get(key))
+            except Exception:return None
+        def _med(key,scale=1.0,suffix=''):
+            try:raw=codmunity_player_stats.median_of(dists.get(key))
+            except Exception:return None
+            return f"{raw*scale:g}{suffix}" if raw is not None else None
+        kd_text=f"{kd:.2f}" if kd is not None else '\u2014'
+        kd_sub=(f"{codmunity_camo.format_count(kills)} kills \u00b7 {codmunity_camo.format_count(deaths)} deaths" if kills is not None and deaths is not None else '\u2014')
+        self._set_meter(meters.get('kd'),kd_text,kd_sub,_pct(kd,'kd') if kd is not None else None,_med('kd'))
+        wl_text=f"{wl:.2f}" if wl is not None else '\u2014'
+        wl_sub=(f"{codmunity_camo.format_count(wins)} wins \u00b7 {codmunity_camo.format_count(losses)} losses" if wins is not None and losses is not None else '\u2014')
+        self._set_meter(meters.get('wl'),wl_text,wl_sub,_pct(wl,'wl') if wl is not None else None,_med('wl'))
+        wr_text=f"{wr:.0f}%" if wr is not None else '\u2014'
+        wr_sub=(f"{codmunity_camo.format_count(int(games))} games played" if games is not None else '\u2014')
+        self._set_meter(meters.get('wr'),wr_text,wr_sub,_pct(wr/100.0 if wr is not None else None,'winRate') if wr is not None else None,_med('winRate',100.0,'%'),wr_text if wr is not None else '')
+
+        tiles=getattr(self,'dash_profile_tiles',None)
+        if tiles:
+            best=self._known_number(stats,'highest_kills_game');streak=self._known_number(stats,'highest_streak')
+            raw_spm=stats.get('score_per_min')
+            spm=float(raw_spm) if isinstance(raw_spm,(int,float)) and not isinstance(raw_spm,bool) and raw_spm>=0 else None
+            avg=None
+            for akey in ('avg_kills_game','avg_elims'):
+                cand=stats.get(akey)
+                if isinstance(cand,(int,float)) and not isinstance(cand,bool) and cand>=0:avg=float(cand);break
+            hours=None;hours_key=None
+            raw_seconds=stats.get('time_played_s')
+            if isinstance(raw_seconds,(int,float)) and not isinstance(raw_seconds,bool) and raw_seconds>=0:
+                hours=float(raw_seconds)/3600.0;hours_key='timePlayedH' if 'timePlayedH' in dists else ('hoursPlayed' if 'hoursPlayed' in dists else None)
+            else:
+                raw_hours=stats.get('hours_played')
+                if isinstance(raw_hours,(int,float)) and not isinstance(raw_hours,bool) and raw_hours>=0:
+                    hours=float(raw_hours);hours_key='hoursPlayed' if 'hoursPlayed' in dists else ('timePlayedH' if 'timePlayedH' in dists else None)
+            def _fmt_int(v):
+                try:return codmunity_camo.format_count(int(v))
+                except (TypeError,ValueError):return '\u2014'
+            def _set_tile(key,text,pct):
+                slot=tiles.get(key)
+                if not isinstance(slot,dict):return
+                try:slot['value'].setText(text)
+                except (AttributeError,RuntimeError):pass
+                try:
+                    badge=slot.get('badge')
+                    if badge is None:return
+                    if pct is None:badge.setText('');badge.setVisible(False)
+                    else:badge.setText(f"TOP {100.0-pct:.0f}%");badge.setVisible(True)
+                except (AttributeError,RuntimeError):pass
+            _set_tile('kills',_fmt_int(kills) if kills is not None else '\u2014',_pct(kills,'kills') if kills is not None else None)
+            _set_tile('deaths',_fmt_int(deaths) if deaths is not None else '\u2014',None)
+            _set_tile('wins',_fmt_int(wins) if wins is not None else '\u2014',None)
+            _set_tile('losses',_fmt_int(losses) if losses is not None else '\u2014',None)
+            _set_tile('games',_fmt_int(int(games)) if games is not None else '\u2014',None)
+            if hours is None:time_text='\u2014'
+            elif hours>=24:
+                total_minutes=int(round(hours*60));time_text=f"{total_minutes//1440}d {(total_minutes%1440)//60}h"
+            else:time_text=codmunity_camo.format_time(int(round(hours*3600)))
+            _set_tile('time',time_text,_pct(hours,hours_key) if hours is not None and hours_key else None)
+            _set_tile('streak',_fmt_int(streak) if streak is not None else '\u2014',None)
+            _set_tile('best',_fmt_int(best) if best is not None else '\u2014',None)
+            _set_tile('spm',f"{spm:.0f}" if spm is not None else '\u2014',_pct(spm,'spm') if spm is not None else None)
+            avg_key=next((k for k in ('killsPerGame','avgElims') if k in dists),None)
+            _set_tile('avg',f"{avg:.1f}" if avg is not None else '\u2014',_pct(avg,avg_key) if avg is not None and avg_key else None)
+
+    def _maybe_fetch_distribution(self,game,mode):
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        try:player=self._codmunity_player_record()
+        except Exception:player=None
+        if player is None:return
+        key='|'.join((str(game),str(mode),'lifetime'))
+        fetching=getattr(self,'_dist_fetching',None)
+        if fetching is None:fetching=self._dist_fetching=set()
+        if key in fetching:return
+        fetching.add(key)
+        try:self.log(f'Loading community data ({game}/{mode}/lifetime).')
+        except Exception:pass
+        pid=str(player.get('id'))
+        def done(distribution,pid=pid,key=key):
+            try:
+                if str(getattr(self,'current_player',None) or '')!=str(pid):return
+                self.on_codmunity_distribution(pid,key,distribution)
+            except Exception as exc:
+                try:self.log('Community auto-refresh skipped: '+str(exc))
+                except Exception:pass
+            finally:
+                try:self._refresh_dashboard_stats()
+                except Exception:pass
+        def failed(message,pid=pid,key=key):
+            try:self.log('Community auto-refresh failed: '+str(message or 'unknown error'))
+            except Exception:pass
+        try:self.async_task(lambda:self.codmunity_client.community_distribution(game,mode,'lifetime'),done,failed)
+        except Exception as exc:
+            try:self.log('Community auto-refresh skipped: '+str(exc))
+            except Exception:pass
+    def _refresh_dash_rank(self,game,mode,stats):
+        if not hasattr(self,'dash_rank_bar'):return
+        try:kd=codmunity_camo.lifetime_kd(stats)
+        except Exception:kd=None
+        if kd is None:
+            self.dash_rank_bar.set_rank(-1,0.0)
+            try:self.dash_rank_current.setText('—')
+            except (AttributeError,RuntimeError):pass
+            try:self.dash_rank_next.setText('No lifetime K/D cached for this game yet.')
+            except (AttributeError,RuntimeError):pass
+            self._refresh_dash_profile_card(game,mode,stats,None)
+            return
+        try:snapshot=self.store.meta('codmunity_public_distributions') or {}
+        except Exception:snapshot={}
+        distribution=None
+        if isinstance(snapshot,dict):
+            saved=snapshot.get('|'.join((str(game),str(mode),'lifetime')))
+            if isinstance(saved,dict) and isinstance(saved.get('kd'),list):
+                try:distribution=codmunity_player_stats.CommunityDistribution.from_payload({'data':{'game':saved.get('game'),'mode':saved.get('mode'),'scope':saved.get('scope'),'sampled':saved.get('sampled'),'usersTotal':saved.get('users_total'),'dist':{'kd':saved.get('kd')}}})
+                except (TypeError,ValueError):distribution=None
+        if distribution is None or (str(distribution.game),str(distribution.mode))!=(str(game),str(mode)):
+            self.dash_rank_bar.set_rank(-1,0.0)
+            try:self.dash_rank_current.setText('—')
+            except (AttributeError,RuntimeError):pass
+            try:self.dash_rank_next.setText('Refresh community data to rank this K/D.')
+            except (AttributeError,RuntimeError):pass
+            self._refresh_dash_profile_card(game,mode,stats,None)
+            self._maybe_fetch_distribution(game,mode)
+            return
+        try:rank=codmunity_player_stats.distribution_rank(kd,distribution)
+        except Exception:rank=None
+        if rank is None:
+            self.dash_rank_bar.set_rank(-1,0.0)
+            try:self.dash_rank_current.setText('—')
+            except (AttributeError,RuntimeError):pass
+            try:self.dash_rank_next.setText('Refresh community data to rank this K/D.')
+            except (AttributeError,RuntimeError):pass
+            self._refresh_dash_profile_card(game,mode,stats,None)
+            self._maybe_fetch_distribution(game,mode)
+            return
+        tier_index=max(0,len(codmunity_player_stats.LADDER_TIERS)-1)
+        for index,(_floor,tier_name) in enumerate(codmunity_player_stats.LADDER_TIERS):
+            if tier_name==rank.tier:tier_index=index;break
+        self.dash_rank_bar.set_rank(tier_index,(rank.progress_percent or 0)/100.0)
+        try:self.dash_rank_current.setText(rank.tier)
+        except (AttributeError,RuntimeError):pass
+        try:
+            if rank.next_tier is not None:self.dash_rank_next.setText(f"Next: {rank.next_tier} from {rank.next_tier_kd:.2f} K/D")
+            else:self.dash_rank_next.setText('MAX RANK')
+        except (AttributeError,RuntimeError):pass
+        self._refresh_dash_profile_card(game,mode,stats,rank)
+
+    def _refresh_dashboard_stats_view(self):
+        if hasattr(self,'stats_game_buttons'):self.refresh_stats()
+        else:self._refresh_dashboard_stats()
+    def copy_stats_summary(self):
+        game,mode=self._stats_selection()
+        snapshot=self.board_snapshot() if hasattr(self,'board_snapshot') else {}
+        try:snapshot=self.store.meta('codmunity_stats') or {}
+        except Exception:snapshot={}
+        line=codmunity_camo.summary_line(snapshot,game,mode)
+        if not line:self.notice('No lifetime stats cached for this game and mode yet.');return
+        QApplication.clipboard().setText(line);self.log('Stats summary copied to the clipboard.')
     def build_settings(self):
         l=self.page('Settings','CODMunity, Meta AI automation, and Discord settings in one place. Mutable files are stored under Windows AppData.')
         self.settings_tabs=QTabWidget();self.settings_tabs.addTab(self.solo_settings_panel,'CODMunity');l.addWidget(self.settings_tabs,1)
+        self.sync_tab_page=QWidget();sync_tab_layout=QVBoxLayout(self.sync_tab_page);sync_tab_layout.setContentsMargins(20,16,20,16);sync_tab_layout.setSpacing(10)
+        sync_header=QHBoxLayout();sync_title=QLabel('CODMunity Sync & Account');sync_title.setObjectName('title');sync_header.addWidget(sync_title);sync_header.addStretch()
+        self.sync_header_status=QLabel('Native sync page — no external app.');self.sync_header_status.setStyleSheet('color:#99a8bc;font-weight:700;');sync_header.addWidget(self.sync_header_status);sync_tab_layout.addLayout(sync_header)
+        if self.tab_prototype:
+            sync_preview=QLabel('Preview uses a copy of your settings, match history, and roster photos. It will not change live tracker data. Tracking and Discord posting are disabled in this window.')
+            sync_preview.setWordWrap(True);sync_preview.setStyleSheet('padding:9px 12px;background:#1b2330;border-left:3px solid #ed2938;color:#cbd3df;');sync_tab_layout.addWidget(sync_preview)
+        self.build_codmunity_sync(sync_tab_layout)
+        self.settings_tabs.addTab(self.sync_tab_page,'Sync & Account')
+        self.settings_tabs.currentChanged.connect(self._settings_tab_changed)
         automation_tab=QWidget();automation_layout=QVBoxLayout(automation_tab);automation_layout.setContentsMargins(12,12,12,12);automation_layout.setSpacing(12);self.settings_tabs.addTab(automation_tab,'Automation & Chrome')
         self.poll=QSpinBox();self.poll.setRange(3,60);self.poll.setValue(int(self.settings.values.get('poll_seconds',5)))
         self.browser_timeout=QSpinBox();self.browser_timeout.setRange(10,180);self.browser_timeout.setSuffix(' sec');self.browser_timeout.setValue(int(self.settings.values.get('browser_navigation_timeout',60)))
@@ -2269,15 +4510,18 @@ class Window(QMainWindow):
         self.browser_retries=QSpinBox();self.browser_retries.setRange(0,3);self.browser_retries.setValue(int(self.settings.values.get('browser_retries',1)))
         f=QFormLayout();f.addRow('Polling interval (seconds)',self.poll);f.addRow('Meta page navigation timeout',self.browser_timeout);f.addRow('Wait for image download',self.download_timeout);f.addRow('Browser/navigation retries',self.browser_retries);f.addRow('Application data',QLabel(str(E.DATA)));automation_layout.addLayout(f)
         self.row(automation_layout,self.button('Open data folder',lambda:os.startfile(str(E.DATA))),self.button('Open logs folder',lambda:os.startfile(str(E.DATA))))
+        self.cache_size_label=QLabel('');self.cache_size_label.setWordWrap(True);self.cache_size_label.setStyleSheet('color:#99a8bc')
+        self.row(automation_layout,self.cache_size_label,self.button('Clear downloaded image caches',self.clear_image_caches))
+        self.refresh_cache_size_label()
         automation_layout.addWidget(QLabel('Meta poster and video jobs run in a small in-app browser using the tracker profile. Sign in once with Log into Meta AI in the sidebar; no extension install or pairing token is needed.'))
         browser_mode_note=QLabel('Tracker Chrome profile: the dedicated profile keeps the Meta AI login isolated from your own Chrome; attaching reuses a Meta AI tab you already have open in your own Chrome.');browser_mode_note.setWordWrap(True);automation_layout.addWidget(browser_mode_note)
         self.browser_mode_combo=QComboBox();self.browser_mode_combo.addItems(['Dedicated tracker profile (recommended)','Use my already-open Chrome']);self.browser_mode_combo.setCurrentIndex(1 if self.tracker_browser_mode()=='attach' else 0);browser_mode_form=QFormLayout();browser_mode_form.addRow('Tracker Chrome profile',self.browser_mode_combo);automation_layout.addLayout(browser_mode_form)
         automation_layout.addStretch()
         poster_tab=QWidget();poster_layout=QVBoxLayout(poster_tab);poster_layout.setContentsMargins(12,12,12,12);poster_layout.setSpacing(12)
         poster_note=QLabel('Poster automation runs in the background. These switches apply to every finished match.');poster_note.setWordWrap(True);poster_note.setStyleSheet('color:#99a8bc');poster_layout.addWidget(poster_note)
-        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(True);self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.include_stats_checkbox)
-        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(self.settings.values.get('auto_post',False));self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.auto_post)
-        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',False)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.full_auto)
+        self.include_stats_checkbox=QCheckBox('Include player Ladder Rank + match stats in prompt');self.include_stats_checkbox.setChecked(bool(self.settings.values.get('include_stats',True)));self.include_stats_checkbox.setToolTip('Adds verified rank and match lines from the Player Stats Service. Unverified players are never included.');self.include_stats_checkbox.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.include_stats_checkbox)
+        self.auto_post=QCheckBox('Automatically post completed posters to Discord');self.auto_post.setChecked(bool(self.settings.values.get('auto_post',True)));self.auto_post.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.auto_post)
+        self.full_auto=QCheckBox('Full Auto: finished match → Meta AI picture → Discord, no clicks');self.full_auto.setChecked(bool(self.settings.values.get('full_auto',True)));self.full_auto.stateChanged.connect(lambda _state:self._toggle_full_auto());self.full_auto.setStyleSheet('color:#c4ccd8;font-weight:700;');poster_layout.addWidget(self.full_auto)
         poster_layout.addStretch(1)
         self.settings_tabs.addTab(poster_tab,'Poster Automation')
         self.settings_tabs.addTab(self.discord_settings_panel,'Discord')
@@ -2295,10 +4539,62 @@ class Window(QMainWindow):
         hotkeys_layout.addStretch()
         self.settings_tabs.addTab(hotkeys_tab,'Hotkeys & Folders')
 
-        self.save_settings_button=self.button('Save all settings',self.save_settings,True);self.row(l,self.save_settings_button)
-        self.update_version_label=QLabel(f'Installed version {APP_VERSION}. Updates come from GitHub Releases.');self.update_version_label.setStyleSheet('color:#99a8bc')
-        self.row(l,self.update_version_label,self.button('Check for Updates',lambda:self.check_for_app_update(manual=True)))
+        self.save_settings_button=self.button('Save all settings',self.save_settings,True)
+        self.check_updates_button=self.button('Check for Updates',lambda:self.check_for_app_update(manual=True))
+        settings_corner=QWidget();settings_corner_layout=QHBoxLayout(settings_corner);settings_corner_layout.setContentsMargins(0,0,4,0);settings_corner_layout.setSpacing(8)
+        settings_corner_layout.addWidget(self.save_settings_button);settings_corner_layout.addWidget(self.check_updates_button)
+        self.settings_tabs.setCornerWidget(settings_corner,Qt.TopRightCorner)
+        self.update_version_label=QLabel(f'Installed version {APP_VERSION}. Updates come from GitHub Releases.');self.update_version_label.setStyleSheet('color:#99a8bc');l.addWidget(self.update_version_label)
+        self.codmunity_stats_frame=QFrame();self.codmunity_stats_frame.setObjectName('dashboardPanel')
+        stats_frame_layout=QVBoxLayout(self.codmunity_stats_frame);stats_frame_layout.setContentsMargins(0,0,0,0)
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            self.codmunity_stats_view=QWebEngineView(self.codmunity_stats_frame);self.codmunity_stats_view.setMinimumHeight(320)
+            stats_frame_layout.addWidget(self.codmunity_stats_view)
+        except Exception:
+            self.codmunity_stats_view=None
+            stats_frame_fallback=QLabel('Stats preview unavailable: Qt WebEngine is not installed.');stats_frame_fallback.setWordWrap(True)
+            stats_frame_layout.addWidget(stats_frame_fallback)
+        l.addWidget(self.codmunity_stats_frame,1)
+        self._refresh_codmunity_stats_frame()
 
+    @staticmethod
+    def _codmunity_stats_url(username):
+        from urllib.parse import quote
+        name=str(username or '').strip().lstrip('@')
+        if not name:return ''
+        return 'https://codmunity.gg/profile/'+quote(name)+'/stats'
+    STATS_FRAME_EMPTY_HTML='<html><body style="background:#0a0d13;color:#8b93a1;font-family:sans-serif;padding:40px;text-align:center;">Enter your CODMunity Name above to preview your public stats page here.</body></html>'
+    def _refresh_codmunity_stats_frame(self):
+        try:view=self.codmunity_stats_view
+        except AttributeError:view=None
+        if view is None:return
+        url=self._codmunity_stats_url(self.player.text() if hasattr(self,'player') else '')
+        if not url:
+            try:view.setHtml(self.STATS_FRAME_EMPTY_HTML)
+            except (AttributeError,RuntimeError):pass
+            return
+        try:
+            if view.url().toString()!=url:view.setUrl(QUrl(url))
+        except (AttributeError,RuntimeError,NameError):pass
+    def refresh_cache_size_label(self):
+        if not hasattr(self,'cache_size_label'):return
+        try:sizes=codmunity_camo.cache_sizes(E.DATA)
+        except Exception:sizes={}
+        total=sum(sizes.values())
+        if total>=1048576:text=f'{total/1048576:.1f} MB'
+        elif total>=1024:text=f'{total/1024:.0f} KB'
+        else:text=f'{total} B'
+        detail=', '.join(f'{k} {v//1024} KB' for k,v in sorted(sizes.items()) if v) or 'empty'
+        self.cache_size_label.setText(f'Downloaded images: {text} ({detail}). Boards, camos and avatars re-download on demand.')
+    def clear_image_caches(self):
+        try:removed=codmunity_camo.clear_caches(E.DATA)
+        except Exception as exc:self.notice('Could not clear caches: '+str(exc));return
+        try:self._board_avatars={}
+        except (AttributeError,RuntimeError):pass
+        try:self._camo_images={}
+        except (AttributeError,RuntimeError):pass
+        self.refresh_cache_size_label();self.log(f'Cleared {removed} cached image file(s).')
     def media_dir(self,key,default_name):
         custom=str(self.settings.values.get(key) or '').strip()
         folder=Path(custom).expanduser() if custom else E.DATA/default_name
@@ -2358,7 +4654,7 @@ class Window(QMainWindow):
             self.screenshot_hotkey_registered=self.hotkey_registered
             screenshot_error=scoreboard_error
             if self.hotkey_registered:
-                self.hotkey_status.setText('GLOBAL HOTKEY ACTIVE  '+chr(0xB7)+'  '+score_text);self.hotkey_status.setObjectName('hotkeyPill');self.hotkey_status.setAlignment(Qt.AlignCenter);self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;')
+                self.hotkey_status.setText('Set Capture Hotkey  '+chr(0xB7)+'  '+score_text);self.hotkey_status.setObjectName('hotkeyPillShort');self.hotkey_status.setAlignment(Qt.AlignCenter);self.hotkey_status.setStyleSheet('color:#56e99a;font-weight:800;')
             elif self.tab_prototype:
                 self.hotkey_status.setText('Scoreboard OCR hotkey disabled in CODMunity tab preview mode.');self.hotkey_status.setStyleSheet('color:#aab4c3')
             else:
@@ -2744,6 +5040,8 @@ class Window(QMainWindow):
                 try:age=now-float(row.get('updated') or 0)
                 except (TypeError,ValueError):age=max_age_s+1
                 if age<max_age_s:continue
+                try:attempts=int(row.get('attempts') or 0)
+                except (TypeError,ValueError):attempts=0
                 if active and row.get('id')==active:
                     try:flag_age=now-float(started) if started is not None else -1
                     except (TypeError,ValueError):flag_age=-1
@@ -2751,7 +5049,10 @@ class Window(QMainWindow):
                     self._inapp_active=None
                     try:self._inapp_started=None
                     except Exception:pass
-                self.store.update_cinematic(row['id'],status='queued',error='Video worker ended with no result; requeued automatically.')
+                if attempts>=3:
+                    self.store.update_cinematic(row['id'],status='failed',attempts=attempts+1,error='Video worker timed out 3 times with no result; re-queue the screenshot by hand to try again.')
+                else:
+                    self.store.update_cinematic(row['id'],status='queued',attempts=attempts+1,error='Video worker ended with no result; requeued automatically (try '+str(attempts+1)+').')
             except Exception:continue
             reset+=1
             try:self.log('Reset orphaned video job '+str(row.get('id'))+'; it retries automatically.')
@@ -3047,6 +5348,18 @@ class Window(QMainWindow):
             self.cod_ai_capture_status.setText(detail);self.cod_ai_capture_status.setStyleSheet('color:#ffb15e;font-weight:800;');self.log(detail)
             if self.tray.isVisible():self.tray.showMessage('COD AI screenshot failed',str(message)[:240],QSystemTrayIcon.Warning,3500)
         self.async_task(work,done,failed)
+    def build_how_it_works(self):
+        l=self.page('How it works','The unified tracker loop, in order. Everything below runs locally except Discord posts and the pages you open in the browser.')
+        steps=(('1 · Track','Start tracking on the Dashboard. The watcher reads your game screen with local OCR and files matches, camo ticks and lifetime totals into the tracker database.'),
+               ('2 · Review','Scoreboards land in the review queue. Fix names and values, confirm, and save. Nothing posts automatically.'),
+               ('3 · Progress','Camo Tracker, Loadouts, Leaderboards and Stats read the same local records. Manual ticks and builds stay in the tracker.'),
+               ('4 · Share','Generate the Meta AI picture, approve it, and post to Discord. Profile links and share buttons only open the browser.'))
+        for title,body in steps:
+            card=QFrame();card.setObjectName('dashboardPanel');box=QVBoxLayout(card);box.setContentsMargins(14,12,14,12)
+            heading=QLabel(title);heading.setObjectName('camoWeaponName');box.addWidget(heading)
+            text=QLabel(body);text.setWordWrap(True);text.setObjectName('camoNextLine');box.addWidget(text)
+            l.addWidget(card)
+        l.addStretch(1)
     def build_logs(self):
         panel=QWidget();l=QVBoxLayout(panel);l.setContentsMargins(12,12,12,12);l.setSpacing(12)
         desc=QLabel('Operational events and recoverable errors. Webhook URLs are redacted.');desc.setWordWrap(True);l.addWidget(desc)
@@ -3120,7 +5433,7 @@ class Window(QMainWindow):
         if self.ask('Update downloaded. Restart now to apply it?') and updater.apply_and_restart(dest):QApplication.quit()
     def save_settings(self):
         try:
-            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=self.warzone.isChecked(),profile_url=self.profile.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),full_auto=self.full_auto.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
+            self.settings.values.update(player=self.player.text().strip() or 'vintendo',stats_dir=self.stats_dir.text().strip(),warzone_enabled=True,profile_url=self.profile.text().strip(),codmunity_email=self.codmunity_email_edit.text().strip(),poll_seconds=self.poll.value(),mode=self.mode.currentText(),auto_detect=self.auto_detect.isChecked(),auto_post=self.auto_post.isChecked(),full_auto=self.full_auto.isChecked(),include_stats=self.include_stats_checkbox.isChecked(),provider='Meta AI manual handoff',allow_both=self.allow_both.isChecked(),browser_navigation_timeout=self.browser_timeout.value(),browser_download_timeout=self.download_timeout.value()*60,browser_retries=self.browser_retries.value(),tracker_browser_mode=('attach' if self.browser_mode_combo.currentIndex()==1 else 'dedicated'))
             self.settings.values.update(scoreboard_hotkey_vk=self.scoreboard_hotkey_edit.vk,scoreboard_hotkey_mod=self.scoreboard_hotkey_edit.mod,screenshot_hotkey_vk=self.screenshot_hotkey_edit.vk,screenshot_hotkey_mod=self.screenshot_hotkey_edit.mod,screenshots_dir=self.screenshots_dir_edit.text().strip(),videos_dir=self.videos_dir_edit.text().strip(),webhook_channel=self.webhook_channel.text().strip(),cinematic_webhook_channel=self.cinematic_webhook_channel.text().strip());self.settings.set_webhook(self.webhook.text());self.settings.set_cinematic_webhook(self.cinematic_webhook.text());self.settings.save();self.log('Settings saved with DPAPI-protected webhook. Restart tracking to apply integration changes.');self.refresh_dashboard_status()
             self.unregister_global_hotkeys();self.register_global_hotkeys();self.refresh_hotkey_labels()
             self.flash_save_button(getattr(self,'save_settings_button',None),'Save all settings')
@@ -3220,11 +5533,48 @@ class Window(QMainWindow):
         start=self._effective_stats_dir() or str(E.DATA)
         path=QFileDialog.getExistingDirectory(self,'Choose folder containing matches.json',start)
         if path:self.stats_dir.setText(path)
-    def test_data(self):
-        values={**self.settings.values,'stats_dir':self.stats_dir.text().strip()}
-        def done(result):
-            directory,records=result;self.data_status.setPlainText(f'{directory}\n\n{len(records)} merged match records\n\n'+json.dumps([{k:v for k,v in m.items() if k in ('mode','modeKey','game','playedAt','result','stats')} for m in records[-5:]],indent=2));self.log('Local CODMunity data read successfully.')
-        self.async_task(lambda:E.load_matches(values),done)
+    def _maybe_auto_upload(self):
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        if getattr(self,'tab_prototype',False):return
+        if getattr(self,'_auto_upload_done',False):return
+        try:configured=bool(self.codmunity_player_service.configured)
+        except Exception:configured=False
+        if not configured:return
+        try:auth=self.codmunity_auth
+        except AttributeError:auth=None
+        if auth is None:return
+        try:user_dir=self._sync_user_dir()
+        except Exception:user_dir=''
+        self._auto_upload_done=True
+        self.log('Uploading pending matches and lifetime stats automatically.')
+        def work():
+            import codmunity_player_stats as _cps
+            first=_cps.upload_pending_matches(auth,user_dir) if user_dir else {'uploaded':0,'skipped':0,'failed':[]}
+            second=_cps.upload_tracked_matches(auth,self.store)
+            third=_cps.upload_lifetime_snapshot(auth,user_dir) if user_dir else {'uploaded':0,'skipped':0,'failed':[]}
+            return first,second,third
+        def done(results):
+            try:
+                first,second,third=results
+                self.log(f"Auto-upload complete: file matches {first.get('uploaded',0)} sent, tracked matches {second.get('uploaded',0)} sent, lifetime {third.get('uploaded',0)} sent.")
+            except Exception as exc:self.log('Auto-upload finished with unexpected result: '+str(exc))
+            try:self.refresh_codmunity_sync()
+            except Exception:pass
+        def failed(message):self.log('Auto-upload failed (will retry on next launch): '+str(message or 'unknown error'))
+        try:self.async_task(work,done,failed)
+        except Exception as exc:
+            try:self.log('Auto-upload skipped: '+str(exc))
+            except Exception:pass
+    def _boot_autostart(self):
+        if self.tab_prototype or self.tracking:return
+        if os.environ.get('PYTEST_CURRENT_TEST') is not None:return
+        quiet=self.notice
+        self.notice=lambda text:self.log('Auto-start deferred: '+str(text))
+        try:self.start()
+        except Exception as exc:
+            try:self.log('Auto-start skipped: '+str(exc))
+            except Exception:pass
+        finally:self.notice=quiet
     def start(self):
         if self.tab_prototype:return
         if self.tracking:return
@@ -3250,9 +5600,10 @@ class Window(QMainWindow):
             command=[sys.executable,'--solo-worker'] if getattr(sys,'frozen',False) else [sys.executable,str(E.ROOT/'app.py'),'--solo-worker']
             environment=dict(os.environ);environment['VINTENDO_PARENT_PID']=str(os.getpid())
             self.solo=subprocess.Popen(command,env=environment,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        self.status.setText('●  LIVE TRACKING');self.start_button.setText('●   TRACKING');self.start_button.setEnabled(False);self.start_button.setToolTip('Automatic match tracking is active.');self.pause_button.setText('Ⅱ   PAUSE TRACKING');self.pause_button.setEnabled(True);self.stop_button.setEnabled(True);self.log('Tracking started.');self.last_poll=0;self.refresh_dashboard_status()
+        self.status.setText('●  LIVE TRACKING');self.start_button.setText('●   TRACKING');self.start_button.setEnabled(False);self.start_button.setToolTip('Automatic match tracking is active.');self.stop_button.setEnabled(True);self.log('Tracking started.');self.last_poll=0;self.refresh_dashboard_status()
+        if self.mode.currentText()=='Squad Night':self._start_autotrack()
     def stop(self):
-        self.tracking=False;self.paused=False
+        self.tracking=False;self.paused=False;self._stop_autotrack()
         if self.solo:
             if self.solo.poll() is None:
                 try:
@@ -3265,22 +5616,96 @@ class Window(QMainWindow):
                     try:process.wait(timeout=45)
                     except subprocess.TimeoutExpired:process.terminate();process.wait(timeout=5)
                 self.async_task(wait_worker,lambda _:self.log('Solo worker stopped cleanly.'))
-        self.status.setText('●  STOPPED');self.start_button.setText('▶   START TRACKING');self.start_button.setEnabled(True);self.start_button.setToolTip('');self.pause_button.setText('Ⅱ   PAUSE TRACKING');self.pause_button.setEnabled(False);self.stop_button.setEnabled(False);self.log('Tracking stopped.');self.refresh_dashboard_status()
+        self.status.setText('●  STOPPED');self.start_button.setText('▶   START TRACKING');self.start_button.setEnabled(True);self.start_button.setToolTip('');self.stop_button.setEnabled(False);self.log('Tracking stopped.');self.refresh_dashboard_status()
     def pause(self):
         if not self.tracking:return
+        if self.paused:
+            self._start_autotrack()
+        elif getattr(self,'autotrack_watcher',None) is not None:
+            try:self.autotrack_watcher.stop(timeout=5.0)
+            except Exception:pass
+            self.autotrack_watcher=None;self.autotrack_state='paused'
+        else:
+            pass
         if self.mode.currentText()=='Solo Ops':
             if self.solo:
                 import psutil
                 if self.paused:psutil.Process(self.solo.pid).resume()
                 else:psutil.Process(self.solo.pid).suspend()
-        self.paused=not self.paused;self.status.setText('●  PAUSED' if self.paused else '●  LIVE TRACKING');self.pause_button.setText('▶   RESUME TRACKING' if self.paused else 'Ⅱ   PAUSE TRACKING');self.refresh_dashboard_status()
+        self.paused=not self.paused;self.status.setText('●  PAUSED' if self.paused else '●  LIVE TRACKING');self.refresh_dashboard_status()
+        if hasattr(self,'pause_button'):self.pause_button.setText('▶   RESUME TRACKING' if self.paused else 'Ⅱ   PAUSE TRACKING')
     def tick(self):
         if not self.tracking or self.paused:return
         if self.solo and self.solo.poll() is not None:self.log('Solo worker stopped. See Activity Logs for details.');self.stop();return
         now=time.monotonic()
         if now-self.last_poll>=self.poll.value() and not self.poll_busy:self.last_poll=now;self.poll_records()
         if self.mode.currentText()=='Squad Night' and self.auto_detect.isChecked() and now-self.last_auto>=AUTO_OCR_INTERVAL_SECONDS and not self.capture_busy:
+            if self.autotrack_watcher is not None and self.autotrack_watcher.is_alive():
+                self.last_auto=now;return
             self.last_auto=now;self.capture_once(automatic=True)
+    def _autotrack_wanted(self):
+        if getattr(self,'tab_prototype',False):return False
+        if self.mode.currentText()!='Squad Night':return False
+        return bool(self.settings.values.get('autotrack_enabled',True))
+    def _on_autotrack_state(self,state):
+        def apply():
+            self.autotrack_state=str(state);self.log(f'Autotrack: {state}')
+        QTimer.singleShot(0,apply)
+    def _on_autotrack_log(self,text):
+        QTimer.singleShot(0,lambda:None if getattr(self,'closing',False) else self.log(str(text)))
+    def _on_autotrack_draft(self,draft):
+        def apply():
+            self._watcher_draft=dict(draft or {});self._watcher_match_id=draft.get('match_id') if isinstance(draft,dict) else None
+            self.log(f"Autotrack draft: {draft.get('parser','?')}")
+            try:self.refresh_history()
+            except Exception:pass
+        QTimer.singleShot(0,apply)
+    def _sync_discord_sender(self,store,row):
+        mid=str(row.get('match_id') or '')
+        if not mid:return True
+        job=store.get(mid)
+        if not job:return True
+        status=str(job.get('status') or '')
+        if status in ('delivered','solo_delivered'):return True
+        if status in ('posting','failed','uncertain','baseline'):return False
+        try:players=json.loads(job.get('players') or '[]')
+        except (ValueError,TypeError):players=[]
+        if not any(isinstance(p,dict) and p.get('verified') for p in players or []):return False
+        poster=str(job.get('poster') or job.get('image') or '')
+        if not poster:return False
+        url=self.webhook.text().strip()
+        if not url:return False
+        try:match=json.loads(job.get('payload') or '{}')
+        except (ValueError,TypeError):return False
+        if not store.reserve(mid,allow_both=False):return False
+        content=E.recap(match,players,snapshot=store.meta('codmunity_stats'))
+        try:
+            message_id=E.send_discord(url,poster,content)
+            store.update(mid,status='delivered',message_id=message_id or '',error='');E.reserve_legacy_match(match);self.log('Discord sync delivered: '+mid);return True
+        except Exception as exc:
+            store.update(mid,status='uncertain',error=str(exc)[:300]);raise
+    def _start_autotrack(self):
+        self._stop_autotrack()
+        if not self._autotrack_wanted():return
+        try:
+            from autotrack import AutotrackWatcher,SyncWorker
+            service=self.ensure_capture()
+        except Exception as exc:
+            self.log('Autotrack unavailable: '+str(exc));return
+        profile=str(self.settings.values.get('scoreboard_profile','auto') or 'auto')
+        watcher=AutotrackWatcher(service,self.store,dict(self.settings.values),profile=profile,on_state=self._on_autotrack_state,on_draft=self._on_autotrack_draft,on_log=self._on_autotrack_log,own_capture=False)
+        worker=SyncWorker(self.store,sender=self._sync_discord_sender,on_log=self._on_autotrack_log)
+        self.autotrack_watcher=watcher;self.sync_worker=worker
+        watcher.start();worker.start();self.autotrack_state='starting'
+        self.log('Autotrack started (single exe, local OCR).')
+    def _stop_autotrack(self):
+        for attr in ('autotrack_watcher','sync_worker'):
+            worker=getattr(self,attr,None)
+            if worker is not None:
+                try:worker.stop(timeout=5.0)
+                except Exception:pass
+            setattr(self,attr,None)
+        self.autotrack_state='idle'
     def poll_records(self,source=None):
         self.poll_busy=True;values=dict(self.settings.values);mode=self.mode.currentText()
         def work():
@@ -3315,7 +5740,7 @@ class Window(QMainWindow):
             self.poll_busy=False
             for mid in new:self.log('New match queued for Squad Night review: '+mid)
             if source=='player-intel':self.log(f"Match check complete: {len(new)} new; {len(self.store.history())} tracked in total.")
-            if source=='codmunity-tab':self.codmunity_status.setText('CODMunity matches are in the tracker.')
+            if source in ('codmunity-tab','sync-tab') and hasattr(self,'sync_header_status'):self.sync_header_status.setText('CODMunity matches are in the tracker.')
             self.refresh_history()
             self._pump_full_auto()
             touched=getattr(self,'_poll_touched',False);self._poll_touched=False
@@ -3343,6 +5768,19 @@ class Window(QMainWindow):
                 else:selected=next((i for i,item in enumerate(self.outputs) if item.get('primary')),0)
             self.monitor.setCurrentIndex(selected);self.log('Display list refreshed.')
         except Exception as exc:self.log(str(exc))
+    def _paint_monitor_button(self,output=None):
+        button=getattr(self,'capture_setup_button',None)
+        if button is None:return
+        try:
+            if isinstance(output,dict) and str(output.get('label') or ''):
+                button.setText('Game display: '+str(output['label']))
+                button.setObjectName('monitorReady')
+            else:
+                button.setText('Pick Game Monitor')
+                button.setObjectName('')
+        except (AttributeError,RuntimeError):return
+        try:button.style().unpolish(button);button.style().polish(button);button.update()
+        except (AttributeError,RuntimeError):pass
     def setup_scoreboard_display(self,force=False):
         already_setup=bool(self.settings.values.get('scoreboard_display_setup'))
         try:
@@ -3357,7 +5795,7 @@ class Window(QMainWindow):
                 except (TypeError,ValueError):selected=primary_index
             self.monitor.setCurrentIndex(selected)
             if already_setup and not force:
-                self.capture_display_status.setText('Game display: '+self.outputs[selected]['label'])
+                self._paint_monitor_button(self.outputs[selected])
                 return
             if len(self.outputs)>1:
                 choice,ok=QInputDialog.getItem(self,'Choose Game Display','Which display do you play Call of Duty on? Resolution is detected automatically.',[item['label'] for item in self.outputs],selected,False)
@@ -3365,7 +5803,7 @@ class Window(QMainWindow):
                 self.monitor.setCurrentIndex(max(0,[item['label'] for item in self.outputs].index(choice)))
             self._remember_scoreboard_monitor(self.outputs[self.monitor.currentIndex()])
             self.settings.values['scoreboard_display_setup']=True;self.settings.save()
-            self.capture_display_status.setText('Game display: '+self.outputs[self.monitor.currentIndex()]['label'])
+            self._paint_monitor_button(self.outputs[self.monitor.currentIndex()])
             self.ocr_review_status.setText('Game display saved. The scoreboard crop will be selected automatically from its resolution.')
             self.ocr_review_status.setStyleSheet('font-size:11px;color:#56e99a;font-weight:700;padding:2px;')
         except Exception as exc:self.ocr_review_status.setText('Could not list displays: '+str(exc)[:180])
@@ -3545,6 +5983,10 @@ class Window(QMainWindow):
             rows.append(dict(name=name,stats=stats,verified=True,source='user_verified_ocr',confidence=1.0))
         return rows
     def _latest_codmunity_match(self):
+        watched=getattr(self,'_watcher_match_id',None)
+        if watched:
+            job=self.store.get(watched)
+            if job and str(job.get('status') or '') not in ('delivered','solo_delivered'):return watched
         for job in self.store.history():
             if job['status'] in ('delivered','solo_delivered'):continue
             try:payload=json.loads(job['payload'])
@@ -3901,7 +6343,7 @@ class Window(QMainWindow):
         self.dashboard_metrics['kd'].setText(str(summary.get('kd','—')))
         self.dashboard_metrics['kills_per_game'].setText(str(summary.get('kills_per_game','—')))
         self.refresh_match_center(rows)
-        self.refresh_dashboard_status();self.refresh_match_history_view(rows)
+        self.refresh_dashboard_status();self.refresh_match_history_view(rows);self._refresh_dashboard_stats()
 
     def _match_epoch(self,match,created_fallback=None):
         value=match.get('playedAt') or match.get('date') or match.get('timestamp')
@@ -3997,7 +6439,7 @@ class Window(QMainWindow):
         self.center_count.setText(f"{total} match{'es' if total!=1 else ''} tracked")
         job=self._latest_job(rows)
         if job is None:
-            self.latest_job_id=None;self.latest_result.setText('-');self.latest_result.setStyleSheet('font-size:22px;font-weight:900;color:#f2f4f7;');self.latest_detail.setText('No matches tracked yet.');self.latest_stats.setText('');self.latest_status.setText('');self.latest_review.setEnabled(False);return
+            self.latest_job_id=None;self.latest_result.setText('-');self.latest_result.setStyleSheet('font-size:26px;font-weight:900;color:#f2f4f7;');self.latest_detail.setText('No matches tracked yet.');self.latest_stats.setText('');self.latest_status.setText('');self.latest_review.setEnabled(False);return
         match=json.loads(job['payload']);stats=match.get('stats') if isinstance(match.get('stats'),dict) else {}
         raw_result=str(match.get('result') or '').lower();result={'win':'WIN','victory':'WIN','loss':'LOSS','defeat':'LOSS'}.get(raw_result,'-')
         color='#56e99a' if result=='WIN' else '#ff626d' if result=='LOSS' else '#bbc4d0'
@@ -4006,7 +6448,7 @@ class Window(QMainWindow):
         mode=str(match.get('modeKey',match.get('mode','-')) or '-').replace('_',' ').title()
         played=self._display_time(match.get('playedAt') or match.get('date') or match.get('timestamp'))
         self.latest_job_id=job['id']
-        self.latest_result.setText(result);self.latest_result.setStyleSheet('font-size:22px;font-weight:900;color:'+color+';')
+        self.latest_result.setText(result);self.latest_result.setStyleSheet('font-size:26px;font-weight:900;color:'+color+';')
         self.latest_detail.setText(f"{self._display_value(place)} · {mode} · {played}")
         self.latest_stats.setText(f"Kills {self._display_value(stats.get('kills'))} · Elims {self._display_value(stats.get('eliminations'))} · Damage {self._display_value(stats.get('damage'))} · Deaths {self._display_value(stats.get('deaths'))} · Assists {self._display_value(stats.get('assists'))}")
         status=str(job.get('status','-')).replace('_',' ').upper();attempts=job.get('attempts',0)
@@ -4083,6 +6525,7 @@ class Window(QMainWindow):
         self._latest_auto_job_id=None;self._latest_auto_no_discord=False
         self._set_latest_auto_busy(False,label)
     def _set_dashboard_health(self,key,value,good=None):
+        if key not in self.dashboard_health:return
         indicator,label=self.dashboard_health[key]
         online=bool(good) if good is not None else str(value).casefold() in ('online','ready','true')
         label.setText('Online' if online else 'Offline')
@@ -4102,15 +6545,15 @@ class Window(QMainWindow):
         if self.tracking and self.paused:tracking='PAUSED';color='#e3b95e'
         elif self.tracking:tracking='LIVE TRACKING';color='#56e99a'
         else:tracking='STANDBY';color='#a7b0bd'
-        self.status.setText('●  '+tracking);self.status.setStyleSheet(f'background:#111720;border:1px solid {color};border-radius:18px;color:{color};font-size:13px;font-weight:900;padding:10px 16px;')
-        self.footer_tracking.setText('●  '+tracking);self.footer_tracking.setStyleSheet('font-weight:800;color:'+color)
+        self.status.setText('●  '+tracking);self.status.setStyleSheet(f'background:#111720;border:1px solid {color};border-radius:14px;color:{color};font-size:12px;font-weight:900;padding:4px 14px;')
+        if hasattr(self,'footer_tracking'):self.footer_tracking.setText('●  '+tracking);self.footer_tracking.setStyleSheet('font-weight:800;color:'+color)
         if hasattr(self,'blink_timer'):
             if self.tracking and not self.paused:
                 if not self.blink_timer.isActive():self.blink_timer.start()
             else:self.blink_timer.stop()
         latest=json.loads(self.history_rows[0]['payload']) if getattr(self,'history_rows',None) else {}
         played=latest.get('playedAt') or latest.get('date') or latest.get('timestamp')
-        self.footer_match.setText('Last match: '+(self._display_time(played) if played else '—'))
+        if hasattr(self,'footer_match'):self.footer_match.setText('Last match: '+(self._display_time(played) if played else '—'))
     def _blink_live_indicator(self):
         if not (self.tracking and not self.paused):return
         try:pill=self.status
@@ -4378,7 +6821,7 @@ class Window(QMainWindow):
                     try:self._inapp_poster_started=None
                     except Exception:pass
                     if attempts>=3:
-                        self.store.update(row['id'],gen_state='idle',error='Poster job timed out 3 times with no worker result; press Generate AI End Game Picture to retry it by hand.')
+                        self.store.update(row['id'],gen_state='idle',gen_attempts=attempts+1,error='Poster job timed out 3 times with no worker result; press Generate AI End Game Picture to retry it by hand.')
                     else:
                         self.store.update(row['id'],gen_state='queued',gen_attempts=attempts+1,error='Poster worker died with no result; requeued automatically (try '+str(attempts+1)+').')
                 else:
@@ -4721,6 +7164,11 @@ def main():
         sys.exit(verification.run())
     E.DATA.mkdir(parents=True,exist_ok=True)
     logging.basicConfig(level=logging.INFO,handlers=[RotatingFileHandler(E.DATA/'application.log',maxBytes=2_000_000,backupCount=3,encoding='utf-8')],format='%(asctime)s %(levelname)s %(message)s')
+    if os.name=='nt':
+        try:
+            import ctypes as _ctypes
+            _ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('Vintendo.CODTracker')
+        except Exception:pass
     app=QApplication(sys.argv);app.setApplicationName('Vintendo COD Tracker');app.setOrganizationName('Vintendo')
     for font in ('segoeui.ttf','segoeuib.ttf','arial.ttf'):
         path=Path('C:/Windows/Fonts')/font
@@ -4742,6 +7190,7 @@ def main():
         QLocalServer.removeServer(name);server=QLocalServer();server.listen(name)
     window=Window();window.show()
     if not smoke and not prototype:QTimer.singleShot(650,window.run_first_boot_setup)
+    if not smoke and not prototype:QTimer.singleShot(8000,window.maybe_show_startup_requirements)
     if server is not None and not prototype:
         server.newConnection.connect(window.showNormal)
     if server is not None and os.environ.get('VINTENDO_NO_AUTO_START','0')!='1':

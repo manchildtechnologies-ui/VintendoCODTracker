@@ -106,7 +106,7 @@ def snapshot_for_player(store, player, game, mode, scope):
     rank = None
     if kd_info["kd"] is not None and distribution is not None:
         try:
-            computed = C.ladder_rank(kd_info["kd"], distribution)
+            computed = C.distribution_rank(kd_info["kd"], distribution)
         except ValueError:
             computed = None
         if computed is not None:
